@@ -228,6 +228,28 @@ wheels = [
 ]
 
 [[package]]
+name = "deep-gemm"
+version = "2.6.1+559d79f"
+source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" }
+resolution-markers = [
+    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl", hash = "sha256:be7dda2bed915220fe557e15a7dbbf1ce5ba18d52e06bfb3cf329de7bad3cf8c" },
+]
+
+[[package]]
+name = "deep-gemm"
+version = "2.6.1+559d79f"
+source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl", hash = "sha256:96f6fa8657aca7072bbcfa377a611053637425eb36fc44817cb38650805f55f4" },
+]
+
+[[package]]
 name = "einops"
 version = "0.8.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1151,6 +1173,8 @@ benchmark = [
     { name = "apache-tvm" },
     { name = "apache-tvm-ffi" },
     { name = "cupti-python" },
+    { name = "deep-gemm", version = "2.6.1+559d79f", source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "deep-gemm", version = "2.6.1+559d79f", source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "flash-kda", version = "0.0.1+7afb9f4", source = { url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version < '3.13'" },
     { name = "flash-kda", version = "0.0.1+7afb9f4", source = { url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "flash-linear-attention" },
@@ -1194,6 +1218,8 @@ server = [
     { name = "apache-tvm" },
     { name = "apache-tvm-ffi" },
     { name = "cupti-python" },
+    { name = "deep-gemm", version = "2.6.1+559d79f", source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "deep-gemm", version = "2.6.1+559d79f", source = { url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "flash-kda", version = "0.0.1+7afb9f4", source = { url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" }, marker = "python_full_version < '3.13'" },
     { name = "flash-kda", version = "0.0.1+7afb9f4", source = { url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "flash-linear-attention" },
@@ -1237,6 +1263,8 @@ benchmark = [
     { name = "apache-tvm", specifier = "==0.27.0" },
     { name = "apache-tvm-ffi", specifier = "==0.1.14.post0" },
     { name = "cupti-python", specifier = "==13.2.0" },
+    { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },
+    { name = "deep-gemm", marker = "python_full_version == '3.13.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.12.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.13.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-linear-attention", specifier = "==0.5.2" },
@@ -1280,6 +1308,8 @@ server = [
     { name = "apache-tvm", specifier = "==0.27.0" },
     { name = "apache-tvm-ffi", specifier = "==0.1.14.post0" },
     { name = "cupti-python", specifier = "==13.2.0" },
+    { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },
+    { name = "deep-gemm", marker = "python_full_version == '3.13.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.12.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.13.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-linear-attention", specifier = "==0.5.2" },

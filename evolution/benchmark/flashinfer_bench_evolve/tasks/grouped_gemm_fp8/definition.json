@@ -1,0 +1,6 @@
+{
+  "name": "grouped_gemm_fp8",
+  "description": "M-grouped contiguous FP8 GEMM: four configurations spanning 4/8 groups and different matrix dimensions. Preparation and DeepGEMM reference reuse tirx-kernels. Only valid BF16 output rows are compared, with per-group direct diff < 1e-6.",
+  "op_type": "grouped_gemm",
+  "reference": "from flashinfer_bench_evolve.tasks.grouped_gemm_fp8.baseline import run\n"
+}

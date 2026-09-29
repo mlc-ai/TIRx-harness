@@ -39,6 +39,9 @@ harness = [
 benchmark = [
   { include-group = "common" },
   "cupti-python==13.2.0",
+  # DeepGEMM 559d79f, Torch 2.14.0+cu132; Linux x86_64, glibc >= 2.38.
+  "deep-gemm @ https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl#sha256=be7dda2bed915220fe557e15a7dbbf1ce5ba18d52e06bfb3cf329de7bad3cf8c ; python_version == '3.12'",
+  "deep-gemm @ https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl#sha256=96f6fa8657aca7072bbcfa377a611053637425eb36fc44817cb38650805f55f4 ; python_version == '3.13'",
   # FlashKDA 7afb9f4, built with Torch 2.13.0+cu132 for B200 (sm_100a).
   "flash-kda @ https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl#sha256=49e5df1697459d61ee3954b22a47d37d0b117b31f0b6e0b177cee5d99e8e3393 ; python_version == '3.12'",
   "flash-kda @ https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl#sha256=6f9b4dc2a2817e7bf06f62f9c2433596d2c036309e4caab2fa8065fee33ba26c ; python_version == '3.13'",

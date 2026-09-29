@@ -1,0 +1,44 @@
+name: Benchmark dependencies
+
+on:
+  pull_request:
+    paths:
+      - pyproject.toml
+      - uv.lock
+      - evolution/**
+      - .github/workflows/benchmark_dependencies.yml
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - uv.lock
+      - evolution/**
+      - .github/workflows/benchmark_dependencies.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    # The DeepGEMM wheels require glibc >= 2.38.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Install locked benchmark dependencies
+        run: uv sync --locked --only-group benchmark --no-install-project --python '${{ matrix.python }}'
+      - name: Check installation and task integration on CPU
+        run: |
+          uv pip check
+          uv pip install pytest pyyaml
+          .venv/bin/python -c "from importlib.metadata import version; assert version('deep-gemm') == '2.6.1+559d79f'"
+          .venv/bin/python -m pytest evolution/tests/test_grouped_gemm_task.py -q
+      # CUDA Toolkit and a B200 worker are needed for the separate GPU benchmark.

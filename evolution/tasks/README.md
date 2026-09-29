@@ -1,5 +1,14 @@
 # Workload declarations
 
+`grouped_gemm_fp8` uses the existing Grouped GEMM
+preparation and DeepGEMM baseline from `tirx-kernels` on B200.
+All four configurations must pass; report per-workload and geometric-mean speedup.
+The `benchmark` dependency group installs the matching DeepGEMM wheel
+(Python 3.12/3.13, Linux x86_64, glibc >= 2.38). The GPU worker needs
+CUDA Toolkit 13.2 for runtime JIT; set `CUDA_HOME` if it is not on PATH.
+Use `python evolution/setup.py --task grouped_gemm_fp8`
+with `--remote URL` for KCoral; the generated prompt includes evaluation commands.
+
 `evolution/tasks/` contains one immutable benchmark contract per task.
 `evolution/toolsets/kda_flow.yaml` is the authority for the skills and shared
 leak bans installed by KDA setup. The loaders live in

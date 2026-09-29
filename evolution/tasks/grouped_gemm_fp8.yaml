@@ -1,0 +1,30 @@
+name: grouped_gemm_fp8
+workload_dir: candidates/grouped_gemm/fp8
+kernel_authoring: tirx-lite
+sota_baseline:
+  name: deepgemm_m_grouped_fp8_gemm_nt_contiguous
+bench_timeout_s: 600
+spec: |
+  Implement and optimize M-grouped contiguous FP8 GEMM in TIRx on B200
+  (sm_100), using the non-psum layout. Evaluate all four configurations:
+  (G, expected_m_per_group, N, K, seed) =
+    (4, 8192, 6144, 7168, 1), (4, 8192, 4096, 4096, 3),
+    (8, 4096, 7168, 3072, 6), (8, 4096, 4096, 2048, 8).
+  DeepGEMM is the correctness reference and performance baseline.
+
+  solution.py exports setup(data, G, M, N, K) -> callable.
+  data contains K-major A: FP8[M,K], B: FP8[G,N,K], DeepGEMM-packed
+  SFA/SFB (read their strides), grouped_layout: int32[M], D: BF16[M,N],
+  actual_ms, aligned_ms, and alignment=224. A uses per-token (1,128)
+  quantization; B uses per-block (128,128), both with UE8M0 scales.
+  Group lengths vary around expected_m_per_group; M sums their aligned lengths.
+  Padding has grouped_layout=-1 and its output is unspecified.
+
+  Setup may compile, allocate scratch, and warm up. Every invocation must
+  compute D_g = dequantize(A_g) @ dequantize(B_g)^T for all valid rows
+  using TIRx, reading runtime inputs without modifying them or caching results.
+  Do not use DeepGEMM, PyTorch, Triton, CUTE DSL, or raw CUDA for candidate
+  computation. Each group's finite BF16 output must have direct diff < 1e-6
+  against live DeepGEMM. Shared poisoning and post-timing checks apply.
+  Input preparation and compilation are excluded from both timed paths.
+  All four workloads must pass; compare their geometric-mean speedup.
