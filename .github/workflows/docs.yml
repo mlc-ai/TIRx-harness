@@ -35,58 +35,22 @@ jobs:
             -d docs/_build/doctrees docs docs/_build/site/docs
           cp -a docs/_hosting/. docs/_build/site/
           printf '{"repository":"mlc-ai/TIRx-harness","commit":"%s"}\n' "$GITHUB_SHA" > docs/_build/site/source.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
-          name: documentation-html
           path: docs/_build/site
-          include-hidden-files: true
-          if-no-files-found: error
+          retention-days: 0 # Use the repository's default artifact retention.
 
   publish:
     if: github.repository == 'mlc-ai/TIRx-harness' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: published
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: documentation-html
-          path: website
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - name: Synchronize the gh-pages branch
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          # Fetch all branch refs so the first publication can create gh-pages.
-          git -C published fetch origin '+refs/heads/*:refs/remotes/origin/*'
-          if git -C published show-ref --verify --quiet refs/remotes/origin/gh-pages; then
-            git -C published checkout -B gh-pages origin/gh-pages
-          else
-            git -C published checkout --orphan gh-pages
-          fi
-          rsync -a --delete --exclude=.git website/ published/
-          git -C published config user.name 'github-actions[bot]'
-          git -C published config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C published add --all
-          if ! git -C published diff --cached --quiet; then
-            git -C published commit -m "Publish documentation from $SOURCE_SHA"
-            git -C published push origin HEAD:gh-pages
-          fi
-      # GITHUB_TOKEN pushes do not trigger branch-based Pages builds.
-      - name: Upload the Pages artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: website
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
