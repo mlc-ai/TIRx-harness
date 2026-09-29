@@ -84,25 +84,6 @@ uv pip compile --python-version 3.12 docs/requirements.in -o docs/requirements.t
 
 Reinstall the requirements and run the strict build after updating dependencies.
 
-## Automated checks
-
-The [Documentation workflow](https://github.com/mlc-ai/TIRx-harness/blob/main/.github/workflows/docs.yml)
-runs on pull requests, pushes to `main`, and manual dispatch. It installs only
-the locked documentation dependencies with Python 3.12, then runs the same
-strict HTML build as the local command. These CI checks need no kernel
-dependencies, submodules, or GPU.
-
-A successful build uploads a `documentation-html` artifact containing the
-complete website, with the documentation under `docs/`. To preview it, download
-and extract the artifact from the workflow run, then serve the extracted directory:
-
-```bash
-tar -xf /path/to/extracted/artifact/artifact.tar -C /path/to/extracted/artifact
-python -m http.server 8018 --bind 127.0.0.1 --directory /path/to/extracted/artifact
-```
-
-Open `http://127.0.0.1:8018/docs/`. The artifact root redirects to that path.
-
 ## Check external links
 
 External link checking is separate from the HTML build because many source
