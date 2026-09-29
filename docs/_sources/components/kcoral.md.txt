@@ -22,7 +22,7 @@ GPU without relying on files left by an earlier run.
 
 Use a local environment with the `kcoral` client; the
 [Python environment](../installation.md#install-python-packages)
-includes a pinned version. The remote server must already provide the GPU,
+includes the client. The remote server must already provide the GPU,
 kernel dependencies, and tools you want to run. Local GPU access is not needed.
 Server setup is described in the {kcoral}`installation guide <README.md>`.
 

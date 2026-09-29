@@ -64,8 +64,7 @@ The {kernels}`authoring guide <tirx_kernels/tirx_lite/README.md>` owns the full
 language contract. For exact signatures and supported forms, use the
 {kernels}`entry API source <tirx_kernels/tirx_lite/entry.py>` and the
 {kernels}`public namespace <tirx_kernels/tirx_lite/__init__.py>` matching your
-installed revision. The default kernel dependency in {repo}`pyproject.toml`
-tracks the upstream default branch.
+installed revision.
 
 ## Use it on its own
 
@@ -113,9 +112,12 @@ Use it to find a nearby implementation before writing a new kernel.
 | Attention and library ports | {kernels}`FlashAttention <tirx_kernels/ported/flashattention>`, {kernels}`FlashInfer <tirx_kernels/ported/flashinfer>`, and {kernels}`cuDNN <tirx_kernels/ported/cudnn>`. |
 | Native kernels by workload | {kernels}`KDA <tirx_kernels/kda>`, {kernels}`MSA <tirx_kernels/msa>`, and the {kernels}`native kernel catalog <README.md#native-tirx>`. |
 
-List the kernels and configurations available in your installed package:
+Install the dependencies used when importing the kernel examples, then list
+the kernels and configurations available in your installed package:
 
 ```bash
+python -m pip install tirx-harness torch pytest \
+  --extra-index-url https://download.pytorch.org/whl/cu132
 python -m tirx_kernels.registry --format json
 ```
 

@@ -375,8 +375,7 @@ allocation options.</p>
 language contract. For exact signatures and supported forms, use the
 <a class="extlink-kernels reference external" href="https://github.com/mlc-ai/TIRx-kernels/blob/main/tirx_kernels/tirx_lite/entry.py">entry API source</a> and the
 <a class="extlink-kernels reference external" href="https://github.com/mlc-ai/TIRx-kernels/blob/main/tirx_kernels/tirx_lite/__init__.py">public namespace</a> matching your
-installed revision. The default kernel dependency in <a class="extlink-repo reference external" href="https://github.com/mlc-ai/TIRx-harness/blob/main/pyproject.toml">pyproject.toml</a>
-tracks the upstream default branch.</p>
+installed revision.</p>
 </section>
 <section id="use-it-on-its-own">
 <h2>Use it on its own<a class="headerlink" href="#use-it-on-its-own" title="Link to this heading">¶</a></h2>
@@ -433,8 +432,11 @@ Use it to find a nearby implementation before writing a new kernel.</p>
 </tbody>
 </table>
 </div>
-<p>List the kernels and configurations available in your installed package:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>tirx_kernels.registry<span class="w"> </span>--format<span class="w"> </span>json
+<p>Install the dependencies used when importing the kernel examples, then list
+the kernels and configurations available in your installed package:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>tirx-harness<span class="w"> </span>torch<span class="w"> </span>pytest<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--extra-index-url<span class="w"> </span>https://download.pytorch.org/whl/cu132
+python<span class="w"> </span>-m<span class="w"> </span>tirx_kernels.registry<span class="w"> </span>--format<span class="w"> </span>json
 </pre></div>
 </div>
 <p>For example, run a correctness check of the GEMM implementation:</p>

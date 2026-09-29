@@ -333,8 +333,12 @@ then run `python inspect_vector_add.py`:
 
 ```python
 from vector_add import kernel
+from tvm.target import Target
 
-print(inspect_candidate(kernel.compile(), "artifacts/vector-add"))
+target = Target({"kind": "cuda", "arch": "sm_100a"})
+with target:
+    compiled = kernel.compile(target=target)
+print(inspect_candidate(compiled, "artifacts/vector-add"))
 ```
 
 `ptx` and `sass` select artifact stages; CUDA source is always returned.
