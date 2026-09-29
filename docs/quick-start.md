@@ -13,15 +13,15 @@ Use the skills alongside your tests and benchmarks.
 ## Prepare your environment
 
 This example uses a local copy of
-`tirx-kernels/tirx_kernels/gemm/fp16_bf16_gemm.py` on NVIDIA B200.
+`tirx-kernels/tirx_kernels/gemm/fp16_bf16_gemm.py` on NVIDIA B200. It also needs
+a compatible CUDA-enabled PyTorch installation.
 
 With the [system prerequisites](installation.md#before-you-start) available,
 activate the Python environment your agent uses and install the released package
 from [PyPI](installation.md#install-from-pypi):
 
 ```bash
-python -m pip install tirx-harness torch \
-  --extra-index-url https://download.pytorch.org/whl/cu132
+python -m pip install tirx-harness
 ```
 
 Check that its packages resolve:
