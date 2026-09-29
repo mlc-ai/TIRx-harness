@@ -33,7 +33,7 @@ body {
   border: 1px solid var(--color-background-border);
   border-left: 3px solid var(--color-brand-primary);
   border-radius: 0.3rem;
-  background: var(--tirx-panel);
+  background: var(--color-background-secondary);
 }
 .architecture p:last-child { margin-bottom: 0; }
 .architecture code { white-space: normal; }
@@ -47,7 +47,7 @@ body {
 }
 .component-grid .sd-card:hover, .component-grid .sd-card:focus-within {
   border-color: var(--color-brand-primary);
-  background: var(--tirx-panel);
+  background: var(--color-background-secondary);
 }
 .component-grid .sd-card-title {
   font-family: var(--font-stack--monospace);
@@ -69,7 +69,6 @@ body {
 }
 
 .table-wrapper { max-width: 100%; overflow-x: auto; }
-.content .highlight { border-radius: 0.4rem; }
 
 .agent-loop-diagram { margin: 1.5rem 0; overflow-x: auto; }
 .agent-loop-diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
@@ -78,7 +77,7 @@ body {
   stroke: var(--color-background-border);
 }
 .agent-loop-diagram .component-panel {
-  fill: var(--tirx-panel);
+  fill: var(--color-background-secondary);
   stroke: var(--color-background-border);
 }
 .agent-loop-diagram .node-title { fill: var(--color-foreground-primary); }

@@ -32,16 +32,6 @@ html_theme_options = {
     "source_repository": "https://github.com/mlc-ai/TIRx-harness/",
     "source_branch": "main",
     "source_directory": "docs/",
-    "light_css_variables": {
-        "color-brand-primary": "#0f766e",
-        "color-brand-content": "#0f766e",
-        "tirx-panel": "#f2f7f5",
-    },
-    "dark_css_variables": {
-        "color-brand-primary": "#5eead4",
-        "color-brand-content": "#5eead4",
-        "tirx-panel": "#1c2b25",
-    },
 }
 html_show_sourcelink = True
 html_copy_source = True
