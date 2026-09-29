@@ -14,7 +14,7 @@ suggesting a command is not a substitute for running the tool when a runnable
 case is available.
 
 Use the user's workflow Python environment for imports, adapters, and tool
-execution. Resolve tirx-lite documentation and examples through `$tirx-wiki` in that
+execution. Resolve TIRx-lite documentation and examples through `$tirx-wiki` in that
 same environment; do not assume kernels live inside a skill directory.
 
 ## Default order

@@ -14,7 +14,7 @@ and environment before reducing the example.
 | Failure | Where the fix belongs |
 | --- | --- |
 | A candidate computes the wrong result or uses invalid synchronization | Fix it in the run; contribute a maintained kernel fix to [mlc-ai/TIRx-kernels](https://github.com/mlc-ai/TIRx-kernels). |
-| tirx-lite authoring or a canonical kernel is defective | [mlc-ai/TIRx-kernels](https://github.com/mlc-ai/TIRx-kernels). |
+| TIRx-lite authoring or a canonical kernel is defective | [mlc-ai/TIRx-kernels](https://github.com/mlc-ai/TIRx-kernels). |
 | NumSim, Synccheck, Racecheck, harness setup, or an adapter CLI is defective | [mlc-ai/TIRx-harness](https://github.com/mlc-ai/TIRx-harness). |
 | TIRx lowering or generated code is defective | [apache/tvm](https://github.com/apache/tvm), at the revision used by the failing environment. |
 | kcoral's server or execution protocol is defective | [mlc-ai/kcoral](https://github.com/mlc-ai/kcoral); adapter-specific failures belong in [mlc-ai/TIRx-harness](https://github.com/mlc-ai/TIRx-harness). |

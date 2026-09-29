@@ -1,6 +1,6 @@
 name: gdn_prefill_native
 # Native-language variant of gdn_prefill: same benchmark and task math, but
-# implementation must not use tirx-lite/TIRx.
+# implementation must not use TIRx-lite/TIRx.
 workload_dir: candidates/gdn/prefill
 kernel_authoring: task
 sota_baseline:
@@ -49,7 +49,7 @@ spec: |
   The adapter scores all official trace workloads and both synthetic stress rows.
 
   IMPLEMENTATION LANGUAGE: any GPU kernel language or stack available in this
-  environment EXCEPT tirx-lite and its underlying TVM/TIRx stack — e.g. CUDA C++
+  environment EXCEPT TIRx-lite and its underlying TVM/TIRx stack — e.g. CUDA C++
   (with CUTLASS/CuTe headers or inline PTX), the CuTe-DSL Python package, or
   Triton. Use tensor cores (tcgen05 MMA) and TMA whenever possible through your
   chosen stack.

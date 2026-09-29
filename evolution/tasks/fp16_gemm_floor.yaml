@@ -1,6 +1,6 @@
 name: fp16_gemm_floor
 workload_dir: candidates/fp16_gemm_floor
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: cublas
 

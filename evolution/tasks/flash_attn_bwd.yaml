@@ -1,6 +1,6 @@
 name: flash_attn_bwd
 workload_dir: candidates/flash_attn_bwd
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: FA4
 banned_paths: []

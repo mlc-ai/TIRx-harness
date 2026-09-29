@@ -1,6 +1,6 @@
 name: grouped_gemm_fp8
 workload_dir: candidates/grouped_gemm/fp8
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: deepgemm_m_grouped_fp8_gemm_nt_contiguous
 bench_timeout_s: 600

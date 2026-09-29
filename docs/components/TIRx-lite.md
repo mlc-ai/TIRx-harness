@@ -1,4 +1,4 @@
-# tirx-lite
+# TIRx-lite
 
 ```{container} component-subtitle
 Kernel language & examples
@@ -10,8 +10,8 @@ A PTX-level subset of the TIRx foundation IR, with a traced Python authoring API
 
 ## Key idea
 
-**TIRx is the foundation IR; tirx-lite is a subset of it for kernel programming.**
-A tirx-lite kernel is represented as a TIRx `PrimFunc` and uses the TIRx
+**TIRx is the foundation IR; TIRx-lite is a subset of it for kernel programming.**
+A TIRx-lite kernel is represented as a TIRx `PrimFunc` and uses the TIRx
 compiler and analysis infrastructure. The traced Python DSL is the authoring
 interface to this subset.
 
@@ -22,7 +22,7 @@ inspect when improving a kernel.
 
 ## What the subset includes
 
-| Part | Included in tirx-lite |
+| Part | Included in TIRx-lite |
 | --- | --- |
 | Values and local storage | Typed scalar expressions, arithmetic, casts, and register-local scalars and arrays. |
 | Control flow | Loops, conditional branches, and instruction predication. |
@@ -70,7 +70,7 @@ tracks the upstream default branch.
 ## Use it on its own
 
 Install the [Python environment](../installation.md#install-python-packages).
-tirx-lite is distributed in `tirx-kernels`; importing it does not require an
+TIRx-lite is distributed in `tirx-kernels`; importing it does not require an
 agent or kcoral.
 
 Save this as `zero.py`. It constructs a kernel that writes one float per lane
@@ -98,7 +98,7 @@ result needs a GPU supporting the kernel's target.
 
 ```{note}
 Keep kernel definitions in a Python file and use live type annotations.
-Do not enable `from __future__ import annotations` in a tirx-lite module.
+Do not enable `from __future__ import annotations` in a TIRx-lite module.
 ```
 
 ## Kernel Zoo

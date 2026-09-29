@@ -70,7 +70,7 @@ to start the server.
 
 | Skill | Purpose |
 | --- | --- |
-| {repo}`tirx-wiki <skills/tirx-wiki/SKILL.md>` | Find tirx-lite APIs, canonical kernels, and GPU references. |
+| {repo}`tirx-wiki <skills/tirx-wiki/SKILL.md>` | Find TIRx-lite APIs, canonical kernels, and GPU references. |
 | {repo}`tirx-debug-kernel <skills/tirx-debug-kernel/SKILL.md>` | Check correctness, investigate findings, and verify fixes. |
 | {repo}`tirx-profile-kernel <skills/tirx-profile-kernel/SKILL.md>` | Measure performance and use profiler evidence to guide changes. |
 

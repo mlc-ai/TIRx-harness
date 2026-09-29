@@ -27,7 +27,7 @@ def render(name: str, /, **slots: str) -> str:
 
 
 def kernel_authoring_contract(task: Task) -> str:
-    if task.kernel_authoring == "tirx-lite":
+    if task.kernel_authoring == "TIRx-lite":
         return render("rule_tirx_lite_authoring").rstrip("\n")
     if task.kernel_authoring == "task":
         return (
@@ -38,7 +38,7 @@ def kernel_authoring_contract(task: Task) -> str:
 
 
 def kernel_search_references(task: Task) -> str:
-    if task.kernel_authoring == "tirx-lite":
+    if task.kernel_authoring == "TIRx-lite":
         return """\
 One deliberate source of invention: survey the PTX ISA manual in
 `tirx-wiki` broadly, not only the sections the current candidate already
@@ -60,9 +60,9 @@ a kernel written in another authoring stack."""
 
 
 def kernel_research_debugging_contract(task: Task) -> str:
-    if task.kernel_authoring == "tirx-lite":
+    if task.kernel_authoring == "TIRx-lite":
         return """\
-- Proactively use `tirx-wiki` to research relevant tirx-lite/TIRx APIs, canonical
+- Proactively use `tirx-wiki` to research relevant TIRx-lite/TIRx APIs, canonical
   kernels, optimization guidance, and PTX/GPU semantics.
 - For each major optimization direction, invoke `tirx-profile-kernel`; benchmark
   and profile with IKET, add NCU when needed, preserve artifacts, and rerun after
@@ -83,7 +83,7 @@ def kernel_research_debugging_contract(task: Task) -> str:
 
 
 def kernel_remote_gpu_work(task: Task) -> str:
-    if task.kernel_authoring == "tirx-lite":
+    if task.kernel_authoring == "TIRx-lite":
         return (
             "your own correctness runs and timing experiments, the IKET and NCU\n"
             "profiles `tirx-profile-kernel` prescribes, device-side debugging such as\n"
@@ -98,7 +98,7 @@ def kernel_remote_gpu_work(task: Task) -> str:
 
 
 def kernel_remote_local_checks(task: Task) -> str:
-    if task.kernel_authoring == "tirx-lite":
+    if task.kernel_authoring == "TIRx-lite":
         return "Pre-GPU checks (Synccheck, Racecheck, NumSim) need no GPU and stay local."
     if task.kernel_authoring == "task":
         return "Checks that do not execute CUDA work stay local."

@@ -23,7 +23,7 @@ develop correct, fast GPU kernels.
 </p>
 
 TIRx Harness brings together:
-* **tirx-lite** for kernel authoring: a domain-specific language over the TIRx
+* **TIRx-lite** for kernel authoring: a domain-specific language over the TIRx
   intermediate representation.
 * **Compiler analysis**: check synchronization, memory races, and numerical
   behavior; inspect compiler output and generated GPU instructions.

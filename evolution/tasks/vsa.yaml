@@ -1,6 +1,6 @@
 name: vsa
 workload_dir: candidates/vsa
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: flashinfer_bsa_attn_fwd
 bench_timeout_s: 300

@@ -1,6 +1,6 @@
 name: alphamoe_m128_e512_topk10_k2048_i128_fp8
 workload_dir: candidates/alphamoe_m128_e512_topk10_k2048_i128_fp8
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: trtllm_fp8_block_scale_routed_moe
 bench_timeout_s: 300

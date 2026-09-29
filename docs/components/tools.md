@@ -64,7 +64,7 @@ def kernel(a: txl.gptr(txl.f32), b: txl.gptr(txl.f32), out: txl.gptr(txl.f32)):
     txl.ptx.st.global_.f32(out.ptr_to([lane]), x + y)
 ```
 
-**API.** Import `numsim` from `tirx_harness`. For a tirx-lite vector-add kernel
+**API.** Import `numsim` from `tirx_harness`. For a TIRx-lite vector-add kernel
 with three 32-element `float32` buffers named `a`, `b`, and `out`, bind concrete
 NumPy arrays and compare the result with a NumPy reference:
 
@@ -281,7 +281,7 @@ Synccheck and Racecheck share these public parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `kernel` | A TIRx `PrimFunc`; pass `.func` from a tirx-lite `Kernel`. |
+| `kernel` | A TIRx `PrimFunc`; pass `.func` from a TIRx-lite `Kernel`. |
 | `inputs=None` | Dictionary from parameter names to concrete scalars and CPU NumPy buffers, including output storage. Parameterless kernels may omit it; otherwise supply all runtime bindings. |
 
 For tensor-map bindings, `tirx_harness.numsim.TensorMap(...).numpy()` constructs

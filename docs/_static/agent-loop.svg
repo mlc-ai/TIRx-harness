@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" role="img" aria-labelledby="agent-loop-title agent-loop-description">
   <title id="agent-loop-title">Compose the components into an agent loop</title>
-  <desc id="agent-loop-description">Your agent consults a knowledge base of kernel examples and hardware specifications, writes kernels with tirx-lite on the TIRx foundation, and invokes domain-specific compiler analysis through tirx_harness. Kernels run against benchmarks on a local GPU or remotely through kcoral. Tool diagnostics and GPU measurements feed back to the agent.</desc>
+  <desc id="agent-loop-description">Your agent consults a knowledge base of kernel examples and hardware specifications, writes kernels with TIRx-lite on the TIRx foundation, and invokes domain-specific compiler analysis through tirx_harness. Kernels run against benchmarks on a local GPU or remotely through kcoral. Tool diagnostics and GPU measurements feed back to the agent.</desc>
   <defs>
     <marker id="agent-loop-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path class="arrowhead" d="M1 1 L9 5 L1 9 Z" fill="#62716e"/>
@@ -42,7 +42,7 @@
     <g class="detail" fill="#62716e" font-size="18">
       <text x="136" y="268" text-anchor="middle">Plan · revise</text>
       <text x="364" y="103">Kernel Zoo · Hardware spec</text>
-      <text x="364" y="263">tirx-lite</text>
+      <text x="364" y="263">TIRx-lite</text>
       <text x="364" y="433">tirx_harness</text>
       <text x="874" y="246" text-anchor="middle">Local / kcoral</text>
       <text x="874" y="274" text-anchor="middle" font-size="16">Benchmarks · profiles</text>

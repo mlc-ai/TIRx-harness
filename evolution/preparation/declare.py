@@ -17,7 +17,7 @@ import yaml
 # <workload_dir> vN` dispatches to the registered flashinfer-bench-evolve task.
 BENCH_ADAPTER = "evolution/benchmark/adapter.py"
 
-KERNEL_AUTHORING_MODES: frozenset[str] = frozenset({"tirx-lite", "task"})
+KERNEL_AUTHORING_MODES: frozenset[str] = frozenset({"TIRx-lite", "task"})
 
 
 @dataclass

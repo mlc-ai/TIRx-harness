@@ -1,6 +1,6 @@
 name: nvfp4_attention
 workload_dir: candidates/nvfp4_attention
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: FA4
 bench_timeout_s: 300

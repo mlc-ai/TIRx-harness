@@ -1,6 +1,6 @@
 name: kda_decode_b128_t1_h16_hv32_d128_bf16
 workload_dir: candidates/kda/decode_b128_t1_h16_hv32_d128_bf16
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: recurrent_kda_cutedsl
 bench_timeout_s: 300

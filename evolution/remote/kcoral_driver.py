@@ -55,7 +55,7 @@ class _BundleImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 def _exec(source: str, filename: str, namespace: dict) -> None:
     linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
     # dont_inherit: this file's `from __future__ import annotations` must not leak into
-    # the compiled source — tirx-lite reads live annotation objects at decoration time.
+    # the compiled source — TIRx-lite reads live annotation objects at decoration time.
     exec(compile(source, filename, "exec", dont_inherit=True), namespace)
 
 

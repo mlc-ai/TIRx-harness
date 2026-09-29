@@ -1,6 +1,6 @@
 name: mla_dsv4_prefill_b2_qsum386_qmax257_h128_d512_swa16384_c16384_topk1152_bf16_hnd_varlen
 workload_dir: candidates/mla_dsv4_prefill_b2_qsum386_qmax257_h128_d512_swa16384_c16384_topk1152_bf16_hnd_varlen
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: trtllm_batch_decode_sparse_mla_dsv4
 bench_timeout_s: 300
