@@ -44,8 +44,9 @@ python evolution/setup.py --task fp16_gemm_floor
 Setup creates an isolated worktree and `.venv` using the Python interpreter
 that launched it. It installs the harness and benchmark dependencies from
 `uv.lock` into that venv, then prepares the selected skills, references, and
-task prompt. This applies to both local and remote GPU runs. The printed
-launch commands activate the run's venv for the agent.
+task prompt. This applies to both local and remote GPU runs. The final summary
+prints three shell lines to set `run_dir`, enter the worktree, and activate
+the run's venv. Copy those lines before launching the agent below.
 
 (select-remote-execution)=
 ````{admonition} Remote execution

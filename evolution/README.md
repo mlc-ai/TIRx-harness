@@ -15,11 +15,11 @@ python evolution/setup.py --task fp16_gemm_floor --name gemm-review
 cat kda_flow_runs/gemm-review/PROMPT.md
 ```
 
-Setup prints `run_dir`, `launch_claude`, and `launch_codex`. Review the generated
-`PROMPT.md`, then start the selected session with the printed launch command
-and give it that prompt. This starts the agent in the prepared worktree with
-the run's venv. Setup creates a separate worktree and `.venv`
-for each run and installs its packages.
+Setup ends with a short completion summary. Copy its three shell lines to set
+`run_dir`, enter the worktree, and activate the run's venv. Follow
+[Launch the agent](../docs/optimization-runs.md#launch-the-agent) for your agent's
+launch command and prompt. Setup creates a separate worktree and `.venv` for
+each run and installs its packages.
 
 ### Humanize
 

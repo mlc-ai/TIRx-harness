@@ -178,18 +178,12 @@ def setup(
     flowverse_config_path.write_text(
         yaml.safe_dump(flowverse_config, sort_keys=False), encoding="utf-8"
     )
-    print(f"run_dir={run_dir}")
-    print(f"worktree={worktree}")
-    print(f"prompt={prompt_path}")
-    print(f"flowverse_config={flowverse_config_path}")
-    print(f"venv={environment.prefix}")
-    print(f"kernel_package={environment.kernels}")
-    launch_prefix = (
-        f'cd {shlex.quote(str(worktree))} && '
-        f'. {shlex.quote(str(environment.prefix / "bin/activate"))} &&'
-    )
-    print(f"launch_claude={launch_prefix} claude")
-    print(f"launch_codex={launch_prefix} codex")
+    print("\nSetup complete. Enter the prepared worktree:\n")
+    print(f"run_dir={shlex.quote(str(run_dir))}")
+    print('cd "$run_dir/worktree"')
+    print(". .venv/bin/activate")
+    print("\nThen run your agent. See the launch instructions:")
+    print("https://tirxharness.mlc.ai/docs/optimization-runs.html#launch-the-agent")
     return run_dir
 
 
