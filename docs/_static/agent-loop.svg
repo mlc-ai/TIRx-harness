@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" role="img" aria-labelledby="agent-loop-title agent-loop-description">
+  <title id="agent-loop-title">Compose the components into an agent loop</title>
+  <desc id="agent-loop-description">Your agent consults a knowledge base of kernel examples and hardware specifications, writes kernels with tirx-lite on the TIRx foundation, and invokes domain-specific compiler analysis through tirx_harness. Kernels run against benchmarks on a local GPU or remotely through kcoral. Tool diagnostics and GPU measurements feed back to the agent.</desc>
+  <defs>
+    <marker id="agent-loop-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path class="arrowhead" d="M1 1 L9 5 L1 9 Z" fill="#62716e"/>
+    </marker>
+  </defs>
+
+  <g class="edges" fill="none" stroke="#62716e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M136 180 V94 Q136 80 150 80 H340" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M228 240 H340" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M136 310 V386 Q136 400 150 400 H340" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M500 290 V350" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M660 240 H772" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M874 300 V478 Q874 492 860 492 H34 Q20 492 20 478 V290 Q20 276 34 276 H44" marker-end="url(#agent-loop-arrow)"/>
+    <path d="M500 450 V492"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, DejaVu Sans, sans-serif">
+    <g class="detail" fill="#62716e" font-size="18" text-anchor="middle">
+      <text x="275" y="66">Consult</text>
+      <text x="284" y="226">Write</text>
+      <text x="275" y="386">Check</text>
+      <text x="716" y="226">Run</text>
+      <text x="674" y="478">Feedback</text>
+    </g>
+
+    <rect class="agent-panel" x="44" y="180" width="184" height="130" rx="12" fill="#f3f6f5" stroke="#dfe6e3" stroke-width="1.5"/>
+    <rect class="component-panel" x="340" y="30" width="320" height="100" rx="12" fill="#f2f7f5" stroke="#dfe6e3" stroke-width="1.5"/>
+    <rect class="component-panel" x="340" y="190" width="320" height="100" rx="12" fill="#f2f7f5" stroke="#dfe6e3" stroke-width="1.5"/>
+    <rect class="component-panel" x="340" y="350" width="320" height="100" rx="12" fill="#f2f7f5" stroke="#dfe6e3" stroke-width="1.5"/>
+    <rect class="component-panel" x="772" y="180" width="204" height="120" rx="12" fill="#f2f7f5" stroke="#dfe6e3" stroke-width="1.5"/>
+
+    <g class="node-title" fill="#293332" font-size="22" font-weight="600">
+      <text x="136" y="238" text-anchor="middle">Your agent</text>
+      <text x="364" y="73">Knowledge base</text>
+      <text x="364" y="233">TIRx foundation</text>
+      <text x="364" y="380"><tspan x="364">Domain-specific</tspan><tspan x="364" dy="26">compiler analysis</tspan></text>
+      <text x="874" y="216" text-anchor="middle">GPU execution</text>
+    </g>
+    <g class="detail" fill="#62716e" font-size="18">
+      <text x="136" y="268" text-anchor="middle">Plan · revise</text>
+      <text x="364" y="103">Kernel Zoo · Hardware spec</text>
+      <text x="364" y="263">tirx-lite</text>
+      <text x="364" y="433">tirx_harness</text>
+      <text x="874" y="246" text-anchor="middle">Local / kcoral</text>
+      <text x="874" y="274" text-anchor="middle" font-size="16">Benchmarks · profiles</text>
+    </g>
+  </g>
+</svg>

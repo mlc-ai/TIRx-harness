@@ -1,0 +1,102 @@
+/* Extend Furo's theme variables so every component follows the color mode. */
+body {
+  --sd-color-primary: var(--color-brand-primary);
+  --sd-color-primary-highlight: var(--color-brand-content);
+  --sd-color-primary-text: var(--color-background-primary);
+  --sd-color-secondary: var(--color-foreground-secondary);
+  --sd-color-secondary-highlight: var(--color-foreground-primary);
+  --sd-color-secondary-text: var(--color-background-primary);
+}
+
+.lead {
+  color: var(--color-foreground-secondary);
+  font-size: 1.15rem;
+  line-height: 1.65;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0 2rem;
+}
+.hero-actions p { margin: 0; }
+.hero-actions .sd-btn {
+  padding: 0.6rem 1rem;
+  border-radius: 0.3rem;
+  font-weight: 600;
+}
+
+.content .architecture {
+  margin: 1.8rem 0;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--color-background-border);
+  border-left: 3px solid var(--color-brand-primary);
+  border-radius: 0.3rem;
+  background: var(--tirx-panel);
+}
+.architecture p:last-child { margin-bottom: 0; }
+.architecture code { white-space: normal; }
+
+.component-grid .sd-card {
+  border: 1px solid var(--color-background-border);
+  border-radius: 0.4rem;
+  box-shadow: none !important;
+  background: var(--color-background-primary);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.component-grid .sd-card:hover, .component-grid .sd-card:focus-within {
+  border-color: var(--color-brand-primary);
+  background: var(--tirx-panel);
+}
+.component-grid .sd-card-title {
+  font-family: var(--font-stack--monospace);
+  font-size: 1.15rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.component-subtitle {
+  color: var(--color-brand-content);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.component-subtitle p { margin: 0; }
+.component-grid .sd-card-body { padding: 1rem; font-size: 0.9rem; }
+.component-grid .sd-card-footer {
+  border-top-color: var(--color-background-border);
+  color: var(--color-brand-content);
+  font-size: 0.8rem;
+}
+
+.table-wrapper { max-width: 100%; overflow-x: auto; }
+.content .highlight { border-radius: 0.4rem; }
+
+.agent-loop-diagram { margin: 1.5rem 0; overflow-x: auto; }
+.agent-loop-diagram svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.agent-loop-diagram .agent-panel {
+  fill: var(--color-background-secondary);
+  stroke: var(--color-background-border);
+}
+.agent-loop-diagram .component-panel {
+  fill: var(--tirx-panel);
+  stroke: var(--color-background-border);
+}
+.agent-loop-diagram .node-title { fill: var(--color-foreground-primary); }
+.agent-loop-diagram .detail, .agent-loop-diagram .arrowhead {
+  fill: var(--color-foreground-secondary);
+}
+.agent-loop-diagram .edges { stroke: var(--color-foreground-secondary); }
+
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 767px) {
+  .lead { font-size: 1.05rem; }
+  .content .architecture { padding: 1rem; }
+  .content { overflow-wrap: anywhere; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .component-grid .sd-card { transition: none; }
+}
