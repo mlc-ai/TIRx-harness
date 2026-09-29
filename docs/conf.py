@@ -1,5 +1,7 @@
 """Sphinx configuration for the TIRx Harness documentation."""
 
+from sphinx_design.icons import get_octicon
+
 project = "TIRx Harness"
 author = "TIRx contributors"
 extensions = [
@@ -29,6 +31,7 @@ html_baseurl = "https://tirxharness.mlc.ai/docs/"
 html_title = f"{project} documentation"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
+html_context = {"github_icon": get_octicon("mark-github", height="1.25rem")}
 html_theme_options = {
     "source_repository": "https://github.com/mlc-ai/TIRx-harness/",
     "source_branch": "main",
