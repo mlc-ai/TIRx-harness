@@ -92,23 +92,16 @@ the locked documentation dependencies with Python 3.12, then runs the same
 strict HTML build as the local command. These CI checks need no kernel
 dependencies, submodules, or GPU.
 
-A successful build uploads a `github-pages` artifact containing `artifact.tar`,
-which holds the complete website with the documentation under `docs/`. To preview
-it, download and unzip the artifact from the workflow run, then unpack and serve
-the website:
+A successful build uploads a `documentation-html` artifact containing the
+complete website, with the documentation under `docs/`. To preview it, download
+and extract the artifact from the workflow run, then serve the extracted directory:
 
 ```bash
-mkdir -p /path/to/preview
-tar -xf /path/to/downloaded/artifact.tar -C /path/to/preview
-python -m http.server 8018 --bind 127.0.0.1 --directory /path/to/preview
+tar -xf /path/to/extracted/artifact/artifact.tar -C /path/to/extracted/artifact
+python -m http.server 8018 --bind 127.0.0.1 --directory /path/to/extracted/artifact
 ```
 
 Open `http://127.0.0.1:8018/docs/`. The artifact root redirects to that path.
-
-Pushes to `main` also deploy this artifact to <https://tirxharness.mlc.ai/docs/>.
-In the repository's **Settings → Pages**, select **GitHub Actions** as the build
-source and set the custom domain to `tirxharness.mlc.ai`. The artifact's `CNAME`
-file does not configure the custom domain for Actions deployments.
 
 ## Check external links
 
