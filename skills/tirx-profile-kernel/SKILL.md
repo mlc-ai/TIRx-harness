@@ -13,7 +13,7 @@ guide or inspecting source alone is not performance evidence when a runnable
 case is available.
 
 Use the user's workflow Python environment for imports, adapters, and tool
-execution. Resolve tirx-lite documentation and examples through `$tirx-wiki` in that
+execution. Resolve TIRx-lite documentation and examples through `$tirx-wiki` in that
 same environment; do not assume kernels live inside a skill directory.
 
 ## Tool routing

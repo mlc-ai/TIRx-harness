@@ -1,6 +1,6 @@
 name: kda_decode
 workload_dir: candidates/kda/decode
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: recurrent_kda_cutedsl
 bench_timeout_s: 300

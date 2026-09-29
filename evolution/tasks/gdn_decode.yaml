@@ -1,6 +1,6 @@
 name: gdn_decode
 workload_dir: candidates/gdn/decode
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: flashinfer_gated_delta_rule_decode_pretranspose
 bench_timeout_s: 600

@@ -1,6 +1,6 @@
 name: kda_backward_b1_t8192_h96
 workload_dir: candidates/kda/backward_b1_t8192_h96
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: fla_chunk_kda_training_step
 bench_timeout_s: 300

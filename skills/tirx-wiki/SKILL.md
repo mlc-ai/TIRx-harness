@@ -1,9 +1,9 @@
 ---
 name: tirx-wiki
 description: >
-  Authoritative reference for tirx-lite authoring on TIRx: tirx-lite APIs, canonical
+  Authoritative reference for TIRx-lite authoring on TIRx: TIRx-lite APIs, canonical
   kernels, optimization guidance, PTX ISA, and GPU references. Highlight the
-  tirx-lite guide, canonical kernels, and PTX manual when relevant, while retaining
+  TIRx-lite guide, canonical kernels, and PTX manual when relevant, while retaining
   the other reference sources. Pair it with tirx-debug-kernel or
   tirx-profile-kernel for runnable diagnosis or measurement.
 ---
@@ -30,13 +30,13 @@ gates, and their detailed tool guides.
 1. Read `references/repos/tirx-kernels/README.md` for the kernel index and
    browse the source and documentation in that checkout. If it is missing,
    run the reference fetcher below.
-2. Use the tirx-lite guide for the authoring contract, the kernel checkout
+2. Use the TIRx-lite guide for the authoring contract, the kernel checkout
    for implementation patterns, and the PTX ISA manual for instruction
    semantics when those are relevant.
 3. Use the optimization manual, NVIDIA manuals, blogs, and live reference
    repositories for the corresponding optimization, hardware, or
    external-source question.
-4. Verify API claims against installed tirx-lite/TIRx and a canonical call site;
+4. Verify API claims against installed TIRx-lite/TIRx and a canonical call site;
    mark uncertain hardware claims `[VERIFY]`.
 5. Search with `rg` when the relevant page is not obvious.
 
@@ -61,7 +61,7 @@ invokes this same script while excluding resources banned by the task.
 ## Highlighted references
 
 - Kernel index: `references/repos/tirx-kernels/README.md`
-- tirx-lite authoring guide: `references/repos/tirx-kernels/tirx_kernels/tirx_lite/README.md`
+- TIRx-lite authoring guide: `references/repos/tirx-kernels/tirx_kernels/tirx_lite/README.md`
 - Kernel implementations: `references/repos/tirx-kernels/tirx_kernels/`
 - PTX ISA manual: `references/manuals/ptx_isa.rst`
 

@@ -93,7 +93,7 @@ Declare the optimization contract in `evolution/tasks/<name>.yaml`:
 ```yaml
 name: my_kernel
 workload_dir: candidates/my_kernel
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: baseline_name
 bench_timeout_s: 120
@@ -105,7 +105,7 @@ spec: |
 ```
 
 `name`, `workload_dir`, `kernel_authoring`, `sota_baseline.name`, and a
-non-empty `spec` are required. `kernel_authoring` is `tirx-lite` for the shared tirx-lite
+non-empty `spec` are required. `kernel_authoring` is `TIRx-lite` for the shared TIRx-lite
 contract or `task` when the task spec defines another implementation language.
 `bench_timeout_s`, when present, must be positive.
 

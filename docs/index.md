@@ -18,7 +18,7 @@ View on GitHub
 :::
 ::::
 
-TIRx Harness brings together **tirx-lite** for kernel authoring,
+TIRx Harness brings together **TIRx-lite** for kernel authoring,
 **compiler analysis** for kernel inspection, and [**kcoral**](https://kcoral.mlc.ai/)
 for remote execution. Skills guide the agent in using them, while workload
 contracts define correctness and performance. Start with the component or task you need.
@@ -28,7 +28,7 @@ contracts define correctness and performance. Start with the component or task y
 ```{container} architecture
 **Your agent orchestrates the loop.**
 
-Skills guide its choices. tirx-lite produces a kernel; compiler analysis inspects
+Skills guide its choices. TIRx-lite produces a kernel; compiler analysis inspects
 its TIRx function. A benchmark runs the compiled candidate locally or through
 kcoral. Correctness results, timings, and profiler artifacts inform the next edit.
 ```
@@ -39,15 +39,15 @@ kcoral. Correctness results, timings, and profiler artifacts inform the next edi
 :gutter: 3
 :class-container: component-grid
 
-::::{grid-item-card} tirx-lite
-:link: components/tirx-lite
+::::{grid-item-card} TIRx-lite
+:link: components/TIRx-lite
 :link-type: doc
 
 :::{container} component-subtitle
 Kernel language & examples
 :::
 
-Write kernels in tirx-lite, a domain-specific language over the TIRx
+Write kernels in TIRx-lite, a domain-specific language over the TIRx
 intermediate representation. Explore complete implementations and launch examples.
 +++
 Language & examples →
@@ -96,7 +96,7 @@ Project website →
 For hardware and kernel-programming background, see
 [Modern GPU Programming for MLSys](https://mlc.ai/modern-gpu-programming-for-mlsys/).
 For complete implementations, browse the
-[Kernel Zoo](components/tirx-lite.md#kernel-zoo).
+[Kernel Zoo](components/TIRx-lite.md#kernel-zoo).
 
 ```{toctree}
 :hidden:
@@ -114,7 +114,7 @@ optimization-runs
 :maxdepth: 1
 :caption: Components
 
-Kernel language & examples <components/tirx-lite>
+Kernel language & examples <components/TIRx-lite>
 Compiler analysis <components/tools>
 Remote GPU execution <components/kcoral>
 ```

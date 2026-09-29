@@ -1,6 +1,6 @@
 name: moe
 workload_dir: candidates/moe
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: trtllm_fp8_block_scale_moe
 banned_paths:

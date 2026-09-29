@@ -1,6 +1,6 @@
 name: gdn_prefill
 workload_dir: candidates/gdn/prefill
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: flashinfer_chunk_gated_delta_rule
 bench_timeout_s: 120

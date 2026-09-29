@@ -1,6 +1,6 @@
 name: vsa_s80000_h8_d128_blk128_topk156_bf16
 workload_dir: candidates/vsa_s80000_h8_d128_blk128_topk156_bf16
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: flashinfer_bsa_attn_fwd
 bench_timeout_s: 300

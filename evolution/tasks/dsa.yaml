@@ -1,6 +1,6 @@
 name: dsa
 workload_dir: candidates/dsa
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: trtllm_mla_sparse
 banned_paths: []

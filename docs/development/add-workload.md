@@ -53,7 +53,7 @@ replace its `spec` with the complete contract:
 ```yaml
 name: my_kernel
 workload_dir: candidates/my_kernel
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: my_reference
 spec: |

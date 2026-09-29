@@ -1,6 +1,6 @@
 name: msa_decode_b128_q16_kv4096_hq64_hkv4_d128_topk16_bf16_flat
 workload_dir: candidates/msa/decode_b128_q16_kv4096_hq64_hkv4_d128_topk16_bf16_flat
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: minimax_sparse_atten_func
 bench_timeout_s: 300

@@ -1,6 +1,6 @@
 name: kda_forward
 workload_dir: candidates/kda/forward
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: flash_kda_chunk_kda
 bench_timeout_s: 600

@@ -1,6 +1,6 @@
 name: mla_dsv4
 workload_dir: candidates/mla_dsv4
-kernel_authoring: tirx-lite
+kernel_authoring: TIRx-lite
 sota_baseline:
   name: trtllm_batch_decode_sparse_mla_dsv4
 bench_timeout_s: 300
