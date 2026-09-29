@@ -11,11 +11,6 @@ connect them in an agent loop.
 :color: primary
 Get started
 :::
-:::{button-link} https://github.com/mlc-ai/TIRx-harness
-:color: secondary
-:outline:
-View on GitHub
-:::
 ::::
 
 TIRx Harness brings together **TIRx-lite** for kernel authoring,

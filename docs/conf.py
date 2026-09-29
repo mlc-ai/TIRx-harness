@@ -24,6 +24,7 @@ extlinks = {
 }
 
 html_theme = "furo"
+templates_path = ["_templates"]
 html_baseurl = "https://tirxharness.mlc.ai/docs/"
 html_title = f"{project} documentation"
 html_static_path = ["_static"]
