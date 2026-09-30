@@ -234,6 +234,14 @@ def parse_ptxas(log: str) -> dict:
     ``extern __shared__`` dynamic SMEM (most TIRx GEMM/attention kernels) don't
     report it, so its absence does not mean "0 bytes SMEM".
     """
+    # Optional fields may be absent for the first kernel. Searching the entire
+    # log would then borrow a resource count from a later, unrelated function.
+    entries = list(re.finditer(r"(?m)^ptxas info\s*:\s*Compiling entry function", log))
+    if not entries:
+        entries = list(re.finditer(r"(?m)^ptxas info\s*:\s*Function properties for", log))
+    if entries:
+        end = entries[1].start() if len(entries) > 1 else len(log)
+        log = log[entries[0].start():end]
     info = {}
     patterns = {
         "registers": r"Used (\d+) registers",

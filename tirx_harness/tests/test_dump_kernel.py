@@ -48,3 +48,32 @@ def test_parse_ptxas_extracts_resource_counts() -> None:
         "smem": 16,
         "barriers": 2,
     }
+
+
+def test_parse_ptxas_does_not_borrow_optional_fields_from_later_kernels() -> None:
+    # CUDA 13.0 SM103a logs from real plain/shared kernels: the first report has
+    # no static SMEM, while the second has 128 bytes. Preserve that distinction.
+    first = """ptxas info    : Compiling entry function 'plain' for 'sm_103a'
+ptxas info    : Function properties for plain
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers
+ptxas info    : Compile time = 2.481 ms
+"""
+    second = """ptxas info    : Compiling entry function 'shared' for 'sm_103a'
+ptxas info    : Function properties for shared
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 12 registers, used 1 barriers, 128 bytes smem
+"""
+    assert parse_ptxas(first + second) == parse_ptxas(first)
+    assert "smem" not in parse_ptxas(first + second)
+    assert parse_ptxas(second + first) == parse_ptxas(second)
+
+
+def test_parse_ptxas_scopes_reports_without_compile_headers() -> None:
+    log = """ptxas info    : Function properties for plain
+ptxas info    : Used 10 registers
+ptxas info    : Function properties for later
+ptxas info    : 32 bytes stack frame, 8 bytes spill stores, 4 bytes spill loads
+ptxas info    : Used 12 registers, 1 barriers, 128 bytes smem
+"""
+    assert parse_ptxas(log) == {"registers": 10}
