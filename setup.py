@@ -13,10 +13,12 @@ from tempfile import TemporaryDirectory
 import tomllib
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "tirx_harness" / "frontend-rs"
+SKILLS = ROOT / "skills"
 DEPENDENCY_GROUPS = tomllib.loads((ROOT / "pyproject.toml").read_text())["dependency-groups"]
 
 
@@ -118,6 +120,37 @@ class RustBuildExt(build_ext):
                 shutil.copy2(bindings / name, licenses / name)
 
 
+def skill_files(skills_dir: Path) -> list[Path]:
+    """Return the source files of the skills in ``skills_dir``, excluding fetched references."""
+    skill_dirs = sorted(path.parent for path in skills_dir.glob("*/SKILL.md"))
+    if (skills_dir.parent / ".git").exists():
+        # A checkout may hold fetched references; only tracked files are sources.
+        listed = git("ls-files", "-z", "--", *(skill.name for skill in skill_dirs), cwd=skills_dir)
+        return [
+            path for name in listed.split("\0") if name and (path := skills_dir / name).is_file()
+        ]
+    # Source distributions contain only tracked files.
+    return [
+        path
+        for skill in skill_dirs
+        for path in sorted(skill.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    ]
+
+
+class SkillsBuildPy(build_py):
+    def run(self) -> None:
+        super().run()
+        if self.editable_mode:
+            return
+        destination = Path(self.build_lib) / "tirx_harness" / "_skills"
+        shutil.rmtree(destination, ignore_errors=True)
+        for source in skill_files(SKILLS):
+            target = destination / source.relative_to(SKILLS)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
 class RustSdist(sdist):
     def make_release_tree(self, base_dir: str, files: list[str]) -> None:
         super().make_release_tree(base_dir, files)
@@ -128,6 +161,6 @@ setup(
     install_requires=list(dependencies("harness")),
     # This TVM FFI library has no CPython API dependency.
     ext_modules=[Extension("tirx_harness.numsim._tvm_rust_ext", sources=[], py_limited_api=True)],
-    cmdclass={"build_ext": RustBuildExt, "sdist": RustSdist},
+    cmdclass={"build_ext": RustBuildExt, "build_py": SkillsBuildPy, "sdist": RustSdist},
     options={"bdist_wheel": {"py_limited_api": "cp312"}},
 )

@@ -1,6 +1,7 @@
-"""Editable installs must carry the native frontend's companion files."""
+"""Build commands must carry the native frontend's companion files and the skills."""
 
 import runpy
+import subprocess
 from pathlib import Path
 
 import setuptools
@@ -39,3 +40,29 @@ def test_editable_frontend_copies_identity_and_licenses(tmp_path, monkeypatch):
     assert (package / identity.name).read_text() == identity.read_text()
     for name in ("LICENSE", "NOTICE"):
         assert (package / "_thirdparty_licenses" / "tvm-rust-ext" / name).read_text() == name
+
+
+def _setup_definitions(monkeypatch):
+    monkeypatch.setattr(setuptools, "setup", lambda **kwargs: None)
+    return runpy.run_path(str(Path(__file__).resolve().parents[2] / "setup.py"))
+
+
+def test_skill_files_in_a_checkout_skip_fetched_references(tmp_path, monkeypatch):
+    definitions = _setup_definitions(monkeypatch)
+    tracked = [
+        "skills/tirx-wiki/SKILL.md",
+        "skills/tirx-wiki/references/repos/INDEX.md",
+        "skills/tirx-wiki/scripts/fetch_references.py",
+    ]
+    for relative in tracked:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text(relative)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    fetched = tmp_path / "skills/tirx-wiki/references/repos/cutlass/README.md"
+    fetched.parent.mkdir(parents=True)
+    fetched.write_text("fetched")
+
+    files = definitions["skill_files"](tmp_path / "skills")
+
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in files) == tracked
