@@ -74,17 +74,16 @@ to start the server.
 | {repo}`tirx-debug-kernel <skills/tirx-debug-kernel/SKILL.md>` | Check correctness, investigate findings, and verify fixes. |
 | {repo}`tirx-profile-kernel <skills/tirx-profile-kernel/SKILL.md>` | Measure performance and use profiler evidence to guide changes. |
 
-Clone this repository if needed, then copy the skills to your agent's directory
-(such as `.agents/skills` or `.claude/skills`). Run from the repository root:
+The package bundles the skills. Install them into the directory your agent
+reads, such as `.agents/skills` or `.claude/skills`:
 
 ```bash
-skills_dir=/absolute/path/to/your/project/.agents/skills
-mkdir -p "$skills_dir"
-cp -R skills/tirx-wiki skills/tirx-debug-kernel skills/tirx-profile-kernel "$skills_dir/"
-(cd "$skills_dir/tirx-wiki" && python scripts/fetch_references.py)
+tirx-harness skills install --dest /absolute/path/to/your/project/.agents/skills
 ```
 
-The fetcher needs network access to download the wiki manuals and reference
-repositories, including `tirx-kernels`.
+The command also downloads the wiki manuals and reference repositories,
+including `tirx-kernels`. Use `--no-fetch` to skip the download and `--force`
+to replace an earlier installation. Editable installs, such as `uv sync`, do
+not bundle the skills; copy them from `skills/` in the checkout instead.
 
 Continue to [Quick Start](quick-start.md) for a concrete example.

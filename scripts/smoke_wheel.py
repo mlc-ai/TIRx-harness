@@ -1,5 +1,7 @@
 """Exercise an installed wheel without importing checkout sources or using a GPU."""
 
+import subprocess
+import sys
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,7 +40,25 @@ def main():
             module, {"source": source, "output": np.zeros_like(source)}
         )
         np.testing.assert_array_equal(result.outputs["output"], source + 1)
-    print(f"tirx-harness {version('tirx-harness')}: installed native frontend and NumSim OK")
+
+        skills_dir = Path(temporary) / "skills"
+        # The console script sits beside the interpreter of the test venv.
+        subprocess.run(
+            [
+                str(Path(sys.executable).with_name("tirx-harness")),
+                "skills",
+                "install",
+                "--dest",
+                str(skills_dir),
+                "--no-fetch",
+            ],
+            check=True,
+        )
+        for name in ("tirx-debug-kernel", "tirx-profile-kernel", "tirx-wiki"):
+            assert (skills_dir / name / "SKILL.md").is_file(), name
+    print(
+        f"tirx-harness {version('tirx-harness')}: installed native frontend, NumSim, and skills OK"
+    )
 
 
 if __name__ == "__main__":

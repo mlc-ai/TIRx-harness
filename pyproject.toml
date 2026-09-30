@@ -9,6 +9,9 @@ description = "TIRx kernel development, inspection, and simulation tools"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 
+[project.scripts]
+tirx-harness = "tirx_harness.cli:main"
+
 [project.urls]
 Homepage = "https://tirxharness.mlc.ai"
 Repository = "https://github.com/mlc-ai/TIRx-harness"

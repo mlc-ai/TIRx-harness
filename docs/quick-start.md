@@ -33,37 +33,26 @@ python -c "import tvm.tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print
 This checks imports only. To develop the harness itself, use
 [Build from source](installation.md#build-from-source).
 
-Clone the repository to get the skill files:
+From your project directory, install the skills where your agent reads them:
 
 ```bash
-git clone https://github.com/mlc-ai/TIRx-harness.git
-cd TIRx-harness
-```
-
-Copy the skills to the directory your agent reads in `TIRx-harness`:
-
-```bash
-skills_dir="$PWD/.agents/skills"
-mkdir -p "$skills_dir"
-cp -R skills/tirx-wiki skills/tirx-debug-kernel skills/tirx-profile-kernel "$skills_dir/"
-(cd "$skills_dir/tirx-wiki" && python scripts/fetch_references.py)
+tirx-harness skills install --dest .agents/skills
 ```
 
 Use your agent's discovery convention, such as `.agents/skills` or
-`.claude/skills`. Copy each skill as a complete directory. The fetcher downloads
-the wiki manuals and reference repositories; it requires network access.
+`.claude/skills`. The command also downloads the wiki manuals and reference
+repositories.
 
 (use-your-existing-agent)=
 ## Optimize a kernel
 
-Clone `tirx-kernels` from the `TIRx-harness` repository root:
+Clone `tirx-kernels` into the project directory:
 
 ```bash
 git clone https://github.com/mlc-ai/tirx-kernels.git
 ```
 
-Start your agent (for example, Codex or Claude Code) from the
-`TIRx-harness` repository root.
+Start your agent (for example, Codex or Claude Code) from the project directory.
 
 Give your agent the following goal:
 
