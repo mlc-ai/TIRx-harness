@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -81,5 +82,7 @@ class Environment:
         return package_bans
 
     def sanitize(self, banned_paths: list[str]) -> None:
-        """Remove task-banned kernel sources from this venv."""
+        """Remove task-banned kernel sources and the wheel's skill copies from this venv."""
         _sanitize_banned_paths(self.site_packages, self.kernel_bans(banned_paths))
+        # Runs install skills from the worktree; leave no unsanitized second copy.
+        shutil.rmtree(self.site_packages / "tirx_harness" / "_skills", ignore_errors=True)
