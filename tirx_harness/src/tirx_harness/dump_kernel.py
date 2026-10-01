@@ -152,6 +152,17 @@ def _run(cmd: list[str], quiet: bool) -> subprocess.CompletedProcess:
         print(f"  $ {' '.join(cmd)}")
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired as e:
+        # TimeoutExpired can carry bytes even with text=True. Keep any partial
+        # diagnostics, but let the existing stage helpers report a failed run.
+        stdout = e.stdout or ""
+        stderr = e.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        message = f"command timed out after {e.timeout} seconds: {' '.join(cmd)}"
+        return subprocess.CompletedProcess(cmd, 124, stdout, f"{message}\n{stderr}".strip())
     except FileNotFoundError as e:
         # Toolkit executable missing — surface as a failed run so callers collect
         # it into DumpResult.errors instead of crashing with a traceback.
@@ -241,7 +252,7 @@ def parse_ptxas(log: str) -> dict:
         entries = list(re.finditer(r"(?m)^ptxas info\s*:\s*Function properties for", log))
     if entries:
         end = entries[1].start() if len(entries) > 1 else len(log)
-        log = log[entries[0].start():end]
+        log = log[entries[0].start() : end]
     info = {}
     patterns = {
         "registers": r"Used (\d+) registers",

@@ -1,5 +1,11 @@
 """Unit tests for generated-source inspection helpers."""
 
+import subprocess
+import sys
+
+import pytest
+
+import tirx_harness.dump_kernel as inspection
 from tirx_harness.dump_kernel import dump_cuda, extract_symbols, parse_ptxas
 
 
@@ -77,3 +83,53 @@ ptxas info    : 32 bytes stack frame, 8 bytes spill stores, 4 bytes spill loads
 ptxas info    : Used 12 registers, 1 barriers, 128 bytes smem
 """
     assert parse_ptxas(log) == {"registers": 10}
+
+
+@pytest.mark.parametrize("stage", ["ptx", "cubin", "sass"])
+def test_dump_module_reports_tool_timeout(monkeypatch, stage) -> None:
+    # Use a real child process, but shorten the timeout and replace the CUDA
+    # tool so this failure-path regression needs neither a GPU nor a toolkit.
+    run = subprocess.run
+
+    def stalled_tool(cmd, **kwargs):
+        kwargs["timeout"] = 0.5
+        return run(
+            [
+                sys.executable,
+                "-c",
+                "import sys,time; print('partial diagnostic', file=sys.stderr, flush=True); "
+                "time.sleep(60)",
+            ],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(inspection.subprocess, "run", stalled_tool)
+    if stage == "sass":
+        # Reach the disassembler independently of the preceding compiler.
+        monkeypatch.setattr(inspection, "cuda_to_cubin", lambda *args: ("", ""))
+    module = _Module('extern "C" __global__ void test_kernel() {}')
+    result = inspection.dump_module(module, arch="sm_100a", ptx=stage == "ptx", sass=stage != "ptx")
+
+    assert not result.ok
+    assert result.cuda == module._source
+    assert result.ptx is None
+    assert result.sass is None
+    assert len(result.errors) == 1
+    assert "timed out" in result.errors[0]
+    assert "partial diagnostic" in result.errors[0]
+
+
+@pytest.mark.parametrize("output", [b"partial", "partial", None])
+def test_tool_timeout_normalizes_partial_output(monkeypatch, output) -> None:
+    def timeout(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"], output=output, stderr=output)
+
+    monkeypatch.setattr(inspection.subprocess, "run", timeout)
+    result = inspection._run(["nvcc", "-ptx"], quiet=True)
+
+    assert result.returncode == 124
+    assert result.stdout == ("partial" if output is not None else "")
+    assert isinstance(result.stderr, str)
+    assert "timed out after 300 seconds: nvcc -ptx" in result.stderr
+    if output is not None:
+        assert result.stderr.endswith("partial")
