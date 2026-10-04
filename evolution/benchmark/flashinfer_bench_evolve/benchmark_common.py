@@ -60,6 +60,7 @@ class BenchConfig:
     correctness_runs: int = 5
     check_after_timing: bool = True
     require_repeatable_outputs: bool = False
+    check_input_dependence: bool = True
 
 
 def config_from_env(**task_defaults) -> BenchConfig:
@@ -85,6 +86,9 @@ def config_from_env(**task_defaults) -> BenchConfig:
                 "BENCH_REQUIRE_REPEATABLE_OUTPUTS",
                 int(base.require_repeatable_outputs),
             )
+        ),
+        check_input_dependence=bool(
+            env_int("BENCH_CHECK_INPUT_DEPENDENCE", int(base.check_input_dependence))
         ),
     )
 
@@ -792,6 +796,88 @@ def check_observed_outputs(
     )
 
 
+def _tensors(obj):
+    """Every tensor reachable from an argument tuple through tuples, lists and dict values."""
+
+    if isinstance(obj, torch.Tensor):
+        yield obj
+    elif isinstance(obj, (tuple, list)):
+        for item in obj:
+            yield from _tensors(item)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            yield from _tensors(item)
+
+
+def perturb_inputs_(tensors, seed: int):
+    """Add noise of a quarter of each tensor's own spread (its magnitude if constant), in place."""
+
+    for index, tensor in enumerate(tensors):
+        values = tensor.float()
+        scale = values.std().item() or values.abs().mean().item() or 1.0
+        generator = torch.Generator(device=tensor.device).manual_seed(seed + index)
+        noise = torch.randn(
+            values.shape, generator=generator, device=tensor.device, dtype=torch.float32
+        )
+        tensor.copy_((values + 0.25 * scale * noise).to(tensor.dtype))
+
+
+def input_dependence_check(
+    *,
+    candidate_runner,
+    bound_args,
+    correctness_fn,
+    correctness_prepare,
+    device,
+    atol: float,
+    rtol: float,
+    required_matched_ratio,
+    required_rms_error_ratios,
+    phase: str,
+    seed: int,
+    compare_fn=None,
+):
+    """Change a prepared candidate's inputs in place and check one more call on the new values.
+
+    A result computed before the call (in setup, or cached on an earlier call) no longer matches.
+    Only finite floating-point inputs with more than one element are changed. Returns None when
+    none can be changed or one does not reach the candidate (the prepare step copied it).
+    """
+
+    if correctness_fn is None:
+        return None
+    inputs = [
+        tensor
+        for tensor in _tensors(bound_args)
+        if tensor.is_floating_point() and tensor.numel() > 1 and bool(torch.isfinite(tensor).all())
+    ]
+    bound = {tensor.untyped_storage().data_ptr() for tensor in _tensors(candidate_runner.args)}
+    if not inputs or any(t.untyped_storage().data_ptr() not in bound for t in inputs):
+        return None
+
+    perturb_inputs_(inputs, seed)
+    reference = reference_outputs(
+        correctness_fn, prepare_args(bound_args, correctness_prepare), device
+    )
+    check = check_candidate_runs(
+        candidate_runner=candidate_runner,
+        reference=reference,
+        correctness_fn=correctness_fn,
+        runs=1,
+        require_repeatable_outputs=False,
+        device=device,
+        atol=atol,
+        rtol=rtol,
+        required_matched_ratio=required_matched_ratio,
+        required_rms_error_ratios=required_rms_error_ratios,
+        phase=phase,
+        compare_fn=compare_fn,
+    )
+    if not check.ok:
+        check.note += " (output did not follow an in-place change of the inputs)"
+    return check
+
+
 def summarize(rows, group_axis: str):
     valid = [r for r in rows if r["passed"] and r["speedup"] and r["speedup"] > 0]
     print()
@@ -868,11 +954,14 @@ def run_benchmark(
     correctness_runs: int | None = None,
     check_after_timing: bool | None = None,
     require_repeatable_outputs: bool | None = None,
+    check_input_dependence: bool | None = None,
 ):
     if correctness_runs is None:
         correctness_runs = DEFAULT_CORRECTNESS_RUNS
     if check_after_timing is None:
         check_after_timing = DEFAULT_CHECK_AFTER_TIMING
+    if check_input_dependence is None:
+        check_input_dependence = config_from_env().check_input_dependence
     if require_repeatable_outputs is None:
         require_repeatable_outputs = config_from_env().require_repeatable_outputs
     if correctness_runs < 1:
@@ -885,8 +974,9 @@ def run_benchmark(
     print(f"device: {device}")
     print(f"warmup/iters/trials: {warmup}/{iters}/{trials}")
     print(
-        "correctness runs/post-timing/repeatable-outputs: "
-        f"{correctness_runs}/{check_after_timing}/{require_repeatable_outputs}"
+        "correctness runs/post-timing/repeatable-outputs/input-dependence: "
+        f"{correctness_runs}/{check_after_timing}/{require_repeatable_outputs}/"
+        f"{check_input_dependence}"
     )
     print()
 
@@ -974,8 +1064,14 @@ def run_benchmark(
 
             try:
                 timing_args = tuple(make_inputs(entry, device))
+                # Keep the cloned inputs the candidate is bound to, so the
+                # input-dependence check can change them in place after timing.
+                timing_bound = clone_args(timing_args)
                 timing_candidate = KernelRun(
-                    candidate_fn, prepare_args(timing_args, candidate_prepare_fn)
+                    candidate_fn,
+                    timing_bound
+                    if candidate_prepare_fn is None
+                    else tuple(candidate_prepare_fn(*timing_bound)),
                 )
                 timing_baseline_args = prepare_args(timing_args, baseline_prepare_fn)
                 timing_base_fn = baseline_fn if timing_baseline_fn is None else timing_baseline_fn
@@ -1059,6 +1155,38 @@ def run_benchmark(
                     note = check.note
                     break
                 successful_checks += check.passed_runs
+
+            if check_input_dependence:
+                # Last: it changes the timed instance's inputs. A result computed
+                # in setup passes every check above, which reuse setup's inputs.
+                dependence = input_dependence_check(
+                    candidate_runner=timing_candidate,
+                    bound_args=timing_bound,
+                    correctness_fn=correctness_fn,
+                    correctness_prepare=correctness_prepare,
+                    device=device,
+                    atol=entry_atol,
+                    rtol=entry_rtol,
+                    required_matched_ratio=required_matched_ratio,
+                    required_rms_error_ratios=entry_rms_ratios,
+                    phase=f"input-dependence trial {trial_idx}",
+                    seed=trial_idx,
+                    compare_fn=compare_fn,
+                )
+                if dependence is None:
+                    if trial_idx == 1 and correctness_fn is not None:
+                        print("  input-dependence: skipped (a float input is not bound in place)")
+                else:
+                    max_abs = max(max_abs, dependence.max_abs)
+                    max_rel = max(max_rel, dependence.max_rel)
+                    max_rms_ratio = max(max_rms_ratio, dependence.max_rms_ratio)
+                    matched = min(matched, dependence.matched)
+                    if not dependence.ok:
+                        passed = False
+                        verdict = "FAIL"
+                        note = dependence.note
+                        break
+                    successful_checks += dependence.passed_runs
 
             timer_name = timer_name or timer
             # Recorded per row: a downstream consumer's only way to detect
