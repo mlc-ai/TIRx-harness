@@ -90,7 +90,7 @@ Commit the workload files before preparing a run: setup creates the worktree
 from the current Git `HEAD`.
 
 ```bash
-python evolution/setup.py --task my_kernel
+uv run --package tirx-evolution evolve init --task my_kernel
 ```
 
 Follow [Optimization Runs](../optimization-runs.md#launch-the-agent) to launch the

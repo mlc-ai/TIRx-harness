@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
-"""Prepare one clean KDA worktree for a Claude or Codex session.
+"""The ``evolve`` command.
 
-This is intentionally setup-only. The selected agent owns the optimization
+``evolve init`` prepares one clean KDA worktree for a Claude or Codex session.
+It is intentionally setup-only. The selected agent owns the optimization
 session and durable progress lives in the generated worktree.
 """
 
@@ -19,14 +19,8 @@ from urllib.parse import urlparse
 
 import yaml
 
-# Direct-file invocation (``python evolution/setup.py``) does not put
-# the repository root on sys.path automatically.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from evolution.preparation import sandbox  # noqa: E402
-from evolution.preparation.declare import (  # noqa: E402
+from evolution.preparation import sandbox
+from evolution.preparation.declare import (
     BENCH_ADAPTER,
     effective_guard_toolset,
     load_task,
@@ -35,8 +29,8 @@ from evolution.preparation.declare import (  # noqa: E402
     task_path,
     toolset_path,
 )
-from evolution.preparation.live_references import kernel_reference_bans  # noqa: E402
-from evolution.prompts.render import (  # noqa: E402
+from evolution.preparation.live_references import kernel_reference_bans
+from evolution.prompts.render import (
     kernel_authoring_contract,
     kernel_remote_gpu_work,
     kernel_remote_local_checks,
@@ -47,6 +41,8 @@ from evolution.prompts.render import (  # noqa: E402
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+# The workspace member is installed editable, so the source checkout is the run source.
+REPO_ROOT = PACKAGE_DIR.parent
 RUNS_ROOT = REPO_ROOT / "kda_flow_runs"
 PROMPT_TEMPLATE = PACKAGE_DIR / "prompts" / "PROMPT.md"
 REMOTE_TEMPLATE = PACKAGE_DIR / "prompts" / "PROMPT_remote.md"
@@ -187,10 +183,16 @@ def setup(
     return run_dir
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", required=True)
-    parser.add_argument(
+def _parser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
+    parser = argparse.ArgumentParser(prog="evolve")
+    commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser(
+        "init",
+        help="prepare an optimization run",
+        description="Prepare one clean KDA worktree for a Claude or Codex session.",
+    )
+    init.add_argument("--task", required=True)
+    init.add_argument(
         "--remote",
         nargs="?",
         const=BENCH_SERVER_URL,
@@ -198,16 +200,23 @@ def main(argv: list[str] | None = None) -> int:
         help="score candidates through the kcoral benchmark server at URL "
         f"(default {BENCH_SERVER_URL})",
     )
-    parser.add_argument(
+    init.add_argument(
         "--name",
         dest="run_name",
         help="exact run directory name (default: <task>-<timestamp>)",
     )
+    return parser, init
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser, init = _parser()
     args = parser.parse_args(argv)
+    if not (REPO_ROOT / ".git").exists():
+        init.error(f"evolution must run from a TIRx-harness checkout, not {REPO_ROOT}")
     if args.remote is not None:
         server = urlparse(args.remote)
         if not (server.hostname and server.port):
-            parser.error(f"--remote expects http://host:port, got {args.remote!r}")
+            init.error(f"--remote expects http://host:port, got {args.remote!r}")
     try:
         setup(
             task_name=args.task,
@@ -215,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             run_name=args.run_name,
         )
     except ValueError as error:
-        parser.error(str(error))
+        init.error(str(error))
     return 0
 
 

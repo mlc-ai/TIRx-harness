@@ -2,7 +2,7 @@
 
 For installation and launch, read [Optimization Runs](../docs/optimization-runs.md).
 This directory owns run preparation and execution tools. Humanize is an
-external orchestrator; `setup.py` prepares the run for launch.
+external orchestrator; `evolve init` prepares the run for launch.
 
 ## Run preparation
 
@@ -10,7 +10,7 @@ Prepare each optimization run manually before starting the agent. From the sourc
 repository, run:
 
 ```bash
-python evolution/setup.py --task fp16_gemm_floor --name gemm-review
+uv run --package tirx-evolution evolve init --task fp16_gemm_floor --name gemm-review
 # For a remote task, add: --remote http://host:port
 cat kda_flow_runs/gemm-review/PROMPT.md
 ```
@@ -32,7 +32,8 @@ to run two agents in the prepared workspace.
 
 | Path | Responsibility |
 | --- | --- |
-| `setup.py` | Read a task/toolset, prepare the workspace, render the task prompt and write run metadata |
+| `pyproject.toml` | uv workspace member providing the `evolve` command; never published |
+| `cli.py` | `evolve init`: read a task/toolset, prepare the workspace, render the task prompt and write run metadata |
 | `tasks/` | Task contracts: math, interface, baseline, candidate path and task-specific restrictions |
 | `toolsets/` | Selected skills and shared restrictions |
 | `preparation/declare.py` | Parse and combine task/toolset declarations |
