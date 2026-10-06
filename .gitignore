@@ -17,6 +17,7 @@ tirx_harness/frontend-rs/target/
 tirx_harness/frontend-rs/thirdparty/
 tirx_harness/dist/
 tirx_harness/src/*.egg-info/
+/evolution/*.egg-info/
 tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.*.so
 tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.pyd
 tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.identity

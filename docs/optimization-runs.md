@@ -2,7 +2,7 @@
 
 ```{container} lead
 An **optimization run** is the complete workflow for a registered workload:
-`evolution/setup.py` prepares its worktree and Python environment, then an agent
+`evolve init` prepares its worktree and Python environment, then an agent
 iteratively writes, checks, and benchmarks kernel candidates, saving each with
 its results.
 ```
@@ -24,21 +24,20 @@ correctness policy, and scoring rule fixed throughout the run.
 
 Prepare the [source-build prerequisites](installation.md#build-from-source),
 install uv, and configure your coding agent. Setup builds the harness from
-each run's worktree. Clone the repository and install the setup dependencies
-into the Python environment used to launch setup:
+each run's worktree. Clone the repository and initialize the native
+submodule; `uv run` installs the setup tool on first use:
 
 ```bash
 git clone https://github.com/mlc-ai/TIRx-harness.git
 cd TIRx-harness
 git submodule update --init thirdparty/tvm-rust-ext
-python -m pip install -r evolution/preparation/requirements.txt
 ```
 
 Choose a task from {repo}`evolution/tasks` and a GPU matching its contract.
 This example uses the B200 FP16 GEMM task:
 
 ```bash
-python evolution/setup.py --task fp16_gemm_floor
+uv run --package tirx-evolution evolve init --task fp16_gemm_floor
 ```
 
 Setup creates an isolated worktree and `.venv` using the Python interpreter
@@ -66,7 +65,7 @@ hostname or IP address and add `--remote` when preparing the run:
 
 ```bash
 curl -fsS http://your-server:8000/health
-python evolution/setup.py --task fp16_gemm_floor \
+uv run --package tirx-evolution evolve init --task fp16_gemm_floor \
   --remote http://your-server:8000
 ```
 

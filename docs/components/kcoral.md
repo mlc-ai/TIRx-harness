@@ -187,7 +187,7 @@ The [debugging and profiling skills](../installation.md#install-agent-skills) gu
 commands and interpret their results. CPU checks stay local; remote reports
 and logs feed back into kernel edits, followed by correctness checks and an
 ordinary benchmark run. For an optimization run, select remote execution with
-`setup.py --remote URL`; see {ref}`remote setup <select-remote-execution>`.
+`evolve init --remote URL`; see {ref}`remote setup <select-remote-execution>`.
 
 ## Use another execution service
 

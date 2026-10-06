@@ -1,0 +1,23 @@
+# Optimization-run tooling. A uv workspace member of the repository, never
+# published: it prepares runs from this checkout's own sources.
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tirx-evolution"
+version = "0.0.0"
+description = "Prepare TIRx Harness optimization runs"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "pyyaml>=6.0",
+  # The tirx-wiki reference fetcher runs with this interpreter.
+  "pypandoc-binary>=1.17",
+]
+
+[project.scripts]
+evolve = "evolution.cli:main"
+
+[tool.setuptools]
+package-dir = { "evolution" = "." }
+packages = ["evolution", "evolution.preparation", "evolution.prompts"]

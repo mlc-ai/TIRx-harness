@@ -27,13 +27,15 @@ class Environment:
         if prefix.exists():
             raise ValueError(f"Run venv already exists: {prefix}")
         python = prefix / "bin/python"
+        # `uv run` exports the launcher's venv; the run venv is selected explicitly.
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
         subprocess.run(
             [
                 "uv", "sync", "--locked", "--group", "benchmark", "--no-editable",
                 "--link-mode", "copy", "--python", sys.executable,
             ],
             cwd=worktree,
-            env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(prefix)},
+            env={**env, "UV_PROJECT_ENVIRONMENT": str(prefix)},
             check=True,
         )
         # -I ignores PYTHONPATH and the working directory. Discover packages

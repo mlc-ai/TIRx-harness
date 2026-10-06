@@ -66,6 +66,10 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 default-groups = ["harness"]
 no-build-package = ["kcoral", "tirx-kernels"]
 
+[tool.uv.workspace]
+# Optimization-run tooling; run it with `uv run --package tirx-evolution evolve`.
+members = ["evolution"]
+
 [tool.setuptools.packages.find]
 where = ["tirx_harness/src"]
 include = ["tirx_harness*"]
@@ -136,7 +140,7 @@ unfixable = []
 # Only what actually fires; blanket semantic-rule waivers would mask new bugs.
 # guards.py embeds hook source as string templates.
 "evolution/preparation/**/*.py" = ["E501"]
-"evolution/setup.py" = ["E501"]
+"evolution/cli.py" = ["E501"]
 "evolution/tests/**/*.py" = ["E501"]
 
 [tool.ruff.lint.isort]
