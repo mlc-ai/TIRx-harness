@@ -1,1 +1,1 @@
-prune tirx_harness/src/tirx_harness/numsim/engine-rs/tests
+prune tools/src/tirx_harness/numsim/engine-rs/tests

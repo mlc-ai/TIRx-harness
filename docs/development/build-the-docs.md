@@ -80,7 +80,7 @@ remain authoritative for package versions and workload contracts.
 ### Maintain the Python API reference
 
 [Sphinx AutoAPI](https://sphinx-autoapi.readthedocs.io/) reads
-`tirx_harness/src/tirx_harness/` without importing the package. The pages in
+`tools/src/tirx_harness/` without importing the package. The pages in
 `api/` select entry points, input types, results, and exceptions used by callers.
 Private implementation modules, native engine internals, and external projects
 are not published as a module catalog.

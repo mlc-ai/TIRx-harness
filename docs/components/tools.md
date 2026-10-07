@@ -108,14 +108,14 @@ before comparing their numerical contents.
 `NumSimResult` exposes `.outputs`, `.diagnostics`, and `.stats`. Keep simulator
 diagnostics alongside the workload's numerical comparison result.
 
-See the {repo}`NumSim API source <tirx_harness/src/tirx_harness/numsim/api.py>`
+See the {repo}`NumSim API source <tools/src/tirx_harness/numsim/api.py>`
 for full signatures.
 
 **Limitations.**
 
 - Only modeled TIRx operations and their supported dtype, shape, and modifier
   combinations can execute. Opaque CUDA bodies are unsupported; consult the
-  {repo}`operation coverage table <tirx_harness/src/tirx_harness/numsim/engine-rs/SUPPORTED_OPS.md>`.
+  {repo}`operation coverage table <tools/src/tirx_harness/numsim/engine-rs/SUPPORTED_OPS.md>`.
 - Hardware timing and some instruction results use deterministic
   representatives. Simulation time is not GPU latency, and numerical fidelity
   depends on the operation's documented model.
@@ -288,7 +288,7 @@ Synccheck and Racecheck share these public parameters:
 
 For tensor-map bindings, `tirx_harness.numsim.TensorMap(...).numpy()` constructs
 the simulator's descriptor array. The
-{repo}`binding types <tirx_harness/src/tirx_harness/numsim/cases.py>` define its
+{repo}`binding types <tools/src/tirx_harness/numsim/cases.py>` define its
 shape, strides, dtype, and swizzle parameters.
 
 | Report interface | Meaning |
@@ -305,7 +305,7 @@ unsupported effects, and coverage limits produce `incomplete`; `review`
 indicates an advisory, and `error` indicates a detected violation. A clean
 report does not establish correctness for other inputs or replace an
 independent GPU correctness test. The
-{repo}`checker entry points <tirx_harness/src/tirx_harness/numsim/checkers.py>`
+{repo}`checker entry points <tools/src/tirx_harness/numsim/checkers.py>`
 own these signatures.
 
 ## Inspecting generated code

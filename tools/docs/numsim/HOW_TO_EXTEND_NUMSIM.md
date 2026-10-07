@@ -11,7 +11,7 @@ family may use to select that marker.
 
 ## Adding a new TIRx op
 
-The frontend is the Rust crate `tirx_harness/frontend-rs` (crate paths below are
+The frontend is the Rust crate `tools/frontend-rs` (crate paths below are
 relative to its `src/`): `registry.rs` is the op inventory, and
 `emit/<family>.rs` validates and lowers a family's calls. A public TIRx call op
 gets one `OpRow` in `registry.rs` with an `emit` callback. For `tirx.ptx.*`,
@@ -536,7 +536,7 @@ assertions in the affected checker's tests under `tests/analysis_tools/`.
 | Full-corpus payload A/B | that engine behavior did not drift | any behavior-affecting engine change |
 
 Run the suite as `python -m pytest -q -n 16 --dist=worksteal`
-from `tirx_harness/`.
+from `tools/`.
 
 The last two rows are **out-of-tree procedures, not checked-in tests.** There is
 no stored generated-source corpus, no payload-diff script, and no bless flow for

@@ -71,7 +71,7 @@ no-build-package = ["kcoral", "tirx-kernels"]
 members = ["evolution"]
 
 [tool.setuptools.packages.find]
-where = ["tirx_harness/src"]
+where = ["tools/src"]
 include = ["tirx_harness*"]
 
 [tool.setuptools_scm]
@@ -83,7 +83,7 @@ addopts = "--dist=loadgroup --no-loadscope-reorder"
 # (`tvm.tirx`) is NOT listed here — install the compatible apache-tvm and
 # apache-tvm-ffi wheels pinned above.
 # Canonical kernels come from the installed tirx-kernels package.
-pythonpath = [".", "tirx_harness/src", "tirx_harness"]
+pythonpath = [".", "tools/src", "tools"]
 markers = [
   "performance: performance regression scheduled according to the requested pytest worker count",
   "numsim_gpu: live same-kernel NumSim-vs-GPU microtest; enabled by default and skipped by --no-run-numsim-gpu",

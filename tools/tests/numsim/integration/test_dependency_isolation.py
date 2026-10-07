@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 
-from tests.numsim.support.paths import TIRX_HARNESS_ROOT
+from tests.numsim.support.paths import TOOLS_ROOT
 
 
 def _source_environment() -> dict[str, str]:
@@ -13,7 +13,7 @@ def _source_environment() -> dict[str, str]:
     return {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            value for value in (str(TIRX_HARNESS_ROOT / "src"), inherited) if value
+            value for value in (str(TOOLS_ROOT / "src"), inherited) if value
         ),
     }
 
@@ -28,7 +28,7 @@ print(json.dumps(sorted(sys.modules)))
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=TIRX_HARNESS_ROOT,
+        cwd=TOOLS_ROOT,
         env=_source_environment(),
         check=True,
         capture_output=True,
@@ -50,7 +50,7 @@ print(json.dumps(sorted(sys.modules)))
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=TIRX_HARNESS_ROOT,
+        cwd=TOOLS_ROOT,
         env=_source_environment(),
         check=True,
         capture_output=True,

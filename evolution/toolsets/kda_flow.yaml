@@ -9,4 +9,4 @@ skills:
   - tirx-debug-kernel
   - tirx-profile-kernel
 banned_paths:
-  - tirx_harness/tests/**
+  - tools/tests/**

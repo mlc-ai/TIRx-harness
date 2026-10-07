@@ -69,7 +69,7 @@ NumSim == reference  direct mismatch
 Use high parallelism and work stealing:
 
 ```bash
-python -m pytest -q -n 16 --dist=worksteal tirx_harness/tests/numsim
+python -m pytest -q -n 16 --dist=worksteal tools/tests/numsim
 ```
 
 GPU microtests run by default. Pass `--no-run-numsim-gpu` for a CPU-only run.

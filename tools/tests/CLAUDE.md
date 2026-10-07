@@ -9,7 +9,7 @@ git submodule update --init thirdparty/tvm-rust-ext  # repo root
 ```
 
 Tests load canonical kernels from the environment's installed `tirx-kernels`
-package. Then from `tirx_harness/`:
+package. Then from `tools/`:
 
 ```bash
 python -m pip install --no-deps --no-build-isolation ..
