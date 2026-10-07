@@ -1,0 +1,12 @@
+# Lint and format settings for the tools component; the root configuration
+# does not apply below this directory.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F"]
+
+[lint.per-file-ignores]
+"src/tirx_harness/**/*.py" = ["E402", "E501", "E701", "E702", "E741", "F821", "F823", "F841", "F842"]
+"src/tirx_harness/**/__init__.py" = ["F401"]
+"tests/**/*.py" = ["E501", "E741", "F821", "F823", "F841", "F842"]
