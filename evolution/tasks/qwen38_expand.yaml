@@ -11,96 +11,33 @@ banned_paths:
   - qwen38-inference/optimizations.md
   - qwen38-inference/summary.txt
 spec: |
-  Implement one prepared complete Qwen3.8-27B EXPAND forward on
-  B200 (sm_100), using TIRx-lite for all production GPU computation. Beat
-  the independent Qwen38 baseline on full-model GPU latency. This includes
-  embedding, all 64 layers, final normalization, full-vocabulary logits,
-  and all required cache/state writes.
+  Optimize one prepared Qwen3.8-27B expand forward on B200 (sm_100):
+  embedding, all 64 layers, final normalization, full-vocabulary logits and
+  cache/state writes. Weights, activations and KV are BF16; recurrent state
+  and returned logits are FP32. Preserve the reference computation and rounding.
+  Workloads: S1-S13 from shapes.py; S11-S13 contain heterogeneous request lengths.
 
-  Source contract: https://github.com/mlc-ai/qwen38-inference at
-  05e8ef0db302a2c005994b79d9a5e78b96e2d88b, benchmark/shapes.py and
-  benchmark/benchmark.py. The packaged qwen38/model.py preserves that
-  revision's independent baseline; qwen38/shapes.py owns the workload rows.
+  Implement solution.py: setup(data) -> a no-argument callable.
+  data supplies model configuration and immutable weights, packed new-token
+  inputs/cache metadata (prepared), and real prefix state (cache).
+  Return CUDA logits [B,248320] for each request's last new token, processing
+  all new tokens and updating the required KV/convolution/recurrent state in place.
+  Preserve weights, prepared inputs, prefix KV and host cache lengths.
 
-  Multi-shape: score all 13 expand cases S1-S13. S1-S10 use tuples
-  (batch, previous_tokens, new_tokens_per_request), in case order:
-  (1,0,256), (16,0,512), (64,0,512), (256,0,128), (16,8192,256),
-  (64,8192,256), (128,4096,128), (32,32768,512), (8,98304,512),
-  (1,98304,2048). Mixed batches concatenate these request segments:
-  S11: (16,8192,256) + (64,8192,1);
-  S12: (1,98304,2048) + (128,4096,1);
-  S13: (4,0,512) + (128,4096,1).
-  Preserve heterogeneous query/prefix lengths; do not reduce mixed batches
-  to an ordinary uniform decode or prefill workload.
+  Setup may compile kernels, allocate scratch and prepack immutable weights.
+  All token/state-dependent computation belongs in the returned callable.
+  The harness times the prepared callable directly.
+  Setup, prefix preparation and restoration are outside the GPU score.
+  Timing repeatedly uses fixed prepared inputs while state evolves, restoring
+  only before each implementation's timing block.
 
-  Model: BF16 weights/activations and KV cache; hidden size 5120, MLP
-  intermediate size 17408, vocabulary 248320. Layers 3,7,...,63 use causal
-  full attention with 24 query heads, 4 KV heads, head dimension 256,
-  64-dimensional partial non-interleaved RoPE, Q/K Gemma RMSNorm and a
-  sigmoid output gate. Other layers use gated delta attention: 16 Q/K
-  heads, 48 value heads, K=V=128, SiLU causal convolution of width 4,
-  Q/K L2 normalization, g=exp(-exp(A_log)*softplus(a+dt_bias)), beta=sigmoid(b),
-  and FP32 recurrent state. For each value head (Q/K head h//3), decay
-  H[V,K] by g, update H += outer(beta*(v-H@k), k), and emit H@q/sqrt(128),
-  then apply gated RMSNorm with SiLU(z) before the output projection.
-  Preserve the baseline's state orientation and BF16 rounding. Every layer
-  applies residual additions, Gemma RMSNorm and a SwiGLU MLP. Normalization
-  epsilon and RoPE theta come from the supplied model config. No quantization,
-  layer skipping, vocabulary truncation, greedy-token-only output, or
-  replacement of real prefix states with synthetic zero/random states.
+  Every selected case must pass full-logit and full-cache checks with matching
+  shapes/dtypes, finite values and atol=rtol=0.001. Score is the geometric mean
+  of per-case median baseline GPU latency / candidate GPU latency.
 
-  Version contract: solution.py exports setup(data) -> callable. The callable
-  takes no arguments and returns FP32 logits. data exposes config, eps, dtype,
-  device, layer_types, embedding [248320,5120], layers (64 weight dictionaries),
-  final_norm [5120], lm_head [248320,5120], rope, rotary_dim, page_size=64,
-  max_context=131072, cache and prepared. Per-layer weights include input_norm,
-  post_norm, gate_up [34816,5120], down [5120,17408] and out [5120,6144].
-  Full-attention layers also have qkv [14336,5120], q_norm/k_norm [256];
-  linear-attention layers have qkvz [16384,5120], ba [96,5120], conv [10240,4],
-  A_log FP32[48], dt_bias BF16[48] and norm BF16[128]. Weights are immutable.
-
-  prepared contains packed token_ids int64[T], query_start int32[B+1],
-  state_indices int32[B], positions/locations int64[T], page_table int32[B,P],
-  sequence_lengths int32[B], kv_starts int32[B+1], has_initial bool[B],
-  is_decode, max_q_len, query_lens, last_indices and optional verify.
-  Tokens and cache metadata must be consumed on every call. Preserve request
-  boundaries and causal masking. cache.kv holds flat K/V [slots,4,256] per
-  full-attention layer with 64-token pages and a reserved zero page;
-  cache.conv holds BF16[B,10240,3] and cache.recurrent FP32[B,48,128,128]
-  per linear-attention layer. Do not alter weights, prefix KV, prepared inputs
-  or host cache lengths. Write the new KV slots and required state tensors.
-  Return logits [B,248320] for the last new token of each request, while
-  processing every new token and updating final convolution/recurrent state.
-
-  Setup may allocate scratch, compile kernels, construct shape-only metadata,
-  and prepack immutable weights. All token/state-dependent model computation
-  belongs in the returned callable. Do not call baseline model methods,
-  FlashInfer, SGLang kernels, cuBLAS/cuDNN, PyTorch tensor operators, Triton,
-  CuTe DSL, raw CUDA, or existing Qwen solutions for production computation.
-
-  Correctness: compare every full-vocabulary logit and all exposed KV,
-  convolution, recurrent and verification cache tensors against the independent
-  live baseline. Shapes and dtypes must match; every element must satisfy
-  abs(actual-reference) <= 0.001 + 0.001*abs(reference); non-finite values fail.
-  Check full logits and all cache tensors once before timing, with each
-  implementation starting from the same real prefix state. For timing, restore
-  convolution/recurrent states and zero new KV slots and verification buffers
-  once before each implementation's block, outside timing. Run consecutive
-  warmup and measured calls without restoring between calls. Prepared tokens,
-  positions and lengths stay fixed while cache state advances; this is repeated
-  prepared-call timing, not continuous generation. Final block logits must be
-  finite; do not compare them to the single-step correctness reference.
-  Prefix computation, input preparation, allocation, compilation, graph capture
-  and state restoration are excluded from timing.
-  Time the prepared forward directly, including internal graph reuse if
-  implemented; the harness does not capture an outer CUDA graph.
-  Score each case as median baseline GPU milliseconds / median candidate
-  GPU milliseconds. Run a baseline block and a candidate block; reverse their
-  order on alternate trials. Every selected case must pass; the task score is
-  the geometric mean of its case speedups. Defaults are one trial with
-  3 warmup calls and 9 retained samples per implementation.
-
-  Runtime: set QWEN38_MODEL_PATH to the real Qwen3.8-27B weight directory on
-  the GPU worker (local process or KCoral server). The baseline requires
-  the benchmark dependency group,
-  a CUDA 13 C++ compiler and a B200 with sufficient free GPU/host memory.
+  Read the locked contract sources under
+  evolution/benchmark/flashinfer_bench_evolve/tasks/qwen38/:
+  benchmark.py: tirx_prepare for data; baseline.py: new_cache for state layouts;
+  model.py: Qwen38._load_weights, _prepare_step and _forward for tensor layouts
+  and computation; shapes.py for workloads. Read reference code for semantics;
+  do not call its computation from the candidate.

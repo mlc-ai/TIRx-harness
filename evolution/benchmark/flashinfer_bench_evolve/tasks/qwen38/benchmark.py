@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import gc
+import json
 import os
 import secrets
 import statistics
+from pathlib import Path
 
 import torch
 
@@ -24,6 +26,33 @@ HARNESS_FILES = tuple(
 
 def default_config():
     return config_from_env(warmup=3, iters=9, trials=1)
+
+
+def _model_path():
+    """Reuse local weights or fetch the pinned model into the worker's HF cache."""
+    override = os.environ.get("QWEN38_MODEL_PATH")
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_dir():
+            raise FileNotFoundError(f"QWEN38_MODEL_PATH is not a directory: {path}")
+        return path
+
+    from huggingface_hub import hf_hub_download
+    from .model import MODEL_REVISION
+
+    def fetch(filename):
+        # A full commit hash lets cached files resolve without network requests.
+        # The Hub client handles file locks and interrupted downloads.
+        return Path(hf_hub_download(
+            repo_id="Qwen/Qwen3.8-27B", filename=filename, revision=MODEL_REVISION,
+        ))
+
+    print("Qwen3.8 weights: reusing the worker's Hugging Face cache; downloading missing files", flush=True)
+    index = fetch("model.safetensors.index.json")
+    shards = set(json.loads(index.read_text())["weight_map"].values())
+    for filename in ("config.json", "generation_config.json", *sorted(shards)):
+        fetch(filename)
+    return index.parent
 
 
 def make_workloads(group, config=None):
@@ -137,12 +166,9 @@ def run_suite(group, config=None, candidate_fn=None, workloads=None, candidate_p
         raise ValueError("the Qwen3.8 workload list cannot be empty")
     if cfg.warmup < 0 or cfg.iters < 1 or cfg.trials < 1:
         raise ValueError("warmup must be nonnegative; repeat and trials must be positive")
-    model_path = os.environ.get("QWEN38_MODEL_PATH")
-    if not model_path:
-        raise RuntimeError("Set QWEN38_MODEL_PATH to the Qwen3.8-27B weights on the GPU worker")
     from .model import Qwen38
 
-    model = Qwen38(model_path, device=choose_device(cfg.device), max_context=131072)
+    model = Qwen38(_model_path(), device=choose_device(cfg.device), max_context=131072)
     configured_seed = os.environ.get("QWEN38_SEED")
     seed = int(configured_seed) if configured_seed is not None else secrets.randbits(31)
     print(f"Qwen3.8 {group}: {len(entries)} cases, seed={seed}", flush=True)

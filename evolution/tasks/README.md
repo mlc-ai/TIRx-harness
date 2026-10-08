@@ -145,13 +145,24 @@ Torch ABI dependency. Its input/cache helpers are adapted in `qwen38/baseline.py
 modules share `qwen38/benchmark.py`. Upstream licenses accompany the model.
 Optimized upstream solutions are not part of the benchmark package.
 
-Install the `benchmark` dependency group and set `QWEN38_MODEL_PATH` to
-the real weight directory in the GPU process. For remote scoring this means
-the KCoral server environment: source and workload rows are uploaded, while
-weights remain on the worker. A B200, CUDA 13 C++ toolchain and sufficient
-GPU/host memory for the 27B weights, KV cache and CPU state snapshots are
-required. The model reads `config.json`, `generation_config.json`,
-`model.safetensors.index.json` and its weight shards from that directory.
+Install the `benchmark` dependency group on the GPU worker. The benchmark
+automatically resolves `Qwen/Qwen3.8-27B` at `model.MODEL_REVISION` through
+the worker's Hugging Face cache, downloading missing configuration files and
+weight shards. The cache persists across requests; use `HF_HOME` or
+`HF_HUB_CACHE` in the worker environment to select its location. Complete
+cached files resolve without network requests, and the Hub client handles
+concurrent requests and interrupted downloads. KCoral fleet members each need
+their own cache or a shared cache mount. Downloads are preparation work outside
+the GPU score, but count toward the request timeout on a cold worker.
+
+To reuse an existing weight directory, set `QWEN38_MODEL_PATH` in the GPU
+worker environment. This explicit path takes precedence over automatic
+downloads. It must contain `config.json`, `generation_config.json`,
+`model.safetensors.index.json` and the indexed shards. Source and workload rows
+are uploaded for remote scoring; weights stay on the worker. A B200, CUDA 13
+C++ toolchain and sufficient GPU/host memory for the 27B weights, KV cache and
+CPU state snapshots are required.
+
 Each task invocation loads the model once and reuses its weights across all
 selected shapes. Each shape prepares its own real prefix and cache. Separate
 task invocations load separate model instances. Set `QWEN38_SEED` to reproduce
@@ -160,16 +171,17 @@ CPU snapshots are copied directly into pinned memory; initial all-zero states
 are restored by zeroing instead of saving/transferring a snapshot.
 
 ```bash
-export QWEN38_MODEL_PATH=/path/to/Qwen3.8-27B
 uv run --package tirx-evolution evolve init --task qwen38_decode_b128_p4096_n1
 # In the prepared run, use the generated prompt's benchmark command.
 python evolution/benchmark/adapter.py candidates/qwen38/decode_b128_p4096_n1 baseline
 ```
 
-Candidates export `setup(data) -> callable`; the YAML describes model
-weights, packed inputs and cache layouts. Each call computes current logits
-and state with TIRx-lite. Prefix preparation, compilation, capture and state
-restoration are untimed. Decode uses outer CUDA graph replay; prefill/expand
+Candidates export `setup(data) -> callable`. The YAML states the task contract
+and points to `benchmark.tirx_prepare`, `model.Qwen38._prepare_step` and
+`model.Qwen38._forward` for model data, input/cache layouts and computation.
+Each call computes current logits and state with TIRx-lite. Prefix preparation,
+compilation, capture and state restoration are untimed. Decode uses outer CUDA
+graph replay; prefill/expand
 time the prepared callable directly. Scoring uses GPU-event samples
 and the upstream per-element `atol=rtol=0.001` gate on logits and caches.
 The harness checks full logits and all cache tensors once before timing, then

@@ -50,6 +50,7 @@ benchmark = [
   "flash-kda @ https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl#sha256=6f9b4dc2a2817e7bf06f62f9c2433596d2c036309e4caab2fa8065fee33ba26c ; python_version == '3.13'",
   "flash-linear-attention==0.5.2",
   "flashinfer-python @ https://github.com/flashinfer-ai/whl/releases/download/nightly-v0.6.18-20260909/flashinfer_python-0.6.18.dev20260909-py3-none-any.whl#sha256=02b1c431a1f5c1dc6ad0bfdc490261a07a8a0b71ffb12767f4e34e6113c33142",
+  "huggingface-hub>=1.0",
   "safetensors==0.8.0",
   "torch @ https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=0b059371a41b7c868589b00ff60a9f72118bc9b3c0bf12e820c06eb2a3aab55b ; python_version == '3.12'",
   "torch @ https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl#sha256=c083c08cf72c207fefbd8bfca4935f8830af38cb1c6b9548bd589939b73f56c4 ; python_version == '3.13'",
