@@ -17,7 +17,7 @@ from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
 
 ROOT = Path(__file__).resolve().parent
-FRONTEND = ROOT / "tirx_harness" / "frontend-rs"
+FRONTEND = ROOT / "tools" / "frontend-rs"
 SKILLS = ROOT / "skills"
 DEPENDENCY_GROUPS = tomllib.loads((ROOT / "pyproject.toml").read_text())["dependency-groups"]
 
@@ -83,7 +83,7 @@ class RustBuildExt(build_ext):
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("target", "thirdparty"),
             )
-            shutil.copy2(ROOT / "tirx_harness/src/tirx_harness/numsim/dtype_registry.json", staging)
+            shutil.copy2(ROOT / "tools/src/tirx_harness/numsim/dtype_registry.json", staging)
             bindings = staging / "thirdparty" / "tvm-rust-ext"
             revision = copy_thirdparty(bindings)
             env = os.environ.copy()
@@ -154,7 +154,7 @@ class SkillsBuildPy(build_py):
 class RustSdist(sdist):
     def make_release_tree(self, base_dir: str, files: list[str]) -> None:
         super().make_release_tree(base_dir, files)
-        copy_thirdparty(Path(base_dir) / "tirx_harness/frontend-rs/thirdparty/tvm-rust-ext")
+        copy_thirdparty(Path(base_dir) / "tools/frontend-rs/thirdparty/tvm-rust-ext")
 
 
 setup(

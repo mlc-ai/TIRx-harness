@@ -6,8 +6,8 @@ import tirx_harness.numsim as numsim_package
 
 
 NUMSIM_TEST_ROOT = Path(__file__).resolve().parents[1]
-TIRX_HARNESS_ROOT = NUMSIM_TEST_ROOT.parents[1]
-REPO_ROOT = TIRX_HARNESS_ROOT.parent
+TOOLS_ROOT = NUMSIM_TEST_ROOT.parents[1]
+REPO_ROOT = TOOLS_ROOT.parent
 NUMSIM_PACKAGE_ROOT = Path(numsim_package.__file__).resolve().parent
 ENGINE_ROOT = NUMSIM_PACKAGE_ROOT / "engine-rs"
 
@@ -26,6 +26,6 @@ __all__ = [
     "NUMSIM_PACKAGE_ROOT",
     "NUMSIM_TEST_ROOT",
     "REPO_ROOT",
-    "TIRX_HARNESS_ROOT",
+    "TOOLS_ROOT",
     "find_test_file",
 ]

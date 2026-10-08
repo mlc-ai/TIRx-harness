@@ -11,12 +11,12 @@ from pathlib import Path
 import tvm
 import tvm_ffi
 
-from tests.numsim.support.paths import REPO_ROOT, TIRX_HARNESS_ROOT
+from tests.numsim.support.paths import REPO_ROOT, TOOLS_ROOT
 
 
 def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     project_root = REPO_ROOT
-    source_package = TIRX_HARNESS_ROOT / "src" / "tirx_harness" / "numsim"
+    source_package = TOOLS_ROOT / "src" / "tirx_harness" / "numsim"
     tvm_python_root = Path(tvm.__file__).resolve().parent.parent
     tvm_ffi_root = Path(tvm_ffi.__file__).resolve().parent.parent
     env = os.environ.copy()
@@ -36,11 +36,11 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     project = next(unpacked.iterdir())
     project_metadata = tomllib.loads((project / "pyproject.toml").read_text())["project"]
     assert project_metadata["name"] == "tirx-harness"
-    assert not (project / "tirx_harness" / "setup.py").exists()
+    assert not (project / "tools" / "setup.py").exists()
 
     # The archive must preserve the pinned upstream bindings byte for byte.
     original_bindings = project_root / "thirdparty" / "tvm-rust-ext" / "src"
-    bundled_bindings = project / "tirx_harness" / "frontend-rs" / "thirdparty" / "tvm-rust-ext" / "src"
+    bundled_bindings = project / "tools" / "frontend-rs" / "thirdparty" / "tvm-rust-ext" / "src"
     for original in original_bindings.rglob("*.rs"):
         bundled = bundled_bindings / original.relative_to(original_bindings)
         assert bundled.read_bytes() == original.read_bytes(), original.name

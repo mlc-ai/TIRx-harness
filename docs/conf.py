@@ -23,7 +23,7 @@ myst_heading_anchors = 5
 
 # Read source without importing the harness or its native dependencies. The
 # reference pages select user-facing objects instead of publishing every module.
-autoapi_dirs = [str(Path(__file__).resolve().parents[1] / "tirx_harness/src/tirx_harness")]
+autoapi_dirs = [str(Path(__file__).resolve().parents[1] / "tools/src/tirx_harness")]
 autoapi_generate_api_docs = False
 autoapi_add_toctree_entry = False
 autosummary_generate = False

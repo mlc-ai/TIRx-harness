@@ -49,7 +49,7 @@ to run two agents in the prepared workspace.
 | `tests/` | Benchmark entry points and remote-tool regressions |
 
 `preparation/` configures the run; it is not the NumSim execution engine and
-does not schedule agents. Analysis implementation stays in `tirx_harness/`.
+does not schedule agents. Analysis implementation stays in `tools/`.
 Benchmark inputs, correctness and timing implementations stay in
 `benchmark/flashinfer_bench_evolve/`, including task metadata and workload blobs.
 The package was imported from `mlc-ai/flashinfer-bench-evolve` at commit
@@ -66,9 +66,9 @@ kda_flow_runs/<run-id>/
   PROMPT.md
   worktree/
     .venv/                          isolated Python environment for this run
-    .claude/skills/                  five configured skills
-    .agents/skills/                  links to those skills
-    tirx_harness/                     repository source (runtime uses the installed package)
+    .claude/skills/                 five configured skills
+    .agents/skills/                 links to those skills
+    evolution/  tools/  docs/ ...   pinned repository checkout
     candidates/<workload>/
       scratch/<candidate>/solution.py
       frontier/<candidate>/solution.py

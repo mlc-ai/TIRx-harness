@@ -71,21 +71,22 @@ no-build-package = ["kcoral", "tirx-kernels"]
 members = ["evolution"]
 
 [tool.setuptools.packages.find]
-where = ["tirx_harness/src"]
+where = ["tools/src"]
 include = ["tirx_harness*"]
 
 [tool.setuptools_scm]
 
 [tool.pytest.ini_options]
+addopts = "--dist=loadgroup --no-loadscope-reorder"
 # Repo-relative paths added to sys.path so pytest imports the repo packages
 # without requiring the user to set PYTHONPATH each time. TIR itself
 # (`tvm.tirx`) is NOT listed here — install the compatible apache-tvm and
 # apache-tvm-ffi wheels pinned above.
 # Canonical kernels come from the installed tirx-kernels package.
-pythonpath = [".", "tirx_harness/src", "tirx_harness"]
+pythonpath = [".", "tools/src", "tools"]
 markers = [
   "performance: performance regression scheduled according to the requested pytest worker count",
-  "numsim_gpu: live same-kernel NumSim-vs-GPU microtest",
+  "numsim_gpu: live same-kernel NumSim-vs-GPU microtest; enabled by default and skipped by --no-run-numsim-gpu",
 ]
 
 [tool.ruff]
@@ -121,22 +122,6 @@ unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402", "F401", "F403", "F405"]
-# Tooling contains generated source strings and compatibility-heavy parsers.
-"tirx_harness/**/*.py" = [
-  "E402",
-  "E501",
-  "E701",
-  "E702",
-  "E741",
-  "F821",
-  "F823",
-  "F841",
-  "F842",
-  "RUF001",
-  "RUF002",
-  "RUF003",
-  "RUF012",
-]
 # Only what actually fires; blanket semantic-rule waivers would mask new bugs.
 # guards.py embeds hook source as string templates.
 "evolution/preparation/**/*.py" = ["E501"]

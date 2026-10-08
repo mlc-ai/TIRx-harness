@@ -42,7 +42,7 @@ NumSim transpiles TIRx to native Rust and executes a numerical GPU model; native
 - Do not weaken existing NumSim tests to accommodate native analysis. Preserve or migrate every non-deprecated contract; intentional contract changes need proof and explicit test deltas.
 - Corpus goldens record every finding from a run, including simultaneous statuses, with kind and source evidence; alternatives require a documented genuine source of variability.
 - Run focused tests while iterating, then the parent package gate and relevant wiki/corpus gates; deliver no unexpected `incomplete` and report exact blockers.
-- Engine changes also run `(cd tirx_harness/src/tirx_harness/numsim/engine-rs && cargo test --all-features)`.
+- Engine changes also run `(cd tools/src/tirx_harness/numsim/engine-rs && cargo test --all-features)`.
 - Benchmark the named default optimized artifact and compare like-for-like per-kernel phase timings; test worker scaling only when relevant. Gate changes require clean measurements; temporary relaxation must be explicit and scoped.
 - Preserve unaffected numerical/report/performance behavior; name, justify, and test intentional deltas, especially checker conflict classes or memory-ordering scope.
 - Keep each PR scoped to the requested tool; justify shared/cross-tool changes and preserve excluded or experimental work separately.

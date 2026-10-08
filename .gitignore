@@ -12,16 +12,16 @@ __pycache__/
 /build/
 /dist/
 /*.egg-info/
-tirx_harness/build/
-tirx_harness/frontend-rs/target/
-tirx_harness/frontend-rs/thirdparty/
-tirx_harness/dist/
-tirx_harness/src/*.egg-info/
+tools/build/
+tools/frontend-rs/target/
+tools/frontend-rs/thirdparty/
+tools/dist/
+tools/src/*.egg-info/
 /evolution/*.egg-info/
-tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.*.so
-tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.pyd
-tirx_harness/src/tirx_harness/numsim/_tvm_rust_ext.identity
-tirx_harness/src/tirx_harness/numsim/_thirdparty_licenses/
+tools/src/tirx_harness/numsim/_tvm_rust_ext.*.so
+tools/src/tirx_harness/numsim/_tvm_rust_ext.pyd
+tools/src/tirx_harness/numsim/_tvm_rust_ext.identity
+tools/src/tirx_harness/numsim/_thirdparty_licenses/
 
 # KDA run outputs
 /kda_flow_runs/

@@ -1,6 +1,6 @@
 # Test layout
 
-`tirx_harness/tests/` contains the Python/Pytest integration and corpus tests for
+`tools/tests/` contains the Python/Pytest integration and corpus tests for
 the installed `tirx_harness` package.
 
 The embedded NumSim Rust crate follows Cargo's conventional split:
