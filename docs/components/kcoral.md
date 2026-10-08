@@ -37,7 +37,7 @@ Configure their paths in the server's startup environment. For example, if
 the server's models are stored under `/data/models`, start it with:
 
 ```bash
-TIRX_MODELS_DIR=/data/models kcoral server \
+HF_MODEL_PATH=/data/models kcoral server \
   --sandbox bubblewrap --sandbox-readonly-path /data/models
 ```
 

@@ -30,7 +30,7 @@ def default_config():
 
 def _model_path():
     """Read weights from the model root, downloading missing files there."""
-    root = Path(os.environ.get("TIRX_MODELS_DIR", "/raid/catalyst/models")).expanduser()
+    root = Path(os.environ.get("HF_MODEL_PATH", "/raid/catalyst/models")).expanduser()
     path = root / "Qwen3.8-27B"
 
     def fetch(filename):

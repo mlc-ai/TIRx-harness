@@ -122,7 +122,7 @@ contract or `task` when the task spec defines another implementation language.
 
 ## Model weights
 
-`TIRX_MODELS_DIR` is the model root on the machine executing the benchmark;
+`HF_MODEL_PATH` is the harness's model root on the machine executing the benchmark;
 it defaults to `/raid/catalyst/models`. Set it in the local benchmark shell
 or, for remote runs, the GPU worker's startup environment. Remote clients
 submit the task and candidate without needing the worker's filesystem paths.
