@@ -48,9 +48,9 @@ the server, including any enclosing container.
 
 The read-only mount exposes prepared weights to workers. Bubblewrap workers
 have isolated networking and a request workspace that is cleared between
-requests, so prepare the model files outside the sandbox. Their default
-Hugging Face cache is inside that workspace. KCoral's `--disk-cache-dir`
-controls uploaded-file caching, independently of model weight locations.
+requests, so prepare missing model files outside the sandbox in the same
+model root before starting benchmarks. KCoral's `--disk-cache-dir` controls
+uploaded-file caching, independently of model weight locations.
 
 ## Framework adapters
 

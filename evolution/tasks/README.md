@@ -122,36 +122,28 @@ contract or `task` when the task spec defines another implementation language.
 
 ## Model weights
 
-Model weights live on the machine executing the benchmark. Set path variables
-in that process's environment: the local benchmark shell or, for remote runs,
-the GPU worker's startup environment. Remote clients submit the task and
-candidate without needing the worker's filesystem paths.
+`TIRX_MODELS_DIR` is the model root on the machine executing the benchmark;
+it defaults to `/raid/catalyst/models`. Set it in the local benchmark shell
+or, for remote runs, the GPU worker's startup environment. Remote clients
+submit the task and candidate without needing the worker's filesystem paths.
 
-Model workloads resolve weights in this order:
+Each workload uses its declared subdirectory under this root. Existing files
+are read directly; missing files are downloaded from Hugging Face at the
+workload's pinned revision into the same subdirectory. This also completes
+partial downloads on a later invocation. Reading a complete model needs no
+network access or filesystem writes. `HF_HOME` and `HF_HUB_CACHE` do not select
+the benchmark's model directory.
 
-1. The workload's model-specific path override, if set. An invalid directory
-   raises an error rather than falling back to another model location.
-2. The workload's model subdirectory under `TIRX_MODELS_DIR`, which defaults
-   to `/raid/catalyst/models`.
-3. The worker's Hugging Face cache, downloading missing files at the
-   workload's pinned revision when network access is available.
+Each model's section below declares its subdirectory, source, revision and
+required files. Provisioned files must match that revision; existing files
+are reused without version or integrity checks. Install the `benchmark`
+dependency group on the GPU worker.
 
-Each model's section below declares its subdirectory, override variable,
-source, revision and required files. Local model directories must already be
-complete and match that revision; the benchmark reads them without downloading
-or repairing files. Install the `benchmark` dependency group on the GPU worker.
-
-Downloads go to the Hugging Face cache, not `TIRX_MODELS_DIR`. `HF_HOME` or
-`HF_HUB_CACHE` selects that cache location. Complete cached snapshots resolve
-offline; downloads require network access and a
-writable cache. Cache reuse across requests depends on persistent storage
-visible to each worker. Request workspaces that are cleared between runs do
-not preserve downloads. Downloads count toward the request timeout, outside
-the GPU score.
-
-A read-only, offline worker must have a complete model directory or cached
-snapshot mounted before running. Fleet members each need access to the model
-files. For KCoral's server configuration example, see
+Downloads require network access and a writable model directory. To retain
+weights across requests, keep the model root on persistent storage visible
+to each worker. A read-only, offline worker must have the complete model
+mounted before running. Downloads count toward the request timeout, outside
+the GPU score. For KCoral's server configuration example, see
 [Model weights on the worker](../../docs/components/kcoral.md#model-weights-on-the-worker).
 
 ## Qwen3.8 full-model workloads
@@ -184,7 +176,6 @@ These tasks follow the [model weights convention](#model-weights):
 | Model setting | Value |
 | --- | --- |
 | Subdirectory | `Qwen3.8-27B` |
-| Path override | `QWEN38_MODEL_PATH` |
 | Hugging Face repository | `Qwen/Qwen3.8-27B` |
 | Pinned revision | `MODEL_REVISION` in [qwen38/model.py](../benchmark/flashinfer_bench_evolve/tasks/qwen38/model.py) |
 

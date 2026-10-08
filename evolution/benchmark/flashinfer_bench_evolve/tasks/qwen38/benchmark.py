@@ -29,35 +29,29 @@ def default_config():
 
 
 def _model_path():
-    """Reuse local weights or fetch the pinned model into the worker's HF cache."""
-    override = os.environ.get("QWEN38_MODEL_PATH")
-    if override:
-        path = Path(override).expanduser()
-        if not path.is_dir():
-            raise FileNotFoundError(f"QWEN38_MODEL_PATH is not a directory: {path}")
-        return path
-
+    """Read weights from the model root, downloading missing files there."""
     root = Path(os.environ.get("TIRX_MODELS_DIR", "/raid/catalyst/models")).expanduser()
     path = root / "Qwen3.8-27B"
-    if path.is_dir():
-        return path
-
-    from huggingface_hub import hf_hub_download
-    from .model import MODEL_REVISION
 
     def fetch(filename):
-        # A full commit hash lets cached files resolve without network requests.
-        # The Hub client handles file locks and interrupted downloads.
-        return Path(hf_hub_download(
-            repo_id="Qwen/Qwen3.8-27B", filename=filename, revision=MODEL_REVISION,
-        ))
+        file = path / filename
+        # Complete, provisioned weights also work on read-only offline workers.
+        if not file.is_file():
+            from huggingface_hub import hf_hub_download
+            from .model import MODEL_REVISION
 
-    print("Qwen3.8 weights: reusing the worker's Hugging Face cache; downloading missing files", flush=True)
+            print(f"Qwen3.8 weights: downloading {filename} to {path}", flush=True)
+            hf_hub_download(
+                repo_id="Qwen/Qwen3.8-27B", filename=filename,
+                revision=MODEL_REVISION, local_dir=path,
+            )
+        return file
+
     index = fetch("model.safetensors.index.json")
     shards = set(json.loads(index.read_text())["weight_map"].values())
     for filename in ("config.json", "generation_config.json", *sorted(shards)):
         fetch(filename)
-    return index.parent
+    return path
 
 
 def make_workloads(group, config=None):
