@@ -120,6 +120,40 @@ contract or `task` when the task spec defines another implementation language.
 - Shared prior-solution corpora belong in `evolution/toolsets/kda_flow.yaml`;
   workload-specific bans belong in the task YAML.
 
+## Model weights
+
+Model weights live on the machine executing the benchmark. Set path variables
+in that process's environment: the local benchmark shell or, for remote runs,
+the GPU worker's startup environment. Remote clients submit the task and
+candidate without needing the worker's filesystem paths.
+
+Model workloads resolve weights in this order:
+
+1. The workload's model-specific path override, if set. An invalid directory
+   raises an error rather than falling back to another model location.
+2. The workload's model subdirectory under `TIRX_MODELS_DIR`, which defaults
+   to `/raid/catalyst/models`.
+3. The worker's Hugging Face cache, downloading missing files at the
+   workload's pinned revision when network access is available.
+
+Each model's section below declares its subdirectory, override variable,
+source, revision and required files. Local model directories must already be
+complete and match that revision; the benchmark reads them without downloading
+or repairing files. Install the `benchmark` dependency group on the GPU worker.
+
+Downloads go to the Hugging Face cache, not `TIRX_MODELS_DIR`. `HF_HOME` or
+`HF_HUB_CACHE` selects that cache location. Complete cached snapshots resolve
+offline; downloads require network access and a
+writable cache. Cache reuse across requests depends on persistent storage
+visible to each worker. Request workspaces that are cleared between runs do
+not preserve downloads. Downloads count toward the request timeout, outside
+the GPU score.
+
+A read-only, offline worker must have a complete model directory or cached
+snapshot mounted before running. Fleet members each need access to the model
+files. For KCoral's server configuration example, see
+[Model weights on the worker](../../docs/components/kcoral.md#model-weights-on-the-worker).
+
 ## Qwen3.8 full-model workloads
 
 These six TIRx-lite tasks score a prepared Qwen3.8-27B forward, including
@@ -145,22 +179,18 @@ Torch ABI dependency. Its input/cache helpers are adapted in `qwen38/baseline.py
 modules share `qwen38/benchmark.py`. Upstream licenses accompany the model.
 Optimized upstream solutions are not part of the benchmark package.
 
-Install the `benchmark` dependency group on the GPU worker. The benchmark
-automatically resolves `Qwen/Qwen3.8-27B` at `model.MODEL_REVISION` through
-the worker's Hugging Face cache, downloading missing configuration files and
-weight shards. The cache persists across requests; use `HF_HOME` or
-`HF_HUB_CACHE` in the worker environment to select its location. Complete
-cached files resolve without network requests, and the Hub client handles
-concurrent requests and interrupted downloads. KCoral fleet members each need
-their own cache or a shared cache mount. Downloads are preparation work outside
-the GPU score, but count toward the request timeout on a cold worker.
+These tasks follow the [model weights convention](#model-weights):
 
-To reuse an existing weight directory, set `QWEN38_MODEL_PATH` in the GPU
-worker environment. This explicit path takes precedence over automatic
-downloads. It must contain `config.json`, `generation_config.json`,
-`model.safetensors.index.json` and the indexed shards. Source and workload rows
-are uploaded for remote scoring; weights stay on the worker. A B200, CUDA 13
-C++ toolchain and sufficient GPU/host memory for the 27B weights, KV cache and
+| Model setting | Value |
+| --- | --- |
+| Subdirectory | `Qwen3.8-27B` |
+| Path override | `QWEN38_MODEL_PATH` |
+| Hugging Face repository | `Qwen/Qwen3.8-27B` |
+| Pinned revision | `MODEL_REVISION` in [qwen38/model.py](../benchmark/flashinfer_bench_evolve/tasks/qwen38/model.py) |
+
+The model directory must contain `config.json`, `generation_config.json`,
+`model.safetensors.index.json` and the indexed shards. A B200, CUDA 13 C++
+toolchain and sufficient GPU/host memory for the 27B weights, KV cache and
 CPU state snapshots are required.
 
 Each task invocation loads the model once and reuses its weights across all

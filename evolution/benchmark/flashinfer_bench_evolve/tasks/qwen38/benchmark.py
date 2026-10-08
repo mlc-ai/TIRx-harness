@@ -37,6 +37,11 @@ def _model_path():
             raise FileNotFoundError(f"QWEN38_MODEL_PATH is not a directory: {path}")
         return path
 
+    root = Path(os.environ.get("TIRX_MODELS_DIR", "/raid/catalyst/models")).expanduser()
+    path = root / "Qwen3.8-27B"
+    if path.is_dir():
+        return path
+
     from huggingface_hub import hf_hub_download
     from .model import MODEL_REVISION
 

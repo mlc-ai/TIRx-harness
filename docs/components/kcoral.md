@@ -29,6 +29,29 @@ Server setup is described in the {kcoral}`installation guide <README.md>`.
 Run the commands below from the repository root or a generated worktree root,
 replacing `http://your-server:8000` with your endpoint.
 
+### Model weights on the worker
+
+Model workloads follow the harness's
+{repo}`model weights convention <evolution/tasks/README.md#model-weights>`.
+Configure their paths in the server's startup environment. For example, if
+the server's models are stored under `/data/models`, start it with:
+
+```bash
+TIRX_MODELS_DIR=/data/models kcoral server \
+  --sandbox bubblewrap --sandbox-readonly-path /data/models
+```
+
+Keep the model subdirectories described by that convention. Moving to another
+machine changes the server's root path and mount; client commands, task YAMLs
+and candidates stay the same. Paths must exist in the environment running
+the server, including any enclosing container.
+
+The read-only mount exposes prepared weights to workers. Bubblewrap workers
+have isolated networking and a request workspace that is cleared between
+requests, so prepare the model files outside the sandbox. Their default
+Hugging Face cache is inside that workspace. KCoral's `--disk-cache-dir`
+controls uploaded-file caching, independently of model weight locations.
+
 ## Framework adapters
 
 For the Python and profiling examples, put your launch scripts, candidate
