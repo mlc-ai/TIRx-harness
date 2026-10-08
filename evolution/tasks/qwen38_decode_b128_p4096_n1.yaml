@@ -1,0 +1,98 @@
+name: qwen38_decode_b128_p4096_n1
+workload_dir: candidates/qwen38/decode_b128_p4096_n1
+kernel_authoring: TIRx-lite
+sota_baseline:
+  name: qwen38_independent_full_model
+bench_timeout_s: 3600
+banned_paths:
+  - qwen38-inference/decode/**
+  - qwen38-inference/prefill/**
+  - qwen38-inference/expand/**
+  - qwen38-inference/optimizations.md
+  - qwen38-inference/summary.txt
+spec: |
+  Implement one prepared complete Qwen3.8-27B DECODE forward on
+  B200 (sm_100), using TIRx-lite for all production GPU computation. Beat
+  the independent Qwen38 baseline on full-model GPU latency. This includes
+  embedding, all 64 layers, final normalization, full-vocabulary logits,
+  and all required cache/state writes.
+
+  Source contract: https://github.com/mlc-ai/qwen38-inference at
+  05e8ef0db302a2c005994b79d9a5e78b96e2d88b, benchmark/shapes.py and
+  benchmark/benchmark.py. The packaged qwen38/model.py preserves that
+  revision's independent baseline; qwen38/shapes.py owns the workload rows.
+
+  Single-shape: pin official case D4 only: B=128, previous_tokens=4096,
+  new_tokens_per_request=1. Total new tokens T=128; ordinary decode.
+
+  Model: BF16 weights/activations and KV cache; hidden size 5120, MLP
+  intermediate size 17408, vocabulary 248320. Layers 3,7,...,63 use causal
+  full attention with 24 query heads, 4 KV heads, head dimension 256,
+  64-dimensional partial non-interleaved RoPE, Q/K Gemma RMSNorm and a
+  sigmoid output gate. Other layers use gated delta attention: 16 Q/K
+  heads, 48 value heads, K=V=128, SiLU causal convolution of width 4,
+  Q/K L2 normalization, g=exp(-exp(A_log)*softplus(a+dt_bias)), beta=sigmoid(b),
+  and FP32 recurrent state. For each value head (Q/K head h//3), decay
+  H[V,K] by g, update H += outer(beta*(v-H@k), k), and emit H@q/sqrt(128),
+  then apply gated RMSNorm with SiLU(z) before the output projection.
+  Preserve the baseline's state orientation and BF16 rounding. Every layer
+  applies residual additions, Gemma RMSNorm and a SwiGLU MLP. Normalization
+  epsilon and RoPE theta come from the supplied model config. No quantization,
+  layer skipping, vocabulary truncation, greedy-token-only output, or
+  replacement of real prefix states with synthetic zero/random states.
+
+  Version contract: solution.py exports setup(data) -> callable. The callable
+  takes no arguments and returns FP32 logits. data exposes config, eps, dtype,
+  device, layer_types, embedding [248320,5120], layers (64 weight dictionaries),
+  final_norm [5120], lm_head [248320,5120], rope, rotary_dim, page_size=64,
+  max_context=131072, cache and prepared. Per-layer weights include input_norm,
+  post_norm, gate_up [34816,5120], down [5120,17408] and out [5120,6144].
+  Full-attention layers also have qkv [14336,5120], q_norm/k_norm [256];
+  linear-attention layers have qkvz [16384,5120], ba [96,5120], conv [10240,4],
+  A_log FP32[48], dt_bias BF16[48] and norm BF16[128]. Weights are immutable.
+
+  prepared contains packed token_ids int64[T], query_start int32[B+1],
+  state_indices int32[B], positions/locations int64[T], page_table int32[B,P],
+  sequence_lengths int32[B], kv_starts int32[B+1], has_initial bool[B],
+  is_decode, max_q_len, query_lens, last_indices and optional verify.
+  Tokens and cache metadata must be consumed on every call. Preserve request
+  boundaries and causal masking. cache.kv holds flat K/V [slots,4,256] per
+  full-attention layer with 64-token pages and a reserved zero page;
+  cache.conv holds BF16[B,10240,3] and cache.recurrent FP32[B,48,128,128]
+  per linear-attention layer. Do not alter weights, prefix KV, prepared inputs
+  or host cache lengths. Write the new KV slots and required state tensors.
+  Return logits FP32[128,248320] and update final convolution/recurrent
+  states. This case does not allocate four-position verification buffers.
+
+  Setup may allocate scratch, compile kernels, construct shape-only metadata,
+  and prepack immutable weights. All token/state-dependent model computation
+  belongs in the returned callable. Do not call baseline model methods,
+  FlashInfer, SGLang kernels, cuBLAS/cuDNN, PyTorch tensor operators, Triton,
+  CuTe DSL, raw CUDA, or existing Qwen solutions for production computation.
+
+  Correctness: compare every full-vocabulary logit and all exposed KV,
+  convolution, recurrent and verification cache tensors against the independent
+  live baseline. Shapes and dtypes must match; every element must satisfy
+  abs(actual-reference) <= 0.001 + 0.001*abs(reference); non-finite values fail.
+  Check full logits and all cache tensors once before timing, with each
+  implementation starting from the same real prefix state. For timing, restore
+  convolution/recurrent states and zero new KV slots and verification buffers
+  once before each implementation's block, outside timing. Run consecutive
+  warmup and measured calls without restoring between calls. Prepared tokens,
+  positions and lengths stay fixed while cache state advances; this is repeated
+  prepared-call timing, not continuous generation. Final block logits must be
+  finite; do not compare them to the single-step correctness reference.
+  Prefix computation, input preparation, allocation, compilation, graph capture
+  and state restoration are excluded from timing.
+  Decode uses CUDA graph replay for both implementations; setup and the
+  callable must be graph-capture compatible.
+  Score each case as median baseline GPU milliseconds / median candidate
+  GPU milliseconds. Run a baseline block and a candidate block; reverse their
+  order on alternate trials. Every selected case must pass; the task score is
+  the geometric mean of its case speedups. Defaults are one trial with
+  3 warmup calls and 9 retained samples per implementation.
+
+  Runtime: set QWEN38_MODEL_PATH to the real Qwen3.8-27B weight directory on
+  the GPU worker (local process or KCoral server). The baseline requires
+  the benchmark dependency group,
+  a CUDA 13 C++ compiler and a B200 with sufficient free GPU/host memory.
