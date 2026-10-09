@@ -20,6 +20,7 @@ TASK_NAME = "fa4_forward"
 ATOL = 5e-2
 RTOL = 5e-2
 REQUIRED_MATCHED_RATIO = 0.999
+REQUIRED_RMS_ERROR_RATIOS = (0.2,)
 
 
 def default_config() -> BenchConfig:
@@ -150,6 +151,7 @@ def run_suite(
         atol=ATOL,
         rtol=RTOL,
         required_matched_ratio=REQUIRED_MATCHED_RATIO,
+        required_rms_error_ratios=REQUIRED_RMS_ERROR_RATIOS,
         group_axis="seq_len",
         correctness_runs=cfg.correctness_runs,
         check_after_timing=cfg.check_after_timing,
