@@ -37,20 +37,16 @@ Configure their paths in the server's startup environment. For example, if
 the server's models are stored under `/data/models`, start it with:
 
 ```bash
-HF_MODEL_PATH=/data/models kcoral server \
-  --sandbox bubblewrap --sandbox-readonly-path /data/models
+HF_MODEL_PATH=/data/models kcoral server --sandbox none
 ```
 
 Keep the model subdirectories described by that convention. Moving to another
-machine changes the server's root path and mount; client commands, task YAMLs
-and candidates stay the same. Paths must exist in the environment running
-the server, including any enclosing container.
+machine changes the server's root path; client commands, task YAMLs and
+candidates stay the same. The model root must be accessible from the server,
+including inside any enclosing container.
 
-The read-only mount exposes prepared weights to workers. Bubblewrap workers
-have isolated networking and a request workspace that is cleared between
-requests, so prepare missing model files outside the sandbox in the same
-model root before starting benchmarks. KCoral's `--disk-cache-dir` controls
-uploaded-file caching, independently of model weight locations.
+The example disables worker filesystem isolation so workers can download
+missing weights and reuse on-disk compilation caches across requests.
 
 ## Framework adapters
 
