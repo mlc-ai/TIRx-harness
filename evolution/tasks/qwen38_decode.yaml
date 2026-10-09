@@ -1,0 +1,46 @@
+name: qwen38_decode
+workload_dir: candidates/qwen38/decode
+kernel_authoring: TIRx-lite
+sota_baseline:
+  name: qwen38_independent_full_model
+bench_timeout_s: 3600
+banned_paths:
+  - qwen38-inference/decode/**
+  - qwen38-inference/prefill/**
+  - qwen38-inference/expand/**
+  - qwen38-inference/optimizations.md
+  - qwen38-inference/summary.txt
+spec: |
+  Optimize one prepared Qwen3.8-27B decode forward on B200 (sm_100):
+  embedding, all 64 layers, final normalization, full-vocabulary logits and
+  cache/state writes. Weights, activations and KV are BF16; recurrent state
+  and returned logits are FP32. Preserve the reference computation and rounding.
+  Workloads: D1-D13 from shapes.py, including four-position verification D12/D13.
+
+  Implement solution.py: setup(data) -> a no-argument callable.
+  data supplies model configuration and immutable weights, packed new-token
+  inputs/cache metadata (prepared), and real prefix state (cache).
+  Return CUDA logits [B,248320] for each request's last new token, processing
+  all new tokens and updating the required KV/convolution/recurrent state in place.
+  D12/D13 instead return [4*B,248320] for all four positions and write
+  verification convolution windows and recurrent states; preserve the persistent
+  recurrent input state as defined by the reference verification path.
+  Preserve weights, prepared inputs, prefix KV and host cache lengths.
+
+  Setup may compile kernels, allocate scratch and prepack immutable weights.
+  All token/state-dependent computation belongs in the returned callable.
+  The callable must support CUDA Graph capture; the harness times graph replay.
+  Setup, prefix preparation and restoration are outside the GPU score.
+  Timing repeatedly uses fixed prepared inputs while state evolves, restoring
+  only before each implementation's timing block.
+
+  Every selected case must pass full-logit and full-cache checks with matching
+  shapes/dtypes, finite values and atol=rtol=0.001. Score is the geometric mean
+  of per-case median baseline GPU latency / candidate GPU latency.
+
+  Read the locked contract sources under
+  evolution/benchmark/flashinfer_bench_evolve/tasks/qwen38/:
+  benchmark.py: tirx_prepare for data; baseline.py: new_cache for state layouts;
+  model.py: Qwen38._load_weights, _prepare_step and _forward for tensor layouts
+  and computation; shapes.py for workloads. Read reference code for semantics;
+  do not call its computation from the candidate.

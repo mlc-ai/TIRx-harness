@@ -67,6 +67,12 @@ PACKAGED = {
     "msa/decode": ("msa_decode", 3, 50, "all"),
     "msa/decode_b128_q16_kv4096_hq64_hkv4_d128_topk16_bf16_flat": ("msa_decode", 3, 50, "pinned"),
     "nvfp4_attention": ("nvfp4_attention", 3, 50, "all"),
+    "qwen38/decode": ("qwen38_decode", 3, 9, "all"),
+    "qwen38/decode_b128_p4096_n1": ("qwen38_decode", 3, 9, "pinned"),
+    "qwen38/prefill": ("qwen38_prefill", 3, 9, "all"),
+    "qwen38/prefill_b1_p0_n32768": ("qwen38_prefill", 3, 9, "pinned"),
+    "qwen38/expand": ("qwen38_expand", 3, 9, "all"),
+    "qwen38/expand_b64_p8192_n256": ("qwen38_expand", 3, 9, "pinned"),
     "vsa": ("vsa", 3, 50, "all"),
     "vsa_s80000_h8_d128_blk128_topk156_bf16": ("vsa", 3, 50, "pinned"),
 }
@@ -81,6 +87,9 @@ PINNED_WORKLOAD_UUIDS = {
     "mla_dsv4": "mla-dsv4-prefill-h128-swa16384-topk4x-c16384-k1024-bf16-hnd",
     "msa_prefill": "prefill_bf16_b1_q4096_kv4096_h64",
     "msa_decode": "mtp_bf16_b128_q16_kv4096_h64",
+    "qwen38_decode": "D4",
+    "qwen38_prefill": "P3",
+    "qwen38_expand": "S6",
     "vsa": "vsa-pooled-blk128-s80000-h8-topk156",
 }
 
@@ -211,17 +220,19 @@ def run_version(
 def harness_sources(task_name: str) -> dict[str, str]:
     """The pinned harness and task files one benchmark needs, verbatim, keyed by package path.
 
-    The package roots, shared benchmark_common, task benchmark/baseline, and
-    definition containing its independent correctness oracle.
+    Package roots, shared benchmark_common and task sources. Tasks sharing a
+    model harness declare its package-relative files in ``HARNESS_FILES``.
     """
 
     package = BENCH_REPO_ROOT / "flashinfer_bench_evolve"
     files = ["__init__.py", "benchmark_common.py", "tasks/__init__.py",
-             *(f"tasks/{task_name}/{name}" for name in
-               ("__init__.py", "benchmark.py", "baseline.py", "definition.json"))]
-    # A task may carry extra modules its benchmark imports lazily, such as the
-    # salted holdout probes. Ship the ones it publishes; absent files are not
-    # an error, because most tasks have none.
+             f"tasks/{task_name}/__init__.py", f"tasks/{task_name}/benchmark.py"]
+    shared_files = getattr(import_benchmark(task_name), "HARNESS_FILES", None)
+    if shared_files is None:
+        files += [f"tasks/{task_name}/{name}" for name in ("baseline.py", "definition.json")]
+    else:
+        files += list(shared_files)
+    # Some tasks also publish correctness-only probes.
     files += [
         f"tasks/{task_name}/{name}"
         for name in ("holdout.py",)

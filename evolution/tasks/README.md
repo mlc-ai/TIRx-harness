@@ -119,3 +119,99 @@ contract or `task` when the task spec defines another implementation language.
   substitute for removal.
 - Shared prior-solution corpora belong in `evolution/toolsets/kda_flow.yaml`;
   workload-specific bans belong in the task YAML.
+
+## Model weights
+
+`HF_MODEL_PATH` is the harness's model root on the machine executing the benchmark;
+it defaults to `/raid/catalyst/models`. Set it in the local benchmark shell
+or, for remote runs, the GPU worker's startup environment. Remote clients
+submit the task and candidate without needing the worker's filesystem paths.
+
+Each workload uses its declared subdirectory under this root. Existing files
+are read directly; missing files are downloaded from Hugging Face at the
+workload's pinned revision into the same subdirectory. This also completes
+partial downloads on a later invocation. Reading a complete model needs no
+network access or filesystem writes. `HF_HOME` and `HF_HUB_CACHE` do not select
+the benchmark's model directory.
+
+Each model's section below declares its subdirectory, source, revision and
+required files. Provisioned files must match that revision; existing files
+are reused without version or integrity checks. Install the `benchmark`
+dependency group on the GPU worker.
+
+Downloads require network access and a writable model directory. To retain
+weights across requests, keep the model root on persistent storage visible
+to each worker. A read-only, offline worker must have the complete model
+mounted before running. Downloads count toward the request timeout, outside
+the GPU score. For KCoral's server configuration example, see
+[Model weights on the worker](../../docs/components/kcoral.md#model-weights-on-the-worker).
+
+## Qwen3.8 full-model workloads
+
+These six TIRx-lite tasks score a prepared Qwen3.8-27B forward, including
+all 64 layers, full-vocabulary logits and cache/state writes:
+
+| Workload | Multi-shape (13 cases) | Single-shape | Selected case (batch, previous, new) |
+| --- | --- | --- | --- |
+| Decode | `qwen38_decode` | `qwen38_decode_b128_p4096_n1` | D4: (128, 4096, 1) |
+| Prefill | `qwen38_prefill` | `qwen38_prefill_b1_p0_n32768` | P3: (1, 0, 32768) |
+| Expand | `qwen38_expand` | `qwen38_expand_b64_p8192_n256` | S6: (64, 8192, 256) |
+
+`p` counts existing prefix tokens and `n` counts new tokens per request.
+The selected rows cover ordinary decode, long fresh prefill and cached
+expansion. Multi-shape decode also includes four-position verification;
+multi-shape expand includes the three heterogeneous request batches.
+The single-shape tasks use the adapter's existing `pinned` selection.
+
+The shared `qwen38/shapes.py` and independent `qwen38/model.py` are imported
+from [qwen38-inference at 05e8ef0](https://github.com/mlc-ai/qwen38-inference/tree/05e8ef0db302a2c005994b79d9a5e78b96e2d88b).
+The model imports Gemma RMSNorm directly from FlashInfer, the same BF16
+implementation used by the upstream SGLang wrappers, avoiding their compiled
+Torch ABI dependency. Its input/cache helpers are adapted in `qwen38/baseline.py`; the three task
+modules share `qwen38/benchmark.py`. Upstream licenses accompany the model.
+Optimized upstream solutions are not part of the benchmark package.
+
+These tasks follow the [model weights convention](#model-weights):
+
+| Model setting | Value |
+| --- | --- |
+| Subdirectory | `Qwen3.8-27B` |
+| Hugging Face repository | `Qwen/Qwen3.8-27B` |
+| Pinned revision | `MODEL_REVISION` in [qwen38/model.py](../benchmark/flashinfer_bench_evolve/tasks/qwen38/model.py) |
+
+The model directory must contain `config.json`, `generation_config.json`,
+`model.safetensors.index.json` and the indexed shards. A B200, CUDA 13 C++
+toolchain and sufficient GPU/host memory for the 27B weights, KV cache and
+CPU state snapshots are required.
+
+Each task invocation loads the model once and reuses its weights across all
+selected shapes. Each shape prepares its own real prefix and cache. Separate
+task invocations load separate model instances. Set `QWEN38_SEED` to reproduce
+the same inputs across invocations; by default each invocation draws a new seed.
+CPU snapshots are copied directly into pinned memory; initial all-zero states
+are restored by zeroing instead of saving/transferring a snapshot.
+
+```bash
+uv run --package tirx-evolution evolve init --task qwen38_decode_b128_p4096_n1
+# In the prepared run, use the generated prompt's benchmark command.
+python evolution/benchmark/adapter.py candidates/qwen38/decode_b128_p4096_n1 baseline
+```
+
+Candidates export `setup(data) -> callable`. The YAML states the task contract
+and points to `benchmark.tirx_prepare`, `model.Qwen38._prepare_step` and
+`model.Qwen38._forward` for model data, input/cache layouts and computation.
+Each call computes current logits and state with TIRx-lite. Prefix preparation,
+compilation, capture and state restoration are untimed. Decode uses outer CUDA
+graph replay; prefill/expand
+time the prepared callable directly. Scoring uses GPU-event samples
+and the upstream per-element `atol=rtol=0.001` gate on logits and caches.
+The harness checks full logits and all cache tensors once before timing, then
+releases those reference snapshots. Each implementation starts its timing
+block from the same saved state and runs 3 warmup calls followed by 9 retained
+samples without intermediate restoration. Prepared tokens, positions and
+lengths stay fixed while cache state advances; this measures repeated prepared
+calls, not continuous generation. Final block logits must remain finite, but
+are not compared to the single-step reference. `BENCH_TRIALS` defaults to 1;
+additional trials reverse implementation order and restore before every block.
+Baseline self-checks use the reference in both blocks. Prefix preparation,
+snapshots, transfers and correctness checks remain outside the GPU score.

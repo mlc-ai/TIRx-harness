@@ -29,6 +29,25 @@ Server setup is described in the {kcoral}`installation guide <README.md>`.
 Run the commands below from the repository root or a generated worktree root,
 replacing `http://your-server:8000` with your endpoint.
 
+### Model weights on the worker
+
+Model workloads follow the harness's
+{repo}`model weights convention <evolution/tasks/README.md#model-weights>`.
+Configure their paths in the server's startup environment. For example, if
+the server's models are stored under `/data/models`, start it with:
+
+```bash
+HF_MODEL_PATH=/data/models kcoral server --sandbox none
+```
+
+Keep the model subdirectories described by that convention. Moving to another
+machine changes the server's root path; client commands, task YAMLs and
+candidates stay the same. The model root must be accessible from the server,
+including inside any enclosing container.
+
+The example disables worker filesystem isolation so workers can download
+missing weights and reuse on-disk compilation caches across requests.
+
 ## Framework adapters
 
 For the Python and profiling examples, put your launch scripts, candidate
