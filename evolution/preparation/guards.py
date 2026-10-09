@@ -110,6 +110,17 @@ def _sanitize_banned_paths(worktree: Path, banned_paths: list[str]) -> None:
             _patch_init_for_removed_module(path.parent, name)
 
 
+def _require_banned_matches(root: Path, banned_paths: list[str]) -> None:
+    """Fail when a ban matches nothing under ``root``, such as after an upstream rename."""
+    unmatched = [
+        pattern
+        for pattern in banned_paths
+        if not any(os.path.lexists(target) for target in _banned_pattern_targets(root, pattern))
+    ]
+    if unmatched:
+        raise ValueError(f"Banned paths match nothing under {root}: {unmatched}")
+
+
 def _write_banned_paths_hook(
     hooks_dir: Path, banned_paths: list[str], allowed_prefixes: list[str] | None = None
 ) -> None:
