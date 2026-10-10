@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import stat
+import warnings
 from pathlib import Path
 
 CANONICAL_KERNELS_SOURCE_DIR = Path("tirx-kernels")
@@ -108,6 +109,17 @@ def _sanitize_banned_paths(worktree: Path, banned_paths: list[str]) -> None:
         name = path.stem if path.suffix == ".py" else path.name
         if name and name != "__init__":
             _patch_init_for_removed_module(path.parent, name)
+
+
+def _warn_unmatched_bans(root: Path, banned_paths: list[str]) -> None:
+    """Warn when a ban matches nothing under ``root``, such as after an upstream rename."""
+    unmatched = [
+        pattern
+        for pattern in banned_paths
+        if not any(os.path.lexists(target) for target in _banned_pattern_targets(root, pattern))
+    ]
+    if unmatched:
+        warnings.warn(f"Banned paths match nothing under {root}: {unmatched}", stacklevel=2)
 
 
 def _write_banned_paths_hook(

@@ -55,5 +55,6 @@ def fetch_live_references(worktree: Path, banned_paths: list[str] | None = None)
     if result.returncode:
         raise RuntimeError(f"tirx-wiki reference fetch failed: {result.stderr.strip()}")
     if banned_paths:
+        guards._warn_unmatched_bans(worktree, kernel_reference_bans(banned_paths))
         guards._sanitize_banned_paths(worktree, banned_paths)
     return [worktree / SKILL_REL / line for line in result.stdout.splitlines() if line]
