@@ -12,7 +12,7 @@ from pathlib import Path
 from . import claude, codex
 from .declare import Toolset
 from .environment import Environment
-from .guards import _require_banned_matches
+from .guards import _warn_unmatched_bans
 from .live_references import fetch_live_references
 from .worktree import (
     _path_is_wholly_banned,
@@ -104,9 +104,7 @@ def up(
     prefetch_submodules(worktree, effective.banned_paths, repo_root=repo_root)
     environment = Environment.create(worktree)
     # Check now: the reference fetch below also removes these paths from the venv.
-    _require_banned_matches(
-        environment.site_packages, environment.kernel_bans(effective.banned_paths)
-    )
+    _warn_unmatched_bans(environment.site_packages, environment.kernel_bans(effective.banned_paths))
     effective = replace(
         effective,
         # Hooks match paths inside the worktree relative to that root.

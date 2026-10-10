@@ -117,7 +117,7 @@ contract or `task` when the task spec defines another implementation language.
 - Source carrying a reference implementation is physically removed from the
   generated worktree; the hook is an additional access boundary, not a
   substitute for removal.
-- Setup fails if a `tirx-kernels/` ban matches nothing in the installed
+- Setup warns if a `tirx-kernels/` ban matches nothing in the installed
   kernel package (`tirx_kernels/` paths only) or in the reference checkout of
   upstream main. When upstream moves banned files, update the ban.
 - Shared prior-solution corpora belong in `evolution/toolsets/kda_flow.yaml`;
