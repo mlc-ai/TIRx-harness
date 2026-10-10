@@ -86,7 +86,7 @@ impl Default for ExecutionPolicy {
 /// resident.  `try_cancel` walks the launch's logical cluster IDs exactly
 /// once and returns each non-resident task to one caller.
 pub(crate) struct ClcTaskCounter {
-    next_task: AtomicUsize,
+    next_task: Vec<AtomicUsize>,
     task_count: usize,
     ctas_per_cluster: usize,
     resident_clusters: BTreeSet<usize>,
@@ -99,20 +99,28 @@ impl ClcTaskCounter {
             .filter_map(|&warp_id| topology.cluster_id_for_warp(warp_id))
             .collect();
         Self {
-            next_task: AtomicUsize::new(0),
-            task_count: topology.clusters(),
+            next_task: (0..topology.ranks()).map(|_| AtomicUsize::new(0)).collect(),
+            task_count: topology.clusters_per_rank(),
             ctas_per_cluster: topology.ctas_per_cluster(),
             resident_clusters,
         }
     }
 
-    pub(crate) fn try_cancel(&self) -> Result<u32, EngineError> {
+    /// Claim the next pending cluster of `rank`'s grid, as a rank-local CTA ID.
+    pub(crate) fn try_cancel(&self, rank: usize) -> Result<u32, EngineError> {
+        let next_task = self
+            .next_task
+            .get(rank)
+            .ok_or_else(|| EngineError::message("CLC issued by an unknown rank"))?;
         loop {
-            let task = self.next_task.fetch_add(1, AtomicOrdering::Relaxed);
+            let task = next_task.fetch_add(1, AtomicOrdering::Relaxed);
             if task >= self.task_count {
                 return Ok(u32::MAX);
             }
-            if self.resident_clusters.contains(&task) {
+            if self
+                .resident_clusters
+                .contains(&(rank * self.task_count + task))
+            {
                 continue;
             }
             let base_cta = task

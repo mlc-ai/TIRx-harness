@@ -966,10 +966,10 @@ impl<'a> Emitter<'a> {
             "smid" => Some("0_u32".to_owned()),
             "warpid" => Some("ctx.warp_id_in_cta()".to_owned()),
             "nwarpid" => Some(format!("{SM100_MAX_WARP_IDS}_usize")),
-            "ctaid.x" => Some("ctx.global_cta_id()".to_owned()),
-            "nctaid.x" => Some("ctx.topology().cta_count()".to_owned()),
-            "clusterid.x" => Some("ctx.cluster_id()".to_owned()),
-            "nclusterid.x" => Some("ctx.topology().clusters()".to_owned()),
+            "ctaid.x" => Some("ctx.kernel_cta_id()".to_owned()),
+            "nctaid.x" => Some("ctx.kernel_topology().cta_count()".to_owned()),
+            "clusterid.x" => Some("ctx.kernel_cluster_id()".to_owned()),
+            "nclusterid.x" => Some("ctx.kernel_topology().clusters()".to_owned()),
             "cluster_ctaid.x" => Some("ctx.cta_id_in_cluster()".to_owned()),
             "cluster_nctaid.x" => Some("ctx.topology().ctas_per_cluster()".to_owned()),
             "cluster_ctarank" => Some("ctx.cta_id_in_cluster()".to_owned()),
@@ -2562,6 +2562,29 @@ pub fn cuda_make_float2(emitter: &mut Emitter, call: &Decoded) -> AResult<Option
             }
         })
         .map(Some)
+}
+fn emit_launch_rank_value(
+    emitter: &mut Emitter,
+    call: &Decoded,
+    code: &'static str,
+) -> AResult<Option<RustValue>> {
+    let signature = signature(call.node, call.call)?;
+    check_signature(&signature, exact(&signature, "int32", &[]))?;
+    emitter
+        .with_call_expr(call.node, |_emitter| {
+            Ok(RustValue::new(
+                format!("({code}) as i32"),
+                "i32",
+                Uniformity::Uniform,
+            ))
+        })
+        .map(Some)
+}
+pub fn nvshmem_my_pe(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emit_launch_rank_value(emitter, call, "ctx.rank()")
+}
+pub fn nvshmem_n_pes(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emit_launch_rank_value(emitter, call, "ctx.topology().ranks()")
 }
 pub fn cuda_mov_sreg(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let signature = signature(call.node, call.call)?;

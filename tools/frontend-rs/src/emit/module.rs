@@ -386,11 +386,14 @@ fn render_kernel(
                     .expect("TensorMap parameter");
                 additions.push(format!("writes.push(buffers.{}.allocation());", code.field));
             }
-            if additions.is_empty() {
+            let rank_seed = if additions.is_empty() {
                 seed
             } else {
                 format!("{{ let mut writes = {seed}; {} writes }}", additions.join("\n"))
-            }
+            };
+            format!(
+                "{{ let mut rank_writes = Vec::new(); for buffers in rank_buffers.iter() {{ rank_writes.extend({rank_seed}); }} rank_writes }}"
+            )
         }
     };
     Ok(KernelItem {
@@ -713,7 +716,7 @@ fn backing_setup(
     }
     if shared_virtual_end != 0 {
         setup.push(format!(
-            "        let {SHARED_BACKING_FIELD} = Arc::new(allocate_cta_shared(&physical, topology, {shared_virtual_end}).map_err(|error| PyValueError::new_err(error.to_string()))?);"
+            "        let {SHARED_BACKING_FIELD} = physical.reuse_backing(|| allocate_cta_shared(&physical, topology, {shared_virtual_end})).map_err(|error| PyValueError::new_err(error.to_string()))?;"
         ));
     }
     for backing in &emitter.memory_plan.backings {
@@ -722,7 +725,7 @@ fn backing_setup(
             MemorySpace::Local => local_backings.push(backing.index),
             MemorySpace::Register => register_backings.push(backing.index),
             MemorySpace::Tmem => setup.push(format!(
-                "        let {} = Arc::new(allocate_cta_tmem(physical, topology, {}, {}).map_err(|error| PyValueError::new_err(error.to_string()))?);",
+                "        let {} = physical.reuse_backing(|| allocate_cta_tmem(physical, topology, {}, {})).map_err(|error| PyValueError::new_err(error.to_string()))?;",
                 backing.field,
                 optional(backing.tmem_lanes),
                 optional(backing.tmem_columns)
@@ -754,13 +757,13 @@ fn backing_setup(
             byte_lengths.join(", ")
         ));
         setup.push(format!(
-            "        let mut {name}_backings =\n            Vec::with_capacity({backing_lengths_name}.len());\n        for &byte_len in {backing_lengths_name} {{\n            {name}_backings.push(\n                allocate_warp_private(physical.{accessor}(), topology, byte_len)\n                .map(Arc::new)\n                .map_err(|error| PyValueError::new_err(error.to_string()))?,\n            );\n        }}"
+            "        let mut {name}_backings =\n            Vec::with_capacity({backing_lengths_name}.len());\n        for &byte_len in {backing_lengths_name} {{\n            {name}_backings.push(\n                physical.reuse_backing(|| allocate_warp_private(physical.{accessor}(), topology, byte_len))\n                .map_err(|error| PyValueError::new_err(error.to_string()))?,\n            );\n        }}"
         ));
     }
     if emitter.tmem.implicit {
         setup.extend([
             format!(
-                "        let implicit_tmem_allocations = Arc::new(allocate_cta_tmem(physical, topology, 128, {tmem_columns}).map_err(|error| PyValueError::new_err(error.to_string()))?);"
+                "        let implicit_tmem_allocations = physical.reuse_backing(|| allocate_cta_tmem(physical, topology, 128, {tmem_columns})).map_err(|error| PyValueError::new_err(error.to_string()))?;"
             ),
             "        let implicit_tmem = runtime_buffer_tmem(".to_owned(),
             format!("            implicit_tmem_allocations, 128, {tmem_columns}, 0, 4,"),
@@ -1188,7 +1191,7 @@ __NUMSIM_BODY__
 
 const EXECUTE_TEMPLATE: &str = r#"fn __NUMSIM_EXECUTE_FUNCTION__(
     physical: PhysicalMemory,
-    buffers: Arc<Kernel__NUMSIM_INDEX__Buffers>,
+    rank_buffers: Arc<Vec<Arc<Kernel__NUMSIM_INDEX__Buffers>>>,
     selection: LaunchSelection,
     max_workers: usize,
     execution_policy: ExecutionPolicy,
@@ -1204,6 +1207,7 @@ const EXECUTE_TEMPLATE: &str = r#"fn __NUMSIM_EXECUTE_FUNCTION__(
         max_workers,
         execution_policy,
         |warp, services| {
+            let buffers = rank_buffers[artifact_warp_context(&warp).rank()].clone();
             __NUMSIM_CLUSTER_BUFFERS_SELECT__
             NumSimModuleFuture(__NUMSIM_WARP_FUNCTION__(
                 warp,
@@ -1218,10 +1222,12 @@ const EXECUTE_TEMPLATE: &str = r#"fn __NUMSIM_EXECUTE_FUNCTION__(
 
 const RUN_PHASE_TEMPLATE: &str = r#"    if selected_phase.is_none() || selected_phase >= Some(__NUMSIM_INDEX___usize) {
         {
-        let topology = LaunchTopology::new(
+        let rank_inputs = extract_rank_inputs(inputs)?;
+        let topology = LaunchTopology::with_ranks(
             __NUMSIM_CLUSTERS__,
             __NUMSIM_CTAS_PER_CLUSTER__,
             __NUMSIM_WARPS_PER_CTA__,
+            rank_inputs.len(),
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let physical = PhysicalMemory::with_global(topology, global.clone());
@@ -1231,12 +1237,9 @@ const RUN_PHASE_TEMPLATE: &str = r#"    if selected_phase.is_none() || selected_
             __NUMSIM_KERNEL_COUNT___usize,
             topology,
         )?;
-        let buffers = __NUMSIM_PREPARE_FUNCTION__(
-            inputs,
-            &physical,
-            &allocation_ids,
-            topology,
-        )?;
+        let buffers = prepare_rank_buffers(&rank_inputs, &physical, |rank| {
+            __NUMSIM_PREPARE_FUNCTION__(rank, &physical, &allocation_ids, topology)
+        })?;
         let execution_policy = execution_policy.with_tmem_column_capacity(
             __NUMSIM_TMEM_COLUMNS__,
         );
@@ -1268,21 +1271,20 @@ const RUN_PHASE_TEMPLATE: &str = r#"    if selected_phase.is_none() || selected_
     }"#;
 
 const SYNC_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
-            let topology = LaunchTopology::new(
+            let rank_inputs = extract_rank_inputs(inputs)?;
+            let topology = LaunchTopology::with_ranks(
                 __NUMSIM_CLUSTERS__,
                 __NUMSIM_CTAS_PER_CLUSTER__,
                 __NUMSIM_WARPS_PER_CTA__,
+                rank_inputs.len(),
             )
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
             let physical = PhysicalMemory::with_global(topology, global.clone());
             let selection = extract_selection(subset, topology)?;
             let fixed_trace_eligible = __NUMSIM_FIXED_TRACE__;
-        let buffers = __NUMSIM_PREPARE_FUNCTION__(
-            inputs,
-            &physical,
-            &allocation_ids,
-            topology,
-        )?;
+        let rank_buffers = prepare_rank_buffers(&rank_inputs, &physical, |rank| {
+            __NUMSIM_PREPARE_FUNCTION__(rank, &physical, &allocation_ids, topology)
+        })?;
         let execution_policy = execution_policy
             .with_setmaxnreg_calling_initial_count(__NUMSIM_SETMAXNREG_POLICY__)
             .with_tmem_column_capacity(__NUMSIM_TMEM_COLUMNS__);
@@ -1310,11 +1312,12 @@ const SYNC_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
                 max_polls,
                 max_transitions,
                 |warp, physical, services| {
+                    let buffers = rank_buffers[artifact_warp_context(&warp).rank()].clone();
                     __NUMSIM_CLUSTER_BUFFERS_SELECT__
                     NumSimModuleFuture(__NUMSIM_ANALYSIS_WARP_FUNCTION__(
                         warp,
                         physical,
-                        Arc::clone(&buffers),
+                        buffers,
                         services,
                     ))
                 },
@@ -1322,20 +1325,19 @@ const SYNC_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
         }"#;
 
 const RACE_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
-            let topology = LaunchTopology::new(
+            let rank_inputs = extract_rank_inputs(inputs)?;
+            let topology = LaunchTopology::with_ranks(
                 __NUMSIM_CLUSTERS__,
                 __NUMSIM_CTAS_PER_CLUSTER__,
                 __NUMSIM_WARPS_PER_CTA__,
+                rank_inputs.len(),
             )
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
             let physical = PhysicalMemory::with_global(topology, global.clone());
             let selection = extract_selection(subset, topology)?;
-        let buffers = __NUMSIM_PREPARE_FUNCTION__(
-            inputs,
-            &physical,
-            &allocation_ids,
-            topology,
-        )?;
+        let rank_buffers = prepare_rank_buffers(&rank_inputs, &physical, |rank| {
+            __NUMSIM_PREPARE_FUNCTION__(rank, &physical, &allocation_ids, topology)
+        })?;
         let execution_policy = execution_policy
             .with_setmaxnreg_calling_initial_count(__NUMSIM_SETMAXNREG_POLICY__)
             .with_tmem_column_capacity(__NUMSIM_TMEM_COLUMNS__);
@@ -1360,11 +1362,12 @@ const RACE_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
                 max_polls,
                 max_transitions,
                 |warp, physical, services| {
+                    let buffers = rank_buffers[artifact_warp_context(&warp).rank()].clone();
                     __NUMSIM_CLUSTER_BUFFERS_SELECT__
                     NumSimModuleFuture(__NUMSIM_ANALYSIS_WARP_FUNCTION__(
                         warp,
                         physical,
-                        Arc::clone(&buffers),
+                        buffers,
                         services,
                     ))
                 },

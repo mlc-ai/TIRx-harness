@@ -8,7 +8,8 @@ use super::tensor_map_registry::RuntimeTensorMapRegistry;
 use crate::{
     bf16_bits_to_f32, f32_to_bf16_bits, f32_to_fp16_bits, fp16_bits_to_f32, profile_reset,
     profile_snapshot, AllocationId, BufferView, ExecutionStats, GlobalMemory, LaunchTopology,
-    PhysicalAllocationId, PhysicalUninitializedReadReview, WarpValue, NUMSIM_ABI_VERSION,
+    PhysicalAllocationId, PhysicalMemory, PhysicalUninitializedReadReview, WarpValue,
+    NUMSIM_ABI_VERSION,
 };
 use numsim_host_buffer::{HostByteBuffer, HostByteSource};
 use pyo3::buffer::PyBuffer;
@@ -18,6 +19,7 @@ use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBool, PyBytes, PyBytesMethods, PyDict, PyFloat, PyInt, PyList, PyModule};
 use std::fmt::Display;
+use std::sync::Arc;
 
 type ProfileSnapshot = Vec<(&'static str, u64, u64)>;
 
@@ -120,6 +122,48 @@ pub fn required_item<'py>(inputs: &Bound<'py, PyDict>, name: &str) -> PyResult<B
     inputs
         .get_item(name)?
         .ok_or_else(|| PyKeyError::new_err(format!("missing NumSim binding field '{name}'")))
+}
+
+/// Per-rank binding dictionaries of one launch.
+///
+/// A multi-rank launch carries `ranks`: one ordinary binding dictionary per
+/// device, all referencing the launch-wide `allocations` table. A launch
+/// without `ranks` is the single-device rank 0.
+pub fn extract_rank_inputs<'py>(
+    inputs: &Bound<'py, PyDict>,
+) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    let Some(ranks) = inputs.get_item("ranks")? else {
+        return Ok(vec![inputs.clone()]);
+    };
+    let count = ranks.len()?;
+    if count == 0 {
+        return Err(PyValueError::new_err("NumSim launch must contain at least one rank"));
+    }
+    (0..count)
+        .map(|rank| {
+            ranks
+                .get_item(rank)?
+                .cast_into::<PyDict>()
+                .map_err(|_| PyValueError::new_err(format!("NumSim rank {rank} bindings must be a dict")))
+        })
+        .collect()
+}
+
+/// Prepare one parameter table per rank. Launch-wide backings allocated by
+/// the first rank are replayed for every later rank.
+pub fn prepare_rank_buffers<'py, B>(
+    rank_inputs: &[Bound<'py, PyDict>],
+    physical: &PhysicalMemory,
+    mut prepare: impl FnMut(&Bound<'py, PyDict>) -> PyResult<Arc<B>>,
+) -> PyResult<Arc<Vec<Arc<B>>>> {
+    let mut buffers = Vec::with_capacity(rank_inputs.len());
+    for (rank, inputs) in rank_inputs.iter().enumerate() {
+        if rank > 0 {
+            physical.replay_backings();
+        }
+        buffers.push(prepare(inputs)?);
+    }
+    Ok(Arc::new(buffers))
 }
 
 fn extract_scalar_value<'py>(
@@ -415,8 +459,105 @@ pub fn extract_allocations(
             .bind_observed_allocation_address(address)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
     }
+    bind_multicast_windows(inputs, memory, &allocation_ids)?;
+    bind_rank_mappings(inputs, memory, &allocation_ids)?;
     rewrite_tensor_map_addresses(inputs, memory, &allocation_ids, false)?;
     Ok(allocation_ids)
+}
+
+/// Bind `rank_mappings`: per allocation, `None` or the owning rank, whether
+/// the allocation is symmetric memory, and the owner's binding name.
+fn bind_rank_mappings(
+    inputs: &Bound<'_, PyDict>,
+    memory: &GlobalMemory,
+    allocation_ids: &[AllocationId],
+) -> PyResult<()> {
+    let Some(mappings) = inputs.get_item("rank_mappings")? else {
+        return Ok(());
+    };
+    if mappings.len()? != allocation_ids.len() {
+        return Err(PyValueError::new_err(format!(
+            "rank_mappings has {} entries for {} allocations",
+            mappings.len()?,
+            allocation_ids.len()
+        )));
+    }
+    let rank_count = match inputs.get_item("ranks")? {
+        Some(ranks) => ranks.len()?,
+        None => 1,
+    };
+    for (index, &allocation) in allocation_ids.iter().enumerate() {
+        let entry = mappings.get_item(index)?;
+        if entry.is_none() {
+            continue;
+        }
+        let rank = entry.get_item("rank")?.extract::<usize>()?;
+        if rank >= rank_count {
+            return Err(PyValueError::new_err(format!(
+                "allocation {index} is mapped to rank {rank} of a {rank_count}-rank launch"
+            )));
+        }
+        let mapping = crate::memory::RankMapping {
+            rank,
+            symmetric: entry.get_item("symmetric")?.extract::<bool>()?,
+            name: Arc::from(entry.get_item("name")?.extract::<String>()?),
+        };
+        memory
+            .full_view(allocation)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .bind_rank_mapping(mapping)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Bind `multicast`: each entry names a window allocation and one replica
+/// allocation per rank, in rank order.
+fn bind_multicast_windows(
+    inputs: &Bound<'_, PyDict>,
+    memory: &GlobalMemory,
+    allocation_ids: &[AllocationId],
+) -> PyResult<()> {
+    let Some(windows) = inputs.get_item("multicast")? else {
+        return Ok(());
+    };
+    let allocation = |index: usize| {
+        allocation_ids.get(index).copied().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "multicast window references allocation {index}, but only {} exist",
+                allocation_ids.len()
+            ))
+        })
+    };
+    let rank_count = match inputs.get_item("ranks")? {
+        Some(ranks) => ranks.len()?,
+        None => 1,
+    };
+    for index in 0..windows.len()? {
+        let entry = windows.get_item(index)?;
+        let window = allocation(entry.get_item("window")?.extract::<usize>()?)?;
+        let replica_indices = entry.get_item("replicas")?.extract::<Vec<usize>>()?;
+        if replica_indices.len() != rank_count {
+            return Err(PyValueError::new_err(format!(
+                "multicast window {index} has {} replicas for {rank_count} ranks",
+                replica_indices.len()
+            )));
+        }
+        let replicas = replica_indices
+            .into_iter()
+            .map(|replica| {
+                memory
+                    .full_view(allocation(replica)?)
+                    .map_err(|error| PyValueError::new_err(error.to_string()))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        memory
+            .full_view(window)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .bind_multicast_replicas(replicas)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    }
+    Ok(())
 }
 
 fn rewrite_tensor_map_addresses(
@@ -425,7 +566,38 @@ fn rewrite_tensor_map_addresses(
     allocation_ids: &[AllocationId],
     restore_host: bool,
 ) -> PyResult<()> {
-    let buffers = required_item(inputs, "buffers")?;
+    if inputs.get_item("ranks")?.is_none() {
+        return rewrite_rank_tensor_map_addresses(
+            inputs,
+            inputs,
+            0,
+            memory,
+            allocation_ids,
+            restore_host,
+        );
+    }
+    for (rank, rank_inputs) in extract_rank_inputs(inputs)?.iter().enumerate() {
+        rewrite_rank_tensor_map_addresses(
+            inputs,
+            rank_inputs,
+            rank,
+            memory,
+            allocation_ids,
+            restore_host,
+        )?;
+    }
+    Ok(())
+}
+
+fn rewrite_rank_tensor_map_addresses(
+    inputs: &Bound<'_, PyDict>,
+    rank_inputs: &Bound<'_, PyDict>,
+    rank: usize,
+    memory: &GlobalMemory,
+    allocation_ids: &[AllocationId],
+    restore_host: bool,
+) -> PyResult<()> {
+    let buffers = required_item(rank_inputs, "buffers")?;
     let descriptor_names = buffers
         .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("NumSim buffers must be a mapping"))?
@@ -456,6 +628,14 @@ fn rewrite_tensor_map_addresses(
                 allocation_ids.len()
             ))
         })?;
+        if memory
+            .full_view(allocation)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .multicast_replicas()
+            .is_some()
+        {
+            continue;
+        }
         let data_offset = descriptor.get_item("data_offset")?.extract::<usize>()?;
         let shape = descriptor.get_item("shape")?.extract::<Vec<usize>>()?;
         let dtype = descriptor.get_item("dtype")?.extract::<String>()?;
@@ -541,6 +721,13 @@ fn rewrite_tensor_map_addresses(
                         PyValueError::new_err(format!(
                             "TensorMap host address {address:#x} is absent from prepared allocations"
                         ))
+                    })?;
+                memory
+                    .full_view(allocation_ids[runtime_index])
+                    .map_err(|error| PyValueError::new_err(error.to_string()))?
+                    .check_reachable_from(rank)
+                    .map_err(|error| {
+                        PyValueError::new_err(format!("TensorMap '{name}': {error}"))
                     })?;
                 image.relocate(allocation_ids[runtime_index], byte_offset);
             }

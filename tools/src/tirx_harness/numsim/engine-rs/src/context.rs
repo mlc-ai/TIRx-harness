@@ -80,6 +80,26 @@ impl WarpContext {
         self.cluster_id * self.topology.ctas_per_cluster() + self.cta_id_in_cluster
     }
 
+    /// Device rank executing this warp.
+    pub const fn rank(self) -> usize {
+        self.topology.rank_of_cluster(self.cluster_id)
+    }
+
+    /// Kernel-visible cluster index within this warp's rank grid.
+    pub const fn kernel_cluster_id(self) -> usize {
+        self.cluster_id % self.topology.clusters_per_rank()
+    }
+
+    /// Kernel-visible linear CTA index within this warp's rank grid.
+    pub const fn kernel_cta_id(self) -> usize {
+        self.kernel_cluster_id() * self.topology.ctas_per_cluster() + self.cta_id_in_cluster
+    }
+
+    /// Kernel-visible launch dimensions of one rank.
+    pub fn kernel_topology(self) -> LaunchTopology {
+        self.topology.rank_local()
+    }
+
     pub const fn warp_id_in_cta(self) -> usize {
         self.warp_id_in_cta
     }

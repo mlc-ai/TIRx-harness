@@ -15,7 +15,14 @@ import numpy as np
 from threadpoolctl import threadpool_limits
 
 from .abi import abi_metadata
-from .bindings import PreparedBindings, prepare_bindings
+from .bindings import (
+    MulticastWindow,
+    PreparedBindings,
+    SymmetricBuffer,
+    prepare_bindings,
+    prepare_rank_bindings,
+    rank_binding_name,
+)
 from .cases import (
     ComparisonRegion,
     ComparisonSpec,
@@ -748,6 +755,10 @@ class Engine:
         outputs: Iterable[str] | Mapping[str, str] | None,
         assumptions: ExecutionAssumptions | None = None,
     ) -> _PreparedExecution:
+        if isinstance(inputs, (list, tuple)):
+            return self._prepare_rank_execution(
+                module, inputs, outputs=outputs, assumptions=assumptions
+            )
         contract = _host_abi(module)
         canonical_inputs, aliases, ambiguous_aliases = _canonicalize_buffer_names(contract, inputs)
         output_names, external_names = _resolve_output_names(
@@ -763,6 +774,56 @@ class Engine:
             bindings=prepared,
             output_names=frozenset(output_names),
             external_names=external_names,
+            assumptions=_execution_assumptions_payload(module.spec, assumptions),
+        )
+
+    def _prepare_rank_execution(
+        self,
+        module: CompiledModule,
+        inputs: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        *,
+        outputs: Iterable[str] | Mapping[str, str] | None,
+        assumptions: ExecutionAssumptions | None,
+    ) -> _PreparedExecution:
+        """One launch per rank of the same kernel, sharing one physical memory.
+
+        Outputs are keyed ``rank_binding_name(name, rank)``; parameters bound
+        to a :class:`MulticastWindow` have no output of their own.
+        """
+
+        contract = _host_abi(module)
+        if not inputs or not all(isinstance(rank_inputs, dict) for rank_inputs in inputs):
+            raise NumSimExecutionError("multi-rank NumSim inputs must be a non-empty list of dicts")
+        canonical_ranks = []
+        for rank_inputs in inputs:
+            canonical, aliases, ambiguous_aliases = _canonicalize_buffer_names(
+                contract, rank_inputs
+            )
+            canonical_ranks.append(canonical)
+        output_names, external_names = _resolve_output_names(
+            contract, canonical_ranks[0], aliases, ambiguous_aliases, outputs
+        )
+        prepared = prepare_rank_bindings(
+            canonical_ranks,
+            expected_scalar_dtypes=contract.scalar_dtypes,
+            expected_buffer_dtypes=contract.buffer_dtypes,
+            expected_tensor_map_names=[
+                contract.bound_tensor_map_names(canonical) for canonical in canonical_ranks
+            ],
+        )
+        rank_outputs: set[str] = set()
+        rank_external_names: dict[str, str] = {}
+        for rank, canonical in enumerate(canonical_ranks):
+            for name in output_names:
+                if name not in canonical or isinstance(canonical[name], MulticastWindow):
+                    continue
+                flat = rank_binding_name(name, rank)
+                rank_outputs.add(flat)
+                rank_external_names[flat] = rank_binding_name(external_names[name], rank)
+        return _PreparedExecution(
+            bindings=prepared,
+            output_names=frozenset(rank_outputs),
+            external_names=rank_external_names,
             assumptions=_execution_assumptions_payload(module.spec, assumptions),
         )
 
@@ -785,9 +846,16 @@ class Engine:
                 assumptions=assumptions,
             )
         contract = _host_abi(module)
-        canonical_inputs, _aliases, _ambiguous_aliases = _canonicalize_buffer_names(contract, inputs)
+        if prepared_bindings.rank_names:
+            canonical_names = {
+                rank_binding_name(name, rank)
+                for rank, rank_inputs in enumerate(inputs)
+                for name in _canonicalize_buffer_names(contract, rank_inputs)[0]
+            }
+        else:
+            canonical_names = set(_canonicalize_buffer_names(contract, inputs)[0])
         prepared_names = prepared_bindings.buffers.keys() | prepared_bindings.scalars.keys()
-        if prepared_names != canonical_inputs.keys():
+        if prepared_names != canonical_names:
             raise NumSimExecutionError(
                 "precomputed native-analysis bindings do not match the supplied inputs"
             )
@@ -858,6 +926,8 @@ def _host_abi(module: CompiledModule) -> HostAbiContract:
 
 
 def _validate_input_binding(slot: HostBindingSlot, name: str, value: Any) -> None:
+    if isinstance(value, (MulticastWindow, SymmetricBuffer)) and slot.kind in {"buffer", "pointer"}:
+        return
     if slot.kind in {"buffer", "pointer", "tensor_map"}:
         if not isinstance(value, np.ndarray):
             raise NumSimExecutionError(

@@ -1160,8 +1160,8 @@ impl<'a> Emitter<'a> {
         let scope = i64::from(definition.scope.as_raw());
         let warps = self.warps_per_warpgroup;
         let (flat_code, uniformity) = match scope {
-            0 => ("ctx.cluster_id() as i64".to_owned(), Uniformity::Uniform),
-            1 => ("ctx.global_cta_id() as i64".to_owned(), Uniformity::Uniform),
+            0 => ("ctx.kernel_cluster_id() as i64".to_owned(), Uniformity::Uniform),
+            1 => ("ctx.kernel_cta_id() as i64".to_owned(), Uniformity::Uniform),
             2 => (
                 "ctx.cta_id_in_cluster() as i64".to_owned(),
                 Uniformity::Uniform,
@@ -1258,7 +1258,7 @@ impl<'a> Emitter<'a> {
         }
         let value = match thread_tag.as_str() {
             "blockIdx.x" => {
-                RustValue::new("ctx.global_cta_id() as i32", "i32", Uniformity::Uniform)
+                RustValue::new("ctx.kernel_cta_id() as i32", "i32", Uniformity::Uniform)
             }
             "clusterCtaIdx.x" => {
                 RustValue::new("ctx.cta_id_in_cluster() as i32", "i32", Uniformity::Uniform)

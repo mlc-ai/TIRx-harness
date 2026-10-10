@@ -51,25 +51,33 @@ def race_source(func):
     return emit_rust_module(analyze(func), func, analysis_capable=True, analysis_checker="racecheck")
 
 
+def _seed(indices):
+    """The emitted seed: each rank's bindings contribute these buffers' allocations."""
+    return (
+        "let global_write_allocations = { let mut rank_writes = Vec::new(); "
+        f"for buffers in rank_buffers.iter() {{ rank_writes.extend([{indices}].map"
+    )
+
+
 def test_seed_tracks_declared_alias_destinations_but_not_readonly_inputs():
     source = race_source(structured_write)
-    assert "let global_write_allocations = [2_usize, 3_usize].map" in source
+    assert _seed("2_usize, 3_usize") in source
     assert "view.allocation()" in source
     assert "inputs.copy()" not in source
     assert 'set_item("written_allocations"' not in source
 
 
 def test_tile_destination_is_a_write_without_a_buffer_store():
-    assert "let global_write_allocations = [1_usize].map" in race_source(tile_write)
+    assert _seed("1_usize") in race_source(tile_write)
 
 
 def test_raw_store_tracks_its_destination():
-    assert "let global_write_allocations = [1_usize, 2_usize].map" in race_source(raw_write)
+    assert _seed("1_usize, 2_usize") in race_source(raw_write)
 
 
 def test_phase_names_are_qualified_in_multi_kernel_seed():
     source = race_source((structured_write, structured_write))
-    assert source.count("let global_write_allocations = [2_usize, 3_usize].map") == 2
+    assert source.count(_seed("2_usize, 3_usize")) == 2
     assert '"k0:output"' in source
     assert '"k1:output"' in source
 
@@ -105,7 +113,7 @@ def register_result_to_global(source: T.Buffer((1,), "float32"),
 
 def test_register_instruction_buffer_destinations_are_not_assumed_readonly():
     # The existing register-result store owns the destination information.
-    assert "let global_write_allocations = [1_usize].map" in race_source(
+    assert _seed("1_usize") in race_source(
         register_result_to_global
     )
 

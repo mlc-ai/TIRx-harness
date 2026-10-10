@@ -1140,6 +1140,37 @@ impl PhysicalPtr {
         })
     }
 
+    /// Resolve one lane to the full global allocation it names and its byte
+    /// offset from that allocation's start. Integer lanes resolve through the
+    /// observed host address bindings.
+    pub(crate) fn lane_global_allocation_offset(
+        &self,
+        physical: &PhysicalMemory,
+        lane: usize,
+        access_byte_len: usize,
+    ) -> Result<(crate::memory::BufferView, usize), EngineError> {
+        if self.state.integer_lanes.contains(lane) {
+            let address = self.state.byte_offsets[lane] as u64;
+            return physical
+                .global()
+                .observed_address_owner(address)?
+                .ok_or_else(|| self.unresolved_address_error(lane));
+        }
+        let RuntimeBuffer::Global(view) =
+            peel_runtime_buffer_wrappers(&self.state.buffer, lane, ViewAccess::Address)?
+        else {
+            return Err(EngineError::message(format!(
+                "address on lane {lane} does not resolve to global memory"
+            )));
+        };
+        let relative = self.lane_address_byte_offset(lane, access_byte_len)?;
+        let offset = view
+            .byte_offset()
+            .checked_add(relative)
+            .ok_or_else(|| EngineError::out_of_bounds("global byte offset overflow"))?;
+        Ok((physical.global().full_view(view.allocation())?, offset))
+    }
+
     /// Observe a bound global address as an ordinary integer value.
     pub fn global_addresses_u64(&self, mask: WarpMask) -> Result<WarpValue<u64>, EngineError> {
         let mut addresses = WarpValue::splat(0_u64);
@@ -2234,6 +2265,7 @@ fn physical_ptr_from_addresses_u64(
         } else {
             let address = addresses[lane];
             if let Some((view, offset)) = physical.global().observed_address_owner(address)? {
+                view.check_reachable_from(context.rank())?;
                 let relative = i64::try_from(offset).map_err(|_| {
                     EngineError::out_of_bounds("global address offset exceeds int64")
                 })?;

@@ -22,6 +22,7 @@ pub mod matrix;
 pub mod matrix_variants;
 pub mod memory_ops;
 pub mod memory_support;
+pub mod multimem;
 pub mod module;
 pub mod module_template;
 pub mod ptx_addr;

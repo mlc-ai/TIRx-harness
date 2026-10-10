@@ -211,7 +211,8 @@ impl<S: crate::abi::v2::MemorySpace> crate::abi::v2::ElementMap<S> for FrontendT
 pub use crate::runtime::python::{
     build_artifact_metadata_with_build_identity, build_run_result, extract_allocations,
     extract_buffer, extract_buffer_alias, extract_or_build_implicit_tensor_map,
-    extract_output_allocations, extract_phase_selection, extract_pointer, extract_scalar_bool,
+    extract_output_allocations, extract_phase_selection, extract_pointer, extract_rank_inputs,
+    prepare_rank_buffers, extract_scalar_bool,
     extract_scalar_f32, extract_scalar_f64, extract_scalar_i16, extract_scalar_i32,
     extract_scalar_i64, extract_scalar_i8, extract_scalar_u16, extract_scalar_u32,
     extract_scalar_u64, extract_scalar_u8, extract_selection, extract_shape_extent,

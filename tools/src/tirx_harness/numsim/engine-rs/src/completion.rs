@@ -68,6 +68,10 @@ impl DiagnosticLabel {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScopeInstance {
     Global,
+    /// The grid of one device in a multi-rank launch.
+    RankGrid {
+        rank: usize,
+    },
     Cluster {
         cluster_id: usize,
     },
@@ -90,6 +94,7 @@ impl fmt::Display for ScopeInstance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Global => f.write_str("global"),
+            Self::RankGrid { rank } => write!(f, "rank[{rank}].grid"),
             Self::Cluster { cluster_id } => write!(f, "cluster[{cluster_id}]"),
             Self::Cta { global_cta_id } => write!(f, "cta[{global_cta_id}]"),
             Self::WarpGroup {
@@ -395,9 +400,16 @@ impl ParticipantContract {
 
     pub fn grid(context: WarpContext) -> Self {
         let topology = context.topology();
-        let participants = ParticipantSet::new(0..topology.warp_count())
-            .expect("a valid topology has at least one warp");
-        Self::explicit(ScopeInstance::Global, participants)
+        if topology.ranks() == 1 {
+            let participants = ParticipantSet::new(0..topology.warp_count())
+                .expect("a valid topology has at least one warp");
+            return Self::explicit(ScopeInstance::Global, participants);
+        }
+        let rank = context.rank();
+        let first = rank * topology.warps_per_rank();
+        let participants = ParticipantSet::new(first..first + topology.warps_per_rank())
+            .expect("a valid topology has at least one warp per rank");
+        Self::explicit(ScopeInstance::RankGrid { rank }, participants)
     }
 
     pub fn warpgroup(
