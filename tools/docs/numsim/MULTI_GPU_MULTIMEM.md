@@ -30,6 +30,35 @@ unsupported.
 
 ## Ordering and race semantics
 
+### Checked semantics
+
+Immediately after decoding a supported operation, the checks cover:
+
+- **Address validity:** only multimem operations may access a multicast
+  window; a multimem operation must address a window; alignment, bounds, and
+  replica reachability must hold.
+- **Scope and strength:** `.sys` is required for cross-rank publication and
+  observation; `.gpu` and narrower scopes do not order other ranks. Strong
+  atomics and RMW release sequences are checked for moral strength.
+- **Release/acquire:** the release and acquire patterns must cover the
+  communicating actors, the acquire must observe the release or its valid RMW
+  chain, and operations outside the fence pattern are not published or
+  acquired.
+- **Proxy visibility:** generic and multicast-alias accesses need an alias
+  proxy bridge on the causal path. Async/TMA accesses also need completion and
+  the required async proxy fence.
+- **Causality and lanes:** warp/CTA participation must carry writes into the
+  release and reads out of the acquire; a lane-0 signal does not implicitly
+  publish unrelated lanes.
+- **Liveness:** Synccheck distinguishes a completed but weakly ordered wait
+  from a wait that cannot complete, and reports whole-launch deadlock only when
+  no modeled participant or pending completion can progress.
+
+The rule map and named positive/negative tests immediately below are the
+evidence for each item. A clean result covers the supplied TIRx specialization,
+inputs, and executed path; it does not enumerate alternate inputs or
+unmodeled PTX forms.
+
 ### Check contract and limits
 
 These tools consume **TIRx IR and concrete per-rank inputs**, not generated PTX

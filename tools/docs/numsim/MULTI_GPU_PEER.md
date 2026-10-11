@@ -29,6 +29,30 @@ an address alone does not establish visibility or synchronization.
 
 ## Ordering and race semantics
 
+### Checked semantics
+
+Immediately after decoding a supported peer operation, the checks cover:
+
+- **Reachability:** own private memory and mapped `SymmetricBuffer` replicas
+  are valid; a raw peer address or tensor map into another rank's private
+  allocation is an error.
+- **Physical conflicts:** Racecheck compares overlapping physical bytes for
+  RAW, WAR, and WAW conflicts, including buffer reuse and aliases with
+  different parameter names.
+- **Scope and observation:** cross-rank release/acquire communication requires
+  `.sys`, and an acquire must observe a valid publication or RMW chain.
+- **Proxy visibility and completion:** bulk/TMA reads require the async proxy
+  bridge and completion wait; bulk/TMA writes must complete before publication;
+  multicast-alias crossings require the alias bridge.
+- **Lane participation:** warp/CTA synchronization must carry non-signaling
+  lanes into the release and out of the acquire.
+- **Liveness:** Synccheck checks modeled waits, barriers, and pending async
+  completions; a completed poll alone is not proof of data visibility.
+
+The related rule table and named positive/negative tests follow before the
+usage examples. A clean result covers the supplied TIRx specialization,
+inputs, and executed path only.
+
 ### Check contract and memory-ordering rules
 
 The [multimem check contract](MULTI_GPU_MULTIMEM.md#check-contract-and-limits)
