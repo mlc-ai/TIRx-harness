@@ -53,6 +53,95 @@ reflects simulator advisories; compare against a reference to check numerical
 correctness. `assert_close` performs that comparison and raises on a mismatch.
 Simulation statistics do not measure GPU latency.
 
+## High precision for algorithm checks
+
+Use `precision="high"` to execute supported floating operations in FP64:
+
+```python
+module = numsim.transpile(kernel, precision="high")
+result = numsim.Engine().run(module, inputs, outputs=("output",))
+report = numsim.compare(
+    result,
+    {"output": reference_fp64},
+    tolerances={"output": numsim.ComparisonSpec(rtol=1e-10, atol=1e-12)},
+)
+assert report.precision == "high"
+report.require_ok()
+```
+
+`numsim.run_case(case, precision="high")` offers the same mode. Construct the
+reference independently from the **same already quantized inputs**, promoted
+to FP64, and retain its FP64 outputs. Choose tolerances for the algorithm's
+conditioning and reduction order. A native-mode reference rounded to FP16 or
+BF16 is not a high-precision reference. High outputs are decoded FP64 arrays;
+do not specify `actual_encoding="bfloat16"` for them.
+
+For kernel agents, compare both modes with independent references. A correct
+formula can disagree in native mode because of cancellation, accumulated
+rounding, or a simulator approximation. Agreement in high mode helps isolate
+these effects. An incorrect index, omitted term, or wrong sign should still
+fail; include such negative controls and varied inputs when judging a kernel.
+The LayerNorm regression in
+{repo}`test_high_precision_layernorm.py <tools/tests/numsim/corpus/test_high_precision_layernorm.py>`
+compares a moments-based implementation with a centered-variance reference,
+and verifies that an incorrect mean divisor fails in high mode.
+
+The promoted model has these semantics:
+
+- FP16, BF16, FP32, FP64, E4M3FN and E8M0FNU typed values use FP64 arithmetic.
+  Runtime floating casts and stores retain the FP64 result. Input encodings
+  and floating literals retain their original quantization; lost input bits
+  cannot be recovered. Existing FP64 computations gain no extra precision.
+- Allocation sizes, byte addresses, ownership, layout maps, integer arithmetic,
+  masks and scheduling mechanisms retain their original representation. A
+  typed FP16 store still occupies two physical bytes. A shadow value associated
+  with that address carries the FP64 result through later typed loads and
+  synchronous tile copies. Global shadows persist across phases of one
+  compiled module and reset for each `Engine.run`.
+- Scalar arithmetic, supported mathematical intrinsics, typed warp shuffles,
+  warp reductions, synchronous tile copy/cast/elementwise/reduction operations,
+  and FP16/BF16 `tile.gemm` warp MMA are promoted. GEMM accumulates in FP64 in
+  increasing K order using FMA. Transcendentals use host FP64 math, without GPU
+  calibration tables. Floating tile arithmetic drops low-precision rounding
+  and FTZ behavior.
+- `result.outputs` contains unrounded FP64 floating outputs; integer outputs
+  keep their dtype. Caller-provided buffers keep their native size and receive
+  a narrowed byte projection, which is not the result of a native execution.
+  For FP16/BF16/FP8 the byte projection goes through FP32; use `result.outputs`
+  for numerical validation. A separate simulation starts from the host
+  buffers' projected bytes; use a compiled kernel sequence to retain shadows.
+- Accesses that reinterpret promoted values through a different dtype, or use
+  only some of their bytes, fail instead of interpreting the narrowed
+  projection. Accessed integer cells also retain their width, so partial or
+  mixed-width integer accesses are rejected. Packed floating
+  arithmetic, floating bit reinterpretation, vector accesses, raw PTX numeric
+  instructions, atomics, asynchronous copies, TensorMaps, TCGEN/TMEM, and
+  zero-filled scalar accesses are currently unsupported in high mode.
+  Unsupported operations raise `UnsupportedTIRxError`; ambiguous accesses
+  discovered during execution raise `NumSimExecutionError`.
+
+High precision does **not** establish GPU bitwise equality, acceptable native
+error, numerical stability, or race/synchronization correctness. Promotion can
+also change data-dependent branches. Kernels intentionally depending on
+quantization must be checked in native mode against their intended semantics.
+Run the native checkers and device validation separately. FP64 itself rounds,
+can overflow, and can lose information in ill-conditioned computations.
+
+Native precision remains the default. The two modes use separate compiled
+artifacts. High mode adds memory proportional to accessed typed cells and
+extra work for shadow lookups; its simulation time is not a GPU performance
+estimate.
+
+For example, on a 224-CPU host with four engine workers, the `128 x 1024`
+LayerNorm case above had maximum absolute error `0.176` in native mode and
+`3.23e-10` in high mode against the centered FP64 reference. Three `Engine.run`
+measurements were `103.3 / 54.2 / 54.7 ms` native and `1.22 / 1.15 / 1.02 s`
+high. The deliberately wrong mean divisor still failed in high mode, with
+maximum error `2.48`.
+These measurements exclude compilation and reference construction
+(2026-10-10; host preflight: 90.8% CPU idle, load average 27.6/42.4/49.1).
+They demonstrate error isolation for this case, not a universal error bound.
+
 ## Compare outputs
 
 ```{eval-rst}
@@ -73,7 +162,7 @@ one call. Supply an existing engine to reuse its execution configuration.
 
 ```{eval-rst}
 .. autoapiclass:: tirx_harness.numsim.report.NumSimReport
-   :members: ok, mismatches, diagnostics, verdict, require_ok
+   :members: ok, mismatches, diagnostics, precision, verdict, require_ok
    :undoc-members:
 ```
 

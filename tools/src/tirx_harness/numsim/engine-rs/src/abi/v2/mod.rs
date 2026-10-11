@@ -19,6 +19,7 @@ pub mod tmem;
 pub(crate) mod transport;
 pub mod warp;
 
+pub use crate::high_precision;
 pub use error::EngineError;
 pub use transport::{
     Address, AddressViewAccess, BufferHandle, DescriptorDomain, DirectAddress, ElementMap,

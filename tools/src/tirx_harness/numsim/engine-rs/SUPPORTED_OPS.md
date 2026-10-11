@@ -1,7 +1,7 @@
 # NumSim Engine Operation Support
 
 This file is generated from NumSim's operation registry and is checked by tests.
-It describes NumSim ABI **v38**.
+It describes NumSim ABI **v39**.
 A listed operation may still reject modifier, dtype, shape, or layout values outside its exact specialization domain. Handwritten runtime cases cover registered operations; GPU parity is tested where the required hardware is available.
 
 ## TIRx CUDA/PTX Ops

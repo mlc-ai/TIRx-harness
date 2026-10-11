@@ -16,6 +16,15 @@ pub enum F32RoundingMode {
 
 pub trait RuntimeScalar: Copy + Clone {
     const BYTE_LEN: usize;
+    const HIGH_FORMAT: u8 = 0;
+
+    fn high_value(self) -> f64 {
+        unreachable!("native scalar has no high precision value")
+    }
+
+    fn with_high_value(self, _value: f64) -> Self {
+        unreachable!("native scalar has no high precision value")
+    }
 
     fn zero() -> Self;
     fn decode_le(bytes: &[u8]) -> Result<Self, EngineError>;

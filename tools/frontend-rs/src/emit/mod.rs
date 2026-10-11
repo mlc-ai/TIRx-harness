@@ -17,6 +17,7 @@ pub mod control;
 pub mod cuda_helper;
 pub mod diagnostics;
 pub mod expr;
+pub mod high_precision;
 pub mod layout;
 pub mod matrix;
 pub mod matrix_variants;
@@ -376,7 +377,7 @@ impl<'a> Emitter<'a> {
         for (index, entry) in plan.scalars.iter().enumerate() {
             let dtype = entry.dtype.clone();
             let rust_type = match stmt_rust_scalar_by_dtype(&dtype) {
-                Some(rust_type) => rust_type,
+                Some(rust_type) => crate::tables::precision_scalar_type(ctx.schema, &dtype, rust_type),
                 // Global analysis already rejects these parameter dtypes. A
                 // placeholder lets instruction checks report their own errors.
                 None if options.collect_errors => "u64",
@@ -604,7 +605,7 @@ impl<'a> Emitter<'a> {
             call_expr_stack: Vec::new(),
             integer_error_context: "engine",
             integer_error_label: None,
-            use_typed_helpers: !options.analysis_capable,
+            use_typed_helpers: !options.analysis_capable && !ctx.schema.high_precision,
         })
     }
 

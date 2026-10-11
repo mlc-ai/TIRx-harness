@@ -313,6 +313,7 @@ class CompiledModule:
     _analysis_checker: Literal["synccheck", "racecheck"] | None = field(
         default=None, repr=False, compare=False
     )
+    precision: Literal["native", "high"] = "native"
 
     @property
     def cache_key(self) -> str:
@@ -328,6 +329,7 @@ class CompiledModule:
 
     def load(self):
         return self.artifact.load()
+
 
 @dataclass(frozen=True)
 class _PreparedExecution:
@@ -759,6 +761,8 @@ class Engine:
             expected_buffer_dtypes=contract.buffer_dtypes,
             expected_tensor_map_names=contract.bound_tensor_map_names(canonical_inputs),
         )
+        if module.precision == "high":
+            prepared.validate_high_precision()
         return _PreparedExecution(
             bindings=prepared,
             output_names=frozenset(output_names),
@@ -785,7 +789,9 @@ class Engine:
                 assumptions=assumptions,
             )
         contract = _host_abi(module)
-        canonical_inputs, _aliases, _ambiguous_aliases = _canonicalize_buffer_names(contract, inputs)
+        canonical_inputs, _aliases, _ambiguous_aliases = _canonicalize_buffer_names(
+            contract, inputs
+        )
         prepared_names = prepared_bindings.buffers.keys() | prepared_bindings.scalars.keys()
         if prepared_names != canonical_inputs.keys():
             raise NumSimExecutionError(
@@ -840,13 +846,21 @@ class Engine:
         logical_outputs = prepared.apply_allocation_bytes(
             allocation_bytes, output_names=output_names
         )
+        if module.precision == "high":
+            values = payload.get("high_precision_values")
+            if not isinstance(values, list):
+                raise NumSimExecutionError("NumSim artifact did not return high precision values")
+            logical_outputs = prepared.high_precision_outputs(logical_outputs, values)
         remapped_outputs = {
             external_names.get(name, name): value for name, value in logical_outputs.items()
         }
         return NumSimResult(
             outputs=remapped_outputs,
             diagnostics=list(payload.get("diagnostics", [])),
-            stats=dict(payload.get("stats", {})),
+            stats={
+                **payload.get("stats", {}),
+                **({"precision": "high"} if module.precision == "high" else {}),
+            },
         )
 
 
@@ -966,12 +980,13 @@ def _resolve_output_names(
 def transpile(
     func: Any,
     *,
+    precision: Literal["native", "high"] = "native",
     cache_dir: str | Path | None = None,
     _default_generated_opt_level: int = 3,
     _analysis_capable: bool = False,
     _analysis_checker: Literal["synccheck", "racecheck"] | None = None,
 ) -> CompiledModule:
-    """Verify, emit, build, and cache a native Rust NumSim artifact."""
+    """Compile a numerical model, optionally promoting floating arithmetic to FP64."""
 
     from .transpiler.build import (
         build_artifact,
@@ -980,6 +995,12 @@ def transpile(
     )
     from .transpiler.host_prelude import normalize_transpile_source
 
+    if precision not in {"native", "high"}:
+        raise ValueError("NumSim precision must be 'native' or 'high'")
+    if precision == "high" and (_analysis_capable or _analysis_checker is not None):
+        raise ValueError(
+            "high precision is a numerical model; native checkers require native precision"
+        )
     if _analysis_checker not in {None, "synccheck", "racecheck"}:
         raise ValueError(f"unknown native analysis checker: {_analysis_checker!r}")
     analysis_capable = _analysis_capable or _analysis_checker is not None
@@ -988,6 +1009,7 @@ def transpile(
     )
     prepared = prepare_generated_artifact(
         frozen_source,
+        precision=precision,
         cache_dir=cache_dir,
         analysis_capable=analysis_capable,
         analysis_checker=_analysis_checker,
@@ -999,6 +1021,7 @@ def transpile(
 
         spec, source_template = compile_module_cached(
             frozen_source,
+            precision=precision,
             analysis_capable=analysis_capable,
             analysis_checker=_analysis_checker,
         )
@@ -1024,6 +1047,7 @@ def transpile(
         spec=spec,
         artifact=artifact,
         source=frozen_source,
+        precision=precision,
         cache_dir=resolved_cache,
         _generated_opt_level=prepared.build_config.release_opt_level,
         _analysis_capable=analysis_capable,
@@ -1129,7 +1153,12 @@ def compare(
                 )
             )
             break
-    return NumSimReport(ok=not mismatches, mismatches=mismatches, diagnostics=result.diagnostics)
+    return NumSimReport(
+        ok=not mismatches,
+        mismatches=mismatches,
+        diagnostics=result.diagnostics,
+        precision=result.stats.get("precision", "native"),
+    )
 
 
 def _comparison_numeric_view(array: np.ndarray) -> np.ndarray | None:
@@ -1205,9 +1234,20 @@ def _comparison_index(
     return tuple(result)
 
 
-def run_case(case: NumSimCase, *, engine: Engine | None = None) -> NumSimReport:
+def run_case(
+    case: NumSimCase,
+    *,
+    engine: Engine | None = None,
+    precision: Literal["native", "high"] = "native",
+) -> NumSimReport:
+    """Compare a kernel with the caller's reference in the selected numerical model.
+
+    High precision requires a reference evaluated from the same quantized inputs
+    in FP64, without final output rounding. Passing checks those inputs in the
+    promoted model; it does not certify native accuracy or synchronization.
+    """
     engine = engine or Engine()
-    module = transpile(case.kernel)
+    module = transpile(case.kernel, precision=precision)
     execution = engine._prepare_execution(
         module, case.args, outputs=case.outputs, assumptions=case.assumptions
     )

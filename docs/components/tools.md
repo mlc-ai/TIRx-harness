@@ -101,12 +101,20 @@ before comparing their numerical contents.
 
 | Interface | Main parameters | Result |
 | --- | --- | --- |
-| `numsim.transpile(func, *, cache_dir=None)` | `func`: specialized TIRx function. `cache_dir`: optional artifact-cache directory. | `CompiledModule` |
+| `numsim.transpile(func, *, precision="native", cache_dir=None)` | `func`: specialized TIRx function. `precision`: `"native"` or `"high"`. `cache_dir`: optional artifact-cache directory. | `CompiledModule` |
 | `numsim.Engine(...)` | `max_workers=8`: positive CPU-worker count, or `"auto"` to use the detected CPU count. | Execution engine |
 | `engine.run(module, inputs, *, outputs=None)` | `module`: transpiled artifact. `inputs`: concrete binding dictionary. `outputs`: buffer names or a mapping from result names to buffer names; `None` selects bound output buffers. | `NumSimResult` |
 
 `NumSimResult` exposes `.outputs`, `.diagnostics`, and `.stats`. Keep simulator
 diagnostics alongside the workload's numerical comparison result.
+
+For algorithm checks that are obscured by low-precision rounding, use
+[`precision="high"`](../api/numsim.md#high-precision-for-algorithm-checks).
+Supported floating arithmetic and intermediate values use FP64 while physical
+byte layouts stay unchanged. Compare the returned FP64 arrays with an
+independent FP64 reference using the same quantized inputs. This mode does not
+certify native numerical accuracy or GPU bitwise equality; unsupported packed,
+raw, asynchronous, and TCGEN/TMEM paths fail explicitly.
 
 See the {repo}`NumSim API source <tools/src/tirx_harness/numsim/api.py>`
 for full signatures.

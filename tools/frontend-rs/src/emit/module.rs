@@ -491,9 +491,18 @@ fn shape_field<'e>(emitter: &'e Emitter<'_>, variable: &tvm::ir::Var) -> Option<
 /// are also shape variables.
 fn parameter_setup(emitter: &Emitter<'_>, setup: &mut Vec<String>) {
     for scalar in &emitter.scalars {
+        let extractor_type = crate::tables::stmt_rust_scalar_by_dtype(&scalar.dtype)
+            .unwrap_or(&scalar.rust_type);
+        let promotion = if emitter.ctx.schema.high_precision
+            && crate::tables::is_promoted_float(&scalar.dtype)
+        {
+            " as f64"
+        } else {
+            ""
+        };
         setup.push(format!(
-            "        let {} = extract_scalar_{}(\n            inputs,\n            \"{}\",\n            \"{}\",\n        )?;",
-            scalar.field, scalar.rust_type, scalar.binding_name, scalar.dtype
+            "        let {} = extract_scalar_{}(\n            inputs,\n            \"{}\",\n            \"{}\",\n        )?{promotion};",
+            scalar.field, extractor_type, scalar.binding_name, scalar.dtype
         ));
     }
     for pointer in &emitter.pointers {
@@ -1594,6 +1603,7 @@ pub fn emit_rust_module(
             ("engine_abi_imports", &import_block()),
             ("exports", &module_exports(request)),
             ("abi_version", &request.abi_version.to_string()),
+            ("high_precision", &ctx.schema.high_precision.to_string()),
             (
                 "memory_helpers",
                 &if !request.analysis_capable {

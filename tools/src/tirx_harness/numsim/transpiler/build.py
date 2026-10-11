@@ -593,7 +593,11 @@ def _codegen_fingerprint() -> str:
     return digest.hexdigest()
 
 
-def generated_source_identity(source: Any) -> str:
+def generated_source_identity(source: Any, *, precision: str = "native") -> str:
+    if precision != "native":
+        return hashlib.sha256(
+            f"{precision}:{generated_source_identity(source)}".encode()
+        ).hexdigest()
     from tvm.tirx import PrimFunc
 
     funcs = tuple(source) if isinstance(source, (list, tuple)) else (source,)
@@ -657,6 +661,7 @@ def _generated_key_payload(
 def prepare_generated_artifact(
     source: Any,
     *,
+    precision: str = "native",
     cache_dir: str | Path | None = None,
     analysis_capable: bool = False,
     analysis_checker: Literal["synccheck", "racecheck"] | None = None,
@@ -666,7 +671,7 @@ def prepare_generated_artifact(
         raise ValueError(f"unknown native analysis checker: {analysis_checker!r}")
     if analysis_checker is not None and not analysis_capable:
         raise ValueError("a native analysis checker requires analysis-capable code generation")
-    source_identity = generated_source_identity(source)
+    source_identity = generated_source_identity(source, precision=precision)
     kind = artifact_kind(analysis_capable=analysis_capable, analysis_checker=analysis_checker)
     engine_root = _engine_root()
     if not (engine_root / "Cargo.toml").is_file():
