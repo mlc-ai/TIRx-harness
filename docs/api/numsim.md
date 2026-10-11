@@ -86,6 +86,17 @@ The LayerNorm regression in
 compares a moments-based implementation with a centered-variance reference,
 and verifies that an incorrect mean divisor fails in high mode.
 
+For an inference example, run
+`python examples/numsim/fp8_sparse_mla.py` from a source checkout. The
+{repo}`FP8 sparse MLA example <examples/numsim/README.md>` implements sparse
+gather, online softmax, attention sinks, and FP8 probability quantization from
+DeepSeek-V4 MLA. Its default case has about 2.2% relative L2 error with FP8
+probabilities, `2.9e-7` with FP32 probabilities, and `7.6e-16` in high mode,
+all from the same quantized Q/KV inputs. A deliberately wrong 1% output scale
+passes an illustrative loose native gate but fails the strict high check.
+`--gpu` compares this synchronous example with the GPU and separately runs
+the original optimized `tirx-kernels` production implementation on B200.
+
 The promoted model has these semantics:
 
 - FP16, BF16, FP32, FP64, E4M3FN and E8M0FNU typed values use FP64 arithmetic.
