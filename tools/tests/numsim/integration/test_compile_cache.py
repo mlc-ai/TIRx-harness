@@ -71,7 +71,7 @@ def test_one_compile_serves_the_manifest_and_the_generated_source(monkeypatch, t
     first, first_source = compile_cache.compile_module_cached(lane_add, **_PLAIN)
     second, second_source = compile_cache.compile_module_cached(lane_add, **_PLAIN)
 
-    assert compiles == [_PLAIN]
+    assert compiles == [{**_PLAIN, "precision": "native"}]
     assert first == second
     assert first_source == second_source == emit_rust_module(first, lane_add)
     assert all(entry.node is not None for entry in second.kernels[0].source_map)
@@ -158,6 +158,7 @@ def test_each_emission_mode_has_its_own_entry(monkeypatch, tmp_path):
     compiles = _isolated_cache(monkeypatch, tmp_path)
     modes = (
         _PLAIN,
+        {**_PLAIN, "precision": "high"},
         {"analysis_capable": True, "analysis_checker": "synccheck"},
         {"analysis_capable": True, "analysis_checker": "racecheck"},
     )

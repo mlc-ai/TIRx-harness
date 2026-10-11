@@ -1465,6 +1465,13 @@ pub fn build_run_result(
     rewrite_tensor_map_addresses(inputs, global, allocation_ids, true)?;
     let result = PyDict::new(py);
     result.set_item("outputs", PyDict::new(py))?;
+    if global.high_precision_enabled() {
+        let high_precision = allocation_ids
+            .iter()
+            .map(|allocation| global.high_precision.global_values(allocation.as_u64()))
+            .collect::<Vec<_>>();
+        result.set_item("high_precision_values", high_precision)?;
+    }
     result.set_item(
         "allocation_bytes",
         output_allocation_bytes(py, global, allocation_ids, output_allocations)?,

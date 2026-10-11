@@ -527,6 +527,7 @@ impl Drop for SemanticProgressWatch {
 #[derive(Clone, Default)]
 pub struct GlobalMemory {
     inner: Arc<MemoryState>,
+    pub(crate) high_precision: Arc<crate::high_precision::ShadowMemory>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -974,6 +975,14 @@ pub fn publish_deferred_global_writes<'a>(
 }
 
 impl GlobalMemory {
+    pub fn enable_high_precision(&self) {
+        self.high_precision.enable();
+    }
+
+    pub(crate) fn high_precision_enabled(&self) -> bool {
+        self.high_precision.enabled()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -1049,6 +1058,7 @@ impl GlobalMemory {
     /// unchecked synchronization assumption.
     pub fn new_owner_private() -> Self {
         Self {
+            high_precision: Arc::default(),
             inner: Arc::new(MemoryState {
                 mode: MemoryMode::OwnerPrivate,
                 ..MemoryState::default()
@@ -1058,6 +1068,7 @@ impl GlobalMemory {
 
     pub(crate) fn new_queued_owner_private() -> Self {
         Self {
+            high_precision: Arc::default(),
             inner: Arc::new(MemoryState {
                 mode: MemoryMode::QueuedOwnerPrivate,
                 ..MemoryState::default()
@@ -1067,6 +1078,7 @@ impl GlobalMemory {
 
     pub(crate) fn new_owner_private_with_semantic_progress(progress: SemanticProgress) -> Self {
         Self {
+            high_precision: Arc::default(),
             inner: Arc::new(MemoryState {
                 mode: MemoryMode::OwnerPrivate,
                 semantic_progress: progress,
@@ -1079,6 +1091,7 @@ impl GlobalMemory {
         progress: SemanticProgress,
     ) -> Self {
         Self {
+            high_precision: Arc::default(),
             inner: Arc::new(MemoryState {
                 mode: MemoryMode::QueuedOwnerPrivate,
                 semantic_progress: progress,

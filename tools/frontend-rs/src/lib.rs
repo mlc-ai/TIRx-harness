@@ -389,9 +389,11 @@ fn compile_module(
         abi_version,
         split_thresholds,
     };
-    let schema = schema::Schema::parse(&schema)?;
+    let mut schema = schema::Schema::parse(&schema)?;
     let context = analyze::Ctx::new(&schema)?;
     let plans = analyze_kernels(&context, &funcs)?;
+    schema.high_precision = flag_bool("high_precision")?;
+    let context = analyze::Ctx::new(&schema)?;
     let mut emitted: Option<std::string::String> = None;
     let mut failure: Option<Any> = None;
     if plans.iter().all(|plan| plan.supported) {

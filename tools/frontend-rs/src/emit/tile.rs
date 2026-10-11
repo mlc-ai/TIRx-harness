@@ -35,7 +35,10 @@ use crate::schema::Schema;
 use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, round_marker, v2_memory_type_rust};
 
-fn rust_scalar_by_dtype(dtype: &str) -> Option<&'static str> {
+fn rust_scalar_by_dtype(schema: &Schema, dtype: &str) -> Option<&'static str> {
+    if schema.high_precision && crate::tables::is_promoted_float(dtype) {
+        return Some("f64");
+    }
     Some(match dtype {
         "bool" => "bool",
         "int8" => "i8",
@@ -723,7 +726,7 @@ impl<'a> Emitter<'a> {
         let indices = tile_logical_region_indices(region, logical_coordinates)?;
         let index = self.physical_index(&region.buffer, &indices)?;
         let field = self.tile_buffer_field(&region.buffer)?;
-        let memory_dtype = if region.dtype == "float8_e4m3fn" {
+        let memory_dtype = if !self.ctx.schema.high_precision && region.dtype == "float8_e4m3fn" {
             "uint8"
         } else {
             region.dtype.as_str()
@@ -769,13 +772,17 @@ impl<'a> Emitter<'a> {
         );
         self.emit_line(&format!("let {raw} = v2_register_out({load});"));
         let mut name = raw.clone();
-        if region.dtype == "float8_e4m3fn" {
+        if !self.ctx.schema.high_precision && region.dtype == "float8_e4m3fn" {
             name = self.control_name("tile_owner_load");
             self.emit_line(&format!(
                 "let {name} = WarpValue::from_fn(|lane| float8_e4m3fn_bits_to_f32({raw}[lane]));"
             ));
         }
-        Ok(RustValue::new(name, "f32", Uniformity::Varying))
+        Ok(RustValue::new(
+            name,
+            crate::tables::precision_scalar_type(self.ctx.schema, &region.dtype, "f32"),
+            Uniformity::Varying,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -788,7 +795,7 @@ impl<'a> Emitter<'a> {
         owner_aligned: bool,
         source_op_id: i64,
     ) -> AResult<()> {
-        let Some(rust_type) = rust_scalar_by_dtype(&region.dtype) else {
+        let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, &region.dtype) else {
             return unsupported(format!(
                 "Tile store lowering is not implemented for {}",
                 region.dtype
@@ -864,19 +871,21 @@ impl<'a> Emitter<'a> {
                 space.value()
             ));
         };
-        let memory_dtype = if region.dtype == "float8_e4m3fn" || region.dtype == "float8_e8m0fnu" {
+        let memory_dtype = if !self.ctx.schema.high_precision
+            && (region.dtype == "float8_e4m3fn" || region.dtype == "float8_e8m0fnu")
+        {
             "uint8"
         } else {
             region.dtype.as_str()
         };
         let mut stored_value = value.code.clone();
-        if region.dtype == "float8_e4m3fn" {
+        if !self.ctx.schema.high_precision && region.dtype == "float8_e4m3fn" {
             stored_value = self.control_name("tile_float8_store_bits");
             self.emit_line(&format!(
                 "let {stored_value} = WarpValue::from_fn(|lane| f32_to_float8_e4m3fn_bits({}[lane]));",
                 value.code
             ));
-        } else if region.dtype == "float8_e8m0fnu" {
+        } else if !self.ctx.schema.high_precision && region.dtype == "float8_e8m0fnu" {
             stored_value = self.control_name("tile_float8_store_bits");
             self.emit_line(&format!(
                 "let {stored_value} = WarpValue::from_fn(|lane| f32_to_float8_e8m0fnu_bits({}[lane]));",
@@ -1468,7 +1477,7 @@ impl<'a> Emitter<'a> {
         let (target_warp, target_lane) = self.tile_unique_owner_location(op, region, &indices)?;
         let physical_index =
             self.physical_index_at_lane(&region.buffer, &indices, "0_usize", None, false)?;
-        let Some(rust_type) = rust_scalar_by_dtype(&region.dtype) else {
+        let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, &region.dtype) else {
             return unsupported(format!(
                 "Canonical owner transport is not implemented for {}",
                 region.dtype
@@ -1493,7 +1502,13 @@ impl<'a> Emitter<'a> {
             "read_frontend_register_element_at_thread::<{storage_type}>(&physical, v2_context(ctx), &{buffer_ref}, {target_warp}, {}, {target_lane})?",
             physical_index.code
         );
-        if let Some(decoder) = decoder {
+        if self.ctx.schema.high_precision && crate::tables::is_promoted_float(&region.dtype) {
+            let marker = v2_memory_type_rust(self.ctx.schema, &region.dtype)?;
+            load = format!(
+                "read_frontend_register_element_at_thread::<<{marker} as v2::mem::MemoryType>::Storage>(&physical, v2_context(ctx), &{buffer_ref}, {target_warp}, {}, {target_lane})?.value",
+                physical_index.code
+            );
+        } else if let Some(decoder) = decoder {
             load = format!("{decoder}({load})");
         }
         self.emit_line(&format!("let {loaded} = {load};"));
@@ -1511,7 +1526,7 @@ impl<'a> Emitter<'a> {
     ) -> AResult<Vec<(String, &'static str)>> {
         let mut snapshots: Vec<(String, &'static str)> = Vec::new();
         for (operand_index, operand) in op.operands.iter().enumerate() {
-            let Some(rust_type) = rust_scalar_by_dtype(operand.dtype()) else {
+            let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, operand.dtype()) else {
                 return unsupported(format!(
                     "Canonical owner transport is not implemented for {}",
                     operand.dtype()
@@ -1934,8 +1949,8 @@ impl<'a> Emitter<'a> {
         Ok(RustValue::new(result, result_type, Uniformity::Varying))
     }
 
-    fn tile_elementwise_type(op: &ParsedTileCall) -> AResult<&'static str> {
-        match rust_scalar_by_dtype(&op.destination.dtype) {
+    fn tile_elementwise_type(&self, op: &ParsedTileCall) -> AResult<&'static str> {
+        match rust_scalar_by_dtype(self.ctx.schema, &op.destination.dtype) {
             Some(result_type) => Ok(result_type),
             None => unsupported(format!(
                 "Native {} tile lowering does not support {}",
@@ -1973,7 +1988,7 @@ impl<'a> Emitter<'a> {
                 if !operands.is_empty() {
                     return unsupported("Normalized tile.zero unexpectedly retained operands");
                 }
-                let result_type = Self::tile_elementwise_type(op)?;
+                let result_type = self.tile_elementwise_type(op)?;
                 let atom = zero_literal_by_rust_type(result_type)?;
                 if result_type == "bool" {
                     return self.tile_emit_elementwise_atom(op, result_type, atom);
@@ -1994,7 +2009,7 @@ impl<'a> Emitter<'a> {
                 )
             }
             ResultEmitter::Fill => {
-                let result_type = Self::tile_elementwise_type(op)?;
+                let result_type = self.tile_elementwise_type(op)?;
                 if operands.len() != 1 || operands[0].rust_type != result_type {
                     return unsupported(
                         "Normalized tile.fill value does not match the destination scalar type",
@@ -2018,7 +2033,7 @@ impl<'a> Emitter<'a> {
                 instruction,
                 narrow_method,
             } => {
-                let result_type = Self::tile_elementwise_type(op)?;
+                let result_type = self.tile_elementwise_type(op)?;
                 if all_rust_type(operands, "f32") {
                     let variant = f32_arithmetic_variant(rounding_mode, ftz)?;
                     return self.tile_emit_elementwise_register_call(
@@ -2352,8 +2367,13 @@ impl<'a> Emitter<'a> {
 // Reductions.
 // ----------------------------------------------------------------------
 
-fn reduction_identity(builder: IdentityBuilder, dtype: &str) -> AResult<String> {
-    let Some(rust_type) = rust_scalar_by_dtype(dtype) else {
+fn reduction_identity(schema: &Schema, builder: IdentityBuilder, dtype: &str) -> AResult<String> {
+    let dtype = if schema.high_precision && crate::tables::is_promoted_float(dtype) {
+        "float64"
+    } else {
+        dtype
+    };
+    let Some(rust_type) = rust_scalar_by_dtype(schema, dtype) else {
         return Err(Failure::Ffi(ffi_error(&format!("KeyError: {:?}", dtype))));
     };
     let float_maximum = |dtype: &str| -> AResult<&'static str> {
@@ -2462,7 +2482,12 @@ impl<'a> Emitter<'a> {
         if dtype == "int8" || dtype == "uint8" {
             return Ok(None);
         }
-        let Some(rust_type) = rust_scalar_by_dtype(dtype) else {
+        let dtype = if self.ctx.schema.high_precision && crate::tables::is_promoted_float(dtype) {
+            "float64"
+        } else {
+            dtype
+        };
+        let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, dtype) else {
             return Err(Failure::Ffi(ffi_error(&format!("KeyError: {:?}", dtype))));
         };
         if dtype == "float16" || dtype == "bfloat16" {
@@ -2542,7 +2567,7 @@ impl<'a> Emitter<'a> {
             .iter()
             .map(|axis| source.extents[*axis as usize])
             .product();
-        let Some(rust_type) = rust_scalar_by_dtype(&source.dtype) else {
+        let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, &source.dtype) else {
             return Err(Failure::Ffi(ffi_error(&format!(
                 "KeyError: {:?}",
                 &source.dtype
@@ -2683,7 +2708,7 @@ impl<'a> Emitter<'a> {
             )));
         };
         let source = source.clone();
-        if op.attr_str("dispatch") == Some("3input_maxmin") {
+        if !self.ctx.schema.high_precision && op.attr_str("dispatch") == Some("3input_maxmin") {
             return self.tile_emit_3input_maxmin(
                 op,
                 &source,
@@ -2701,7 +2726,8 @@ impl<'a> Emitter<'a> {
         }
         let output_replication = op.attr_int("output_replication").unwrap_or(1);
         if op.attr_str("storage_scope") == Some("local") && collective {
-            let identity = reduction_identity(lowering.identity_builder, &source.dtype)?;
+            let identity =
+                reduction_identity(self.ctx.schema, lowering.identity_builder, &source.dtype)?;
             return self.tile_emit_local_collective_reduction(
                 op,
                 &source,
@@ -2718,8 +2744,8 @@ impl<'a> Emitter<'a> {
             .map(|axis| source.extents[*axis as usize])
             .product();
         let output_count = op.destination.element_count();
-        let identity = reduction_identity(lowering.identity_builder, &source.dtype)?;
-        let Some(rust_type) = rust_scalar_by_dtype(&source.dtype) else {
+        let identity = reduction_identity(self.ctx.schema, lowering.identity_builder, &source.dtype)?;
+        let Some(rust_type) = rust_scalar_by_dtype(self.ctx.schema, &source.dtype) else {
             return Err(Failure::Ffi(ffi_error(&format!(
                 "KeyError: {:?}",
                 &source.dtype
@@ -3184,7 +3210,8 @@ impl<'a> Emitter<'a> {
             "bfloat16" => "v2::reg::variant::Bf16",
             other => return Err(Failure::Ffi(ffi_error(&format!("KeyError: {:?}", other)))),
         };
-        let canonical = m == 16
+        let canonical = !self.ctx.schema.high_precision
+            && m == 16
             && n == 8
             && k == mma_k
             && self.tile_fixed_warp_mma_fragment_k(&left, m, k, "a")? == Some(mma_k)
@@ -3248,6 +3275,11 @@ impl<'a> Emitter<'a> {
             return unsupported(format!("Tile lowering is not registered for {op_name}"));
         };
         let lowering = tile_lowering(kind);
+        if self.ctx.schema.high_precision
+            && matches!(kind, TileOpKind::CopyAsync | TileOpKind::GemmAsync)
+        {
+            return unsupported(format!("high precision does not model {op_name}; asynchronous copies and TCGEN instructions are unsupported"));
+        }
         let plan = self.plan;
         // Tile analysis has already reported rejected source calls. The
         // diagnostic walk skips those calls and continues with later statements.
@@ -3263,6 +3295,19 @@ impl<'a> Emitter<'a> {
                 "emit_tile_call expects a tile call the analysis resolved",
             )));
         };
+        if self.ctx.schema.high_precision {
+            for region in std::iter::once(&op.destination)
+                .chain(op.operands.iter().filter_map(TileOperand::region))
+            {
+                let space = self.memory_plan.resolve(&region.buffer)?.space;
+                super::high_precision::validate_memory(
+                    self,
+                    &region.dtype,
+                    space,
+                    op.attr_bool("zero_fill_invalid_source"),
+                )?;
+            }
+        }
         self.record_global_write(&op.destination.buffer)?;
         self.with_load_site(Some(NestedLoadSite::ByBuffer(source_op_id)), |emitter| {
             emitter.tile_emit_scope_participation(&op, source_op_id)?;

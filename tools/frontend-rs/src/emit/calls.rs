@@ -57,6 +57,12 @@ impl<'a> Emitter<'a> {
             Some(&params),
             self.op_ids.get(node).copied(),
         )?;
+        if self.ctx.schema.high_precision {
+            if let Some(value) = super::high_precision::emit_float(self, &decoded)? {
+                return Ok(Some(value));
+            }
+            super::high_precision::validate_call(&decoded)?;
+        }
         let emit = decoded.entry(self.ctx)?.emit;
         emit(self, &decoded)
     }

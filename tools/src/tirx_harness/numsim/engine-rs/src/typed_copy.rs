@@ -22,6 +22,11 @@ pub(crate) struct TypedTileCopyElement {
     pub(crate) destination_lane: usize,
 }
 
+pub(crate) struct TypedTileCopySnapshot {
+    bytes: Vec<Vec<u8>>,
+    high_values: Option<Vec<Option<crate::high_precision::ShadowValue>>>,
+}
+
 fn checked_index(index: i64, lane: usize, role: &str) -> Result<usize, EngineError> {
     usize::try_from(index).map_err(|_| {
         EngineError::out_of_bounds(format!(
@@ -138,11 +143,11 @@ impl<M: EngineMode> WarpEngine<M> {
         logical_buffer: Option<&str>,
         zero_fill: bool,
         elements: &[TypedTileCopyElement],
-    ) -> Result<Vec<Vec<u8>>, EngineError> {
+    ) -> Result<TypedTileCopySnapshot, EngineError> {
         let (spans, mask) = resolve_source_spans(context, source, itemsize, elements)?;
         let numeric = || {
             let physical = self.kernel().physical();
-            elements
+            let bytes = elements
                 .iter()
                 .map(|element| {
                     if !element.source_in_bounds {
@@ -168,7 +173,30 @@ impl<M: EngineMode> WarpEngine<M> {
                         read_runtime_bytes(physical, context, source, lane, offset, itemsize)
                     }
                 })
-                .collect()
+                .collect::<Result<Vec<_>, EngineError>>()?;
+            let high_values = if physical.global().high_precision_enabled() {
+                Some(
+                    elements
+                        .iter()
+                        .map(|element| {
+                            if !element.source_in_bounds {
+                                return Ok(None);
+                            }
+                            let lane = element.source_lane;
+                            let index = checked_index(element.source_index, lane, "source")?;
+                            let offset = element_byte_offset(source, index, itemsize, lane)?;
+                            let access = resolve_runtime_physical_access(
+                                context, source, lane, offset, itemsize, PhysicalAccessKind::Read,
+                            )?;
+                            crate::high_precision::memory(physical, access.space())
+                                .copy_value(access.space(), access.span())
+                        })
+                        .collect::<Result<Vec<_>, EngineError>>()?,
+                )
+            } else {
+                None
+            };
+            Ok(TypedTileCopySnapshot { bytes, high_values })
         };
         if mask.is_empty() {
             return numeric();
@@ -208,9 +236,9 @@ impl<M: EngineMode> WarpEngine<M> {
         logical_buffer: Option<&str>,
         destination_rank: Option<usize>,
         elements: &[TypedTileCopyElement],
-        snapshots: &[Vec<u8>],
+        snapshots: &TypedTileCopySnapshot,
     ) -> Result<(), EngineError> {
-        if elements.len() != snapshots.len() {
+        if elements.len() != snapshots.bytes.len() {
             return Err(EngineError::message(
                 "tile copy snapshot count does not match its mapped element count",
             ));
@@ -218,7 +246,8 @@ impl<M: EngineMode> WarpEngine<M> {
         let (spans, mask) =
             resolve_destination_spans(context, destination, destination_rank, itemsize, elements)?;
         let numeric = || {
-            for (element, bytes) in elements.iter().zip(snapshots) {
+            for (element_index, (element, bytes)) in elements.iter().zip(&snapshots.bytes).enumerate()
+            {
                 if !element.destination_in_bounds {
                     if uniform_space(destination, "destination")? == PhysicalAccessSpace::Global {
                         continue;
@@ -231,6 +260,19 @@ impl<M: EngineMode> WarpEngine<M> {
                 let lane = element.destination_lane;
                 let index = checked_index(element.destination_index, lane, "destination")?;
                 let offset = element_byte_offset(destination, index, itemsize, lane)?;
+                if let Some(values) = &snapshots.high_values {
+                    let access = match destination_rank {
+                        Some(rank) => resolve_shared_runtime_physical_access_to_cta(
+                            context, destination, lane, rank, offset, itemsize,
+                            PhysicalAccessKind::Write,
+                        )?,
+                        None => resolve_runtime_physical_access(
+                            context, destination, lane, offset, itemsize, PhysicalAccessKind::Write,
+                        )?,
+                    };
+                    crate::high_precision::memory(self.kernel().physical(), access.space())
+                        .replace_copy(access.space(), access.span(), values[element_index])?;
+                }
                 match destination_rank {
                     Some(rank) => write_shared_runtime_bytes_to_cta(
                         self.kernel().physical(),

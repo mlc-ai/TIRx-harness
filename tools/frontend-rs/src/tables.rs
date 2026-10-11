@@ -57,6 +57,9 @@ pub fn expr_rust_type_by_dtype(dtype: &str) -> Option<&'static str> {
 }
 
 pub fn expr_rust_type(schema: &Schema, dtype: &str) -> AResult<String> {
+    if schema.high_precision && is_promoted_float(dtype) {
+        return Ok("f64".to_owned());
+    }
     if let Some(rust_type) = expr_rust_type_by_dtype(dtype) {
         return Ok(rust_type.to_owned());
     }
@@ -92,6 +95,21 @@ pub fn is_low_precision_float(dtype: &str) -> bool {
         dtype,
         "float16" | "bfloat16" | "float8_e4m3fn" | "float8_e8m0fnu"
     )
+}
+
+pub fn is_promoted_float(dtype: &str) -> bool {
+    matches!(
+        dtype,
+        "float16" | "bfloat16" | "float32" | "float64" | "float8_e4m3fn" | "float8_e8m0fnu"
+    )
+}
+
+pub fn precision_scalar_type<'a>(schema: &Schema, dtype: &str, native: &'a str) -> &'a str {
+    if schema.high_precision && is_promoted_float(dtype) {
+        "f64"
+    } else {
+        native
+    }
 }
 
 pub fn scope_marker(scope: &str) -> &'static str {
@@ -153,6 +171,18 @@ pub fn dtype_byte_len(schema: &Schema, dtype: &str) -> AResult<i64> {
 
 /// The v2 memory type of `dtype` without a PTX carrier.
 pub fn v2_memory_type_rust(schema: &Schema, dtype: &str) -> AResult<String> {
+    if schema.high_precision && is_promoted_float(dtype) {
+        let format = match dtype {
+            "float16" => "F16",
+            "bfloat16" => "Bf16",
+            "float32" => "F32",
+            "float64" => "F64",
+            "float8_e4m3fn" => "E4m3",
+            "float8_e8m0fnu" => "E8m0",
+            _ => unreachable!(),
+        };
+        return Ok(format!("v2::mem::variant::High<v2::high_precision::{format}>"));
+    }
     let marker = match dtype {
         "int8" => Some("v2::reg::variant::I8"),
         "int16" => Some("v2::reg::variant::I16"),
