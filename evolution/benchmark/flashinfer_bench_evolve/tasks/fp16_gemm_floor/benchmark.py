@@ -17,7 +17,7 @@ TASK_NAME = "fp16_gemm_floor"
 
 ATOL = 1e-1
 RTOL = 1e-2
-REQUIRED_MATCHED_RATIO = 0.99
+REQUIRED_MATCHED_RATIO = 0.9999
 
 
 def default_config() -> BenchConfig:
