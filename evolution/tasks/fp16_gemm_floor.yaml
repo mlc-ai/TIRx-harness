@@ -24,6 +24,6 @@ spec: |
   Triton, CUTE DSL, raw CUDA, or an existing solution kernel for production
   computation.
 
-  Correctness requires torch-isclose rtol=0.01, atol=0.1 for at least 99% of
+  Correctness requires torch-isclose rtol=0.01, atol=0.1 for at least 99.99% of
   elements on every shape. Speedup is sum(cuBLAS GPU time) /
   sum(candidate GPU time) across all 12 shapes.
