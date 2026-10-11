@@ -14,7 +14,22 @@ Paths below are relative to `tools/`; `engine-rs/` is
 `src/tirx_harness/numsim/engine-rs/`. PTX section numbers refer to the PTX
 ISA's "Memory Consistency Model" chapter.
 
-## Check contract and memory-ordering rules
+## Supported operations
+
+The layer checks peer addresses through the ordinary global-memory path for:
+
+- weak, relaxed, acquire, and release loads/stores and vector accesses;
+- 32- and 64-bit atomics, reductions, CAS polling, and system-scope waits;
+- bulk and Tensor Memory Accelerator copies through peer symmetric memory;
+- reachability of raw peer addresses and tensor maps.
+
+The operation details, ordering rules, counterexamples, and related tests are
+listed immediately below. Invalid peer access to private memory is an error;
+an address alone does not establish visibility or synchronization.
+
+## Ordering and race semantics
+
+### Check contract and memory-ordering rules
 
 The [multimem check contract](MULTI_GPU_MULTIMEM.md#check-contract-and-limits)
 also applies here: analysis executes TIRx IR with concrete bindings, and a
@@ -59,7 +74,7 @@ for the specification, and the
 measurements and outstanding gates. Mega MoE currently has an
 `alias_stale_read` advisory and therefore a `review` verdict, not `clean`.
 
-## Supported operations
+### Operation details
 
 Every global-memory instruction NumSim models accepts a peer address. The
 address resolves to the peer replica's allocation in the launch's shared
@@ -73,7 +88,7 @@ global arena, and the access runs through the ordinary engine path:
 | TMA | `cp.async.bulk.tensor` loads and stores through a `TensorMap` over a peer's replica |
 | Polls | `T.cuda.wait_until(scope="sys")` and `atom.cas` spins |
 
-## Litmus kernels and tests
+## Related tests
 
 `tests/numsim/support/peer_litmus.py` runs one warp per rank and takes scalar
 modes, so one transpile serves a rule's passing form and every counterexample:

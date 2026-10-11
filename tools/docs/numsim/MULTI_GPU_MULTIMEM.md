@@ -11,7 +11,26 @@ Paths below are relative to `tools/`; `engine-rs/` is
 `src/tirx_harness/numsim/engine-rs/`. PTX section numbers refer to the PTX
 ISA's "Memory Consistency Model" chapter.
 
-## Check contract and limits
+## Supported operations
+
+The layer checks these TIRx forms before GPU execution:
+
+- `multimem.ld_reduce`, `multimem.st`, and `multimem.red` on `.global`
+  multicast windows, with the supported integer, floating-point, reduction,
+  semantic, scope, and vector combinations listed in the operation table
+  below.
+- `fence.proxy.alias` for visibility between multicast-alias and generic
+  accesses.
+- `nvshmem.my_pe` and `nvshmem.n_pes` for rank and world-size queries.
+
+The negative tests also verify rejected state spaces, invalid type/reduction
+combinations, invalid semantic/scope pairs, unsupported widths, and address-kind
+misuse. Unsupported async multimem copy/reduction forms remain explicitly
+unsupported.
+
+## Ordering and race semantics
+
+### Check contract and limits
 
 These tools consume **TIRx IR and concrete per-rank inputs**, not generated PTX
 or SASS. NumSim executes the selected numerical, control-flow, and memory
@@ -51,7 +70,7 @@ this is not a claim to implement every PTX multimem instruction.
 The current branch still needs fresh native/GPU validation; see the
 [validation status and resume checklist](MULTI_GPU_VALIDATION.md).
 
-## Supported operations
+### Operation details
 
 | Op | Forms |
 |---|---|
@@ -70,7 +89,7 @@ and fp8 element types. ptxas itself rejects `multimem.ld_reduce` on
 `e4m3`/`e5m2` for sm_100a, sm_100f, and sm_103a. `engine-rs/SUPPORTED_OPS.md`
 carries each row's fidelity note.
 
-## Memory ordering rules
+### Memory ordering rules
 
 Racecheck matches overlapping physical bytes, including a replica reached through
 both its multicast and unicast addresses. The rule implementation is
@@ -118,7 +137,7 @@ both its multicast and unicast addresses. The rule implementation is
   - **Async-proxy pairs.** These still report the bridge first, because async
     completion is not in the generic clocks.
 
-## Synchronization and liveness
+### Synchronization and liveness
 
 Synccheck has no multimem-specific code:
 - **Liveness:** all ranks' warps run in one launch, so a cross-rank flag spin
@@ -138,7 +157,7 @@ address without that wait does not. For a bulk/TMA store,
 finish; publishing its destination requires full completion. The GEMM tests
 include both a skipped load wait and a read-only store wait.
 
-## Tests
+## Related tests
 
 | File | Covers |
 |---|---|
