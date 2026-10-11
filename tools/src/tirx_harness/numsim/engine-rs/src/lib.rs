@@ -251,4 +251,4 @@ pub(crate) use runtime::operand::PhysicalAddress;
 
 /// Increment for an incompatible generated-code, binding, or result boundary change.
 #[cfg(feature = "python")]
-pub(crate) const NUMSIM_ABI_VERSION: u32 = 38;
+pub(crate) const NUMSIM_ABI_VERSION: u32 = 40;

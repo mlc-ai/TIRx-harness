@@ -145,6 +145,7 @@ const SPARSE_MMA: &str = "separate D/C groups support overlapping fragments and 
 const BITFIELD_CONTROLS: &str = "PTX low-eight-bit position/length semantics and instruction predicates; B200 GPU controls agree in the stated 0..255 operand domain, but 64-bit forms disagree above that domain with both ptxas 13.2 and 13.4; wide-control GPU parity remains unresolved";
 const REGISTER_SHIFTS: &str = "SHL b16/b32/b64 and all table signed/unsigned/bit-size SHR use the shared carrier and predicate paths; shift counts clamp to the instruction width; only signed SHR sign-fills; preserved half/BF16 destinations have the existing TVM compilation boundary, with raw-storage GPU controls";
 const MMA_PREDICATES: &str ="register operands are snapshotted before D writes; full-warp predicates execute or skip all reads, partial-warp issue is invalid; preserve_dst keeps inactive bits, otherwise unspecified inactive outputs use zero";
+const MULTIMEM: &str = "the address must lie in a bound multicast window; the instruction accesses every rank's replica in rank order through the multicast-alias proxy, so unicast accesses to the same bytes are ordered only through fence.proxy.alias on the synchronization path; float ld_reduce.add sums in the GB200 NVLS fixed-point window anchored at the largest input exponent and rounds once to nearest even, with or without .acc::f32 (f32/f64 bit-exact; hardware f16/bf16 rounding differs by up to one ulp); red.add.f32 flushes subnormals; plain accesses to a window are errors (PTX ISA 8.2.3)";
 const UNREVIEWED_TARGET_PTX_REASON: &str =
     "target-table PTX operation has no reviewed NumSim semantics";
 
@@ -201,6 +202,8 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.cuda.make_float2", "pure_scalar", crate::emit::pure::cuda_make_float2),
     OpRow::new("tirx.cuda.mbarrier_wait", "synchronization", crate::emit::sync::emit_legacy).suspends(true),
     OpRow::new("tirx.cuda.mbarrier_wait_acquire_cluster", "synchronization", crate::emit::sync::emit_legacy).suspends(true),
+    OpRow::new("tirx.nvshmem.my_pe", "pure_scalar", crate::emit::pure::nvshmem_my_pe).support("modeled").reason("the launch rank of the executing device"),
+    OpRow::new("tirx.nvshmem.n_pes", "pure_scalar", crate::emit::pure::nvshmem_n_pes).support("modeled").reason("the launch world size"),
     OpRow::new("tirx.cuda.mov_sreg", "pure_scalar", crate::emit::pure::cuda_mov_sreg).support("deterministic_representative").reason("logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero"),
     OpRow::new("tirx.cuda.nano_sleep", "synchronization", crate::emit::sync::emit_legacy).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE).suspends(true),
     OpRow::new("tirx.cuda.printf", "synchronization", crate::emit::sync::emit_legacy).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE).suspends(true),
@@ -448,7 +451,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.fabric_wait", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
     OpRow::new("tirx.ptx.fence", "synchronization", crate::emit::sync::emit).support("ordering_only").reason(SCOPED_GLOBAL_ORDER).suspends(true),
     OpRow::new("tirx.ptx.fence_mbarrier_init", "synchronization", crate::emit::sync::emit).support("ordering_only").reason("instruction predicates gate the explicit init-release boundary; mbarrier uses are validated against the initialization happens-before relation, which may instead be established by CTA synchronization").suspends(true),
-    OpRow::new("tirx.ptx.fence_proxy", "synchronization", crate::emit::sync::emit).support("ordering_only").reason("operation has no numerical payload; native Racecheck consumes its typed proxy boundary for supported async-memory handoffs, restricted to instruction-predicated lanes").suspends(true),
+    OpRow::new("tirx.ptx.fence_proxy", "synchronization", crate::emit::sync::emit).support("ordering_only").reason("operation has no numerical payload; native Racecheck consumes its typed proxy boundary for supported async-memory handoffs and, for proxykind alias, for unicast/multicast-alias handoffs, restricted to instruction-predicated lanes").suspends(true),
     OpRow::new("tirx.ptx.fence_proxy_fabric", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
     OpRow::new("tirx.ptx.fence_proxy_tensormap_acquire", "raw_tensor_map_fence", crate::emit::raw_tma::emit_fence).reason(TENSOR_MAP_FENCE),
     OpRow::new("tirx.ptx.fence_proxy_tensormap_release", "raw_tensor_map_fence", crate::emit::raw_tma::emit_fence).reason(TENSOR_MAP_FENCE),
@@ -573,17 +576,17 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.multimem_cp_async_bulk", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
     OpRow::new("tirx.ptx.multimem_cp_reduce_async_bulk", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
     OpRow::new("tirx.ptx.multimem_cp_reduce_async_bulk_f32_noftz", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_ld_reduce", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_ld_reduce_f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_ld_reduce_f_vec", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_red", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.multimem_ld_reduce", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_ld_reduce_f", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_ld_reduce_f_vec", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_red", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
     OpRow::new("tirx.ptx.multimem_red_async", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_red_f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_red_f_vec", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_st", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.multimem_red_f", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_red_f_vec", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_st", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
     OpRow::new("tirx.ptx.multimem_st_async", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_st_f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
-    OpRow::new("tirx.ptx.multimem_st_f_vec", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.multimem_st_f", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
+    OpRow::new("tirx.ptx.multimem_st_f_vec", "atomic_bulk_memory", crate::emit::multimem::emit).reason(MULTIMEM).suspends(true),
     OpRow::new("tirx.ptx.neg", "register_unary", crate::emit::ptx_unary::emit).support("deterministic_representative").reason(SIGN_OPERATIONS),
     OpRow::new("tirx.ptx.neg_half", "register_unary", crate::emit::ptx_unary::emit).support("deterministic_representative").reason(SIGN_OPERATIONS),
     OpRow::new("tirx.ptx.neg_int", "register_integer_arithmetic", crate::emit::ptx_integer_arithmetic::emit).reason(PREDICATED_REGISTER_OUTPUTS),

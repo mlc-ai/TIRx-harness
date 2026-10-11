@@ -297,7 +297,7 @@ impl ResolvedSyncResource {
                     cluster_id: effect.cluster_id(),
                 }
             }
-            ProxyAsyncFenceScope::Global => ResolvedSyncResourceKey::ProxyAsyncGlobal {
+            ProxyAsyncFenceScope::Global | ProxyAsyncFenceScope::Alias => ResolvedSyncResourceKey::ProxyAsyncGlobal {
                 kernel_index: effect.kernel_index(),
             },
         };

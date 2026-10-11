@@ -2,8 +2,25 @@
 
 These types describe NumSim inputs and numerical comparisons. Unless otherwise
 noted, import them from `tirx_harness.numsim`. Fields and defaults below are
-read from the Python source. These are data classes; construct them with the
-listed field names as keyword arguments.
+read from the Python source. Construct each type with the arguments
+documented below.
+
+## Multi-GPU bindings
+
+For a single-node multi-rank launch, pass a list of per-rank input dictionaries
+to `Engine.run`, `racecheck`, or `synccheck`. Every rank uses the same kernel
+and grid. Use `MulticastWindow(replicas)` for a multicast address and
+`SymmetricBuffer(replicas)` for peer-accessible memory. Each takes one
+C-contiguous NumPy array of matching dtype and shape per rank.
+
+`SymmetricBuffer.peer_offsets(rank)` returns the byte offsets from that rank's
+replica to its peers. Results use `rank_binding_name(name, rank)`, for example
+`"out@rank2"`. A multicast window itself has no output; bind its unicast
+replica to inspect the result.
+
+The {repo}`multimem guide <tools/docs/numsim/MULTI_GPU_MULTIMEM.md>` and
+{repo}`peer-memory guide <tools/docs/numsim/MULTI_GPU_PEER.md>` document the
+binding restrictions, memory-ordering rules, and related tests.
 
 ## Reusable cases and comparisons
 

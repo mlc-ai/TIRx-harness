@@ -14,7 +14,14 @@ import numpy as np
 from tvm import tirx
 from tvm.ir.type import PointerType
 
-from .bindings import PreparedBindings, prepare_bindings
+from .bindings import (
+    MulticastWindow,
+    PreparedBindings,
+    SymmetricBuffer,
+    prepare_bindings,
+    prepare_rank_bindings,
+    rank_binding_name,
+)
 from .errors import NumSimExecutionError, UnsupportedTIRxError
 from .host_abi import HostAbiContract, HostBindingSlot, build_host_abi
 from .transpiler.frontend import _extract_topology
@@ -96,6 +103,8 @@ def _slot_for_alias(contract: HostAbiContract, name: str) -> HostBindingSlot | N
 
 
 def _validate_explicit_binding(slot: HostBindingSlot, name: str, value: Any) -> None:
+    if isinstance(value, (MulticastWindow, SymmetricBuffer)) and slot.kind in {"buffer", "pointer"}:
+        return
     if slot.kind in {"buffer", "pointer", "tensor_map"}:
         if not isinstance(value, np.ndarray):
             raise NumSimExecutionError(f"native analysis input {name!r} must be a NumPy array")
@@ -139,8 +148,16 @@ def prepare_native_bindings(
     """Freeze the exact concrete inputs for one native checker execution."""
 
     contract = build_host_abi(module.spec)
+    if isinstance(inputs, (list, tuple)):
+        return _prepare_native_rank_bindings(
+            contract,
+            inputs,
+            evidence_inputs=evidence_inputs,
+            supplemental_scalar_dtypes=supplemental_scalar_dtypes,
+            _defer_identity=_defer_identity,
+        )
     if inputs is not None and not isinstance(inputs, dict):
-        raise TypeError("native analysis inputs must be a dict or None")
+        raise TypeError("native analysis inputs must be a dict, a list of per-rank dicts, or None")
     public_inputs = dict(inputs or {})
     public_evidence_inputs = dict(public_inputs if evidence_inputs is None else evidence_inputs)
     supplemental_scalar_dtypes = dict(supplemental_scalar_dtypes or {})
@@ -219,11 +236,118 @@ def prepare_native_bindings(
     )
 
 
+def _prepare_native_rank_bindings(
+    contract: HostAbiContract,
+    inputs: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    evidence_inputs: Any,
+    supplemental_scalar_dtypes: dict[str, str] | None,
+    _defer_identity: bool,
+) -> NativeBindingPreparation:
+    """Freeze one multi-rank launch: one canonical binding table per rank."""
+
+    if not inputs or not all(isinstance(rank_inputs, dict) for rank_inputs in inputs):
+        raise TypeError("multi-rank native analysis inputs must be a non-empty list of dicts")
+    supplemental_scalar_dtypes = dict(supplemental_scalar_dtypes or {})
+    evidence_ranks = list(inputs if evidence_inputs is None else evidence_inputs)
+    canonical_ranks = [_canonicalize_inputs(contract, dict(rank_inputs)) for rank_inputs in inputs]
+    supplemental_inputs = {
+        rank_binding_name(name, rank): evidence[name]
+        for rank, evidence in enumerate(evidence_ranks)
+        for name in supplemental_scalar_dtypes
+        if name in evidence
+    }
+    supplemental_prepared = prepare_bindings(
+        supplemental_inputs,
+        expected_scalar_dtypes={
+            rank_binding_name(name, rank): dtype
+            for rank in range(len(evidence_ranks))
+            for name, dtype in supplemental_scalar_dtypes.items()
+        },
+    )
+    flat_canonical = {
+        rank_binding_name(name, rank): value
+        for rank, canonical in enumerate(canonical_ranks)
+        for name, value in canonical.items()
+    }
+    evidence_canonical = {**flat_canonical, **supplemental_inputs}
+    required = {
+        slot.canonical_name
+        for slot in contract.slots
+        if slot.canonical_name not in contract.implicit_tensor_map_names
+    }
+    missing = tuple(
+        sorted(
+            rank_binding_name(name, rank)
+            for rank, canonical in enumerate(canonical_ranks)
+            for name in required - canonical.keys()
+        )
+    )
+    if missing:
+        return NativeBindingPreparation(
+            inputs=evidence_ranks,
+            canonical_inputs=evidence_canonical,
+            execution_inputs=list(canonical_ranks),
+            input_digest=None,
+            scalar_bindings=copy.deepcopy(supplemental_prepared.identity_payload()["scalars"]),
+            missing_bindings=missing,
+            prepared_bindings=None,
+            _identity_future=None,
+        )
+    prepared = prepare_rank_bindings(
+        canonical_ranks,
+        expected_scalar_dtypes=contract.scalar_dtypes,
+        expected_buffer_dtypes=contract.buffer_dtypes,
+        expected_tensor_map_names=[
+            contract.bound_tensor_map_names(canonical) for canonical in canonical_ranks
+        ],
+    ).freeze()
+    identity_prepared = replace(
+        prepared,
+        scalars={**prepared.scalars, **supplemental_prepared.scalars},
+    )
+    if _defer_identity:
+        identity_future = _deferred_native_binding_identity(identity_prepared)
+        digest = None
+        scalar_bindings = {}
+    else:
+        digest, scalar_bindings = _native_binding_identity(identity_prepared)
+        identity_future = None
+    return NativeBindingPreparation(
+        inputs=evidence_ranks,
+        canonical_inputs=evidence_canonical,
+        execution_inputs=list(canonical_ranks),
+        input_digest=digest,
+        scalar_bindings=scalar_bindings,
+        missing_bindings=(),
+        prepared_bindings=prepared,
+        _identity_future=identity_future,
+    )
+
+
 def _concretize_checker_launch(
     func: Any,
-    inputs: dict[str, Any] | None,
-) -> tuple[Any, dict[str, Any] | None, dict[str, str]]:
+    inputs: Any,
+) -> tuple[Any, Any, dict[str, str]]:
     """Specialize only scalar inputs required to determine the concrete launch."""
+
+    if isinstance(inputs, (list, tuple)):
+        # Every rank launches the same grid, so its launch scalars must agree.
+        if not inputs or not all(isinstance(rank_inputs, dict) for rank_inputs in inputs):
+            raise TypeError("multi-rank native analysis inputs must be a non-empty list of dicts")
+        specialized, first, dtypes = _concretize_checker_launch(func, inputs[0])
+        rank_inputs = [first]
+        for rank, other in enumerate(inputs[1:], start=1):
+            for name in dtypes:
+                if name not in other or not np.array_equal(
+                    np.asarray(other[name]), np.asarray(inputs[0][name])
+                ):
+                    raise NumSimExecutionError(
+                        f"launch scalar {name!r} of rank {rank} differs from rank 0; "
+                        "every rank must launch the same grid"
+                    )
+            rank_inputs.append({key: value for key, value in other.items() if key not in dtypes})
+        return specialized, rank_inputs, dtypes
 
     if inputs is None or not isinstance(inputs, dict) or not hasattr(func, "params"):
         return func, inputs, {}

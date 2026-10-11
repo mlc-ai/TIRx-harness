@@ -1762,6 +1762,7 @@ impl<M: EngineMode> WarpEngine<M> {
             "shared::cta" => ProxyAsyncFenceScope::SharedCta,
             "shared::cluster" => ProxyAsyncFenceScope::SharedCluster,
             "global" => ProxyAsyncFenceScope::Global,
+            "alias" => ProxyAsyncFenceScope::Alias,
             other => {
                 return Err(EngineError::message(format!(
                     "unsupported fence.proxy_async scope {other:?}"
@@ -2144,6 +2145,9 @@ impl<M: EngineMode> WarpEngine<M> {
             M::before_compact_physical_access(self.kernel.mode_state(), &batch)?;
         }
         let result = numeric_effect().map_err(|error| {
+            if !apply_after_numeric {
+                M::abort_compact_physical_access(self.kernel.mode_state(), &batch);
+            }
             self.physical_access_error_context(error, Some(operation), logical_buffer)
         })?;
         M::after_compact_physical_access(self.kernel.mode_state(), &batch)?;
@@ -2329,6 +2333,7 @@ impl<M: EngineMode> WarpEngine<M> {
         )?;
         M::before_effect(self.kernel.mode_state(), operation, effect)?;
         let result = numeric_effect().map_err(|error| {
+            M::abort_effect(self.kernel.mode_state(), operation, effect);
             self.physical_access_error_context(error, Some(operation), logical_buffer)
         })?;
         M::after_effect(self.kernel.mode_state(), operation, effect)?;
@@ -2517,6 +2522,7 @@ impl<M: EngineMode> WarpEngine<M> {
         let effect = OperationEffect::PhysicalAccess(&batch);
         M::before_effect(self.kernel.mode_state(), operation, effect)?;
         let result = numeric_effect().map_err(|error| {
+            M::abort_effect(self.kernel.mode_state(), operation, effect);
             self.physical_access_error_context(error, Some(operation), logical_buffer)
         })?;
         M::after_effect(self.kernel.mode_state(), operation, effect)?;
@@ -2994,7 +3000,10 @@ impl<M: EngineMode> WarpEngine<M> {
         )?;
         M::before_effect(self.kernel.mode_state(), operation, effect)
             .map_err(|error| error.with_operation_context(operation))?;
-        let result = numeric_effect().map_err(|error| error.with_operation_context(operation))?;
+        let result = numeric_effect().map_err(|error| {
+            M::abort_effect(self.kernel.mode_state(), operation, effect);
+            error.with_operation_context(operation)
+        })?;
         // A synchronization word's content is read back here, between the
         // write and the commit. Nothing else runs in this span -- no await
         // separates the two -- so what the word holds now is exactly what this
@@ -3020,7 +3029,15 @@ impl<M: EngineMode> WarpEngine<M> {
             && kind.writes()
             && matches!(byte_width, 4 | 8)
         {
-            let values = self.declared_word_post_images(&batch, pointer, mask, byte_width)?;
+            let values = self
+                .declared_word_post_images(&batch, pointer, mask, byte_width)
+                .inspect_err(|_| {
+                    M::abort_effect(
+                        self.kernel.mode_state(),
+                        operation,
+                        OperationEffect::PhysicalAccess(&batch),
+                    )
+                })?;
             batch = batch.with_declared_values(values);
         }
         M::after_effect(
@@ -3433,7 +3450,10 @@ impl<M: EngineMode> WarpEngine<M> {
         )?;
         M::before_effect(self.kernel.mode_state(), operation, effect)
             .map_err(|error| error.with_operation_context(operation))?;
-        let result = numeric_effect().map_err(|error| error.with_operation_context(operation))?;
+        let result = numeric_effect().map_err(|error| {
+            M::abort_effect(self.kernel.mode_state(), operation, effect);
+            error.with_operation_context(operation)
+        })?;
         M::after_effect(self.kernel.mode_state(), operation, effect)
             .map_err(|error| error.with_operation_context(operation))?;
         Ok(result)
@@ -3495,7 +3515,10 @@ impl<M: EngineMode> WarpEngine<M> {
         )?;
         M::before_effect(self.kernel.mode_state(), operation, effect)
             .map_err(|error| error.with_operation_context(operation))?;
-        let result = numeric_effect().map_err(|error| error.with_operation_context(operation))?;
+        let result = numeric_effect().map_err(|error| {
+            M::abort_effect(self.kernel.mode_state(), operation, effect);
+            error.with_operation_context(operation)
+        })?;
         M::after_effect(self.kernel.mode_state(), operation, effect)
             .map_err(|error| error.with_operation_context(operation))?;
         Ok(result)

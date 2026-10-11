@@ -3381,6 +3381,58 @@ impl RaceCheckLaunchState {
         Ok(())
     }
 
+    /// Undo `before_compact_physical_access` for an access whose numeric
+    /// effect failed. Its write spans would otherwise stay in flight, and an
+    /// overlapping atomic of any other warp would wait on them forever.
+    fn abort_compact_physical_access(&self, batch: &CompactPhysicalAccessBatch<'_>) {
+        let operation = batch.operation();
+        if self.race.global_memory_model_enabled
+            && batch.descriptor().space() == PhysicalAccessSpace::Global
+        {
+            if batch.descriptor().kind().writes() {
+                self.finish_global_write_spans(batch.lane_spans().map(|(_, span)| span));
+            }
+            if let Ok(mut global) = self.global_for_warp(operation.id().global_warp_id()) {
+                global.discard_batch(operation.id());
+            }
+            return;
+        }
+        if let Ok(mut state) = self.race_for_operation(operation) {
+            if state
+                .staged_compact_access
+                .as_ref()
+                .is_some_and(|staged| *staged.operation == *operation.id())
+            {
+                state.staged_compact_access = None;
+            }
+        }
+    }
+
+    /// Undo `before_effect` for a physical access whose numeric effect failed.
+    fn abort_physical_access(&self, operation: &OperationContext, batch: &PhysicalAccessBatch) {
+        if self.race.global_memory_model_enabled {
+            if batch.descriptor().space() == PhysicalAccessSpace::Global
+                && batch.descriptor().kind().writes()
+            {
+                self.finish_global_write_spans(
+                    batch
+                        .lanes()
+                        .iter()
+                        .flat_map(|lane| lane.footprint().spans())
+                        .copied(),
+                );
+            }
+            if batch.descriptor().space().has_read_from_versions() {
+                if let Ok(mut global) = self.global_for_warp(operation.id().global_warp_id()) {
+                    global.discard_batch(operation.id());
+                }
+            }
+        }
+        if let Ok(mut state) = self.race_for_operation(operation) {
+            state.staged_accesses.remove(operation.id());
+        }
+    }
+
     fn after_compact_physical_access(
         &self,
         batch: &CompactPhysicalAccessBatch<'_>,
@@ -8119,6 +8171,13 @@ impl EngineModeImpl for RaceCheckMode {
         }
     }
 
+    fn abort_compact_physical_access(
+        state: &Self::LaunchState,
+        batch: &CompactPhysicalAccessBatch<'_>,
+    ) {
+        state.abort_compact_physical_access(batch);
+    }
+
     fn begin_cached_global_read(
         state: &Self::LaunchState,
         access: CachedGlobalReadAccess,
@@ -8228,6 +8287,16 @@ impl EngineModeImpl for RaceCheckMode {
             return Self::apply_warp_sync(state, operation, sync.mask());
         }
         state.after_effect(operation, effect)
+    }
+
+    fn abort_effect(
+        state: &Self::LaunchState,
+        operation: &OperationContext,
+        effect: OperationEffect<'_>,
+    ) {
+        if let OperationEffect::PhysicalAccess(batch) = effect {
+            state.abort_physical_access(operation, batch);
+        }
     }
 
     fn before_completion(
@@ -8845,6 +8914,92 @@ mod tests {
                 std::iter::empty(),
             );
         assert!(differential.records_resolved_transitions());
+    }
+
+    fn global_red(operation: &OperationContext, allocation: PhysicalAllocationId) -> PhysicalAccessBatch {
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::AtomicReadModifyWrite,
+            PhysicalAccessSpace::Global,
+            4,
+        )
+        .unwrap()
+        .with_memory_semantics(crate::MemoryAccessSemantics::scoped(
+            crate::MemoryOrder::Relaxed,
+            crate::MemoryScope::Sys,
+            crate::MemoryProxy::Generic,
+            crate::MemoryAccessClass::Reduction,
+        ));
+        PhysicalAccessBatch::resolve(operation.clone(), descriptor, |_| {
+            Ok::<_, std::convert::Infallible>(vec![PhysicalByteSpan::new(allocation, 0, 4).unwrap()])
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn aborted_global_write_leaves_no_write_in_flight() {
+        // An overlapping atomic of any other warp waits until no write there
+        // is in flight; one whose numeric effect failed never reaches
+        // `after_effect`.
+        let topology = LaunchTopology::new(1, 1, 2).unwrap();
+        let watched = PhysicalAllocationId::new(71);
+        let state =
+            RaceCheckLaunchState::for_topology_and_global_write_allocations(topology, [watched]);
+        let epoch = Arc::clone(state.race.global_allocation_epochs.get(&watched).unwrap());
+        let red = operation(0, 0, OperationKind::Atomic);
+        let batch = global_red(&red, watched);
+
+        before(&state, &red, OperationEffect::PhysicalAccess(&batch)).unwrap();
+        assert!(epoch.has_write_in_flight(0, 4));
+        <RaceCheckMode as EngineModeImpl>::abort_effect(
+            &state,
+            &red,
+            OperationEffect::PhysicalAccess(&batch),
+        );
+        assert!(!epoch.has_write_in_flight(0, 4));
+
+        let peer = operation(1, 0, OperationKind::Atomic);
+        let peer_batch = global_red(&peer, watched);
+        before(&state, &peer, OperationEffect::PhysicalAccess(&peer_batch)).unwrap();
+        after(&state, &peer, OperationEffect::PhysicalAccess(&peer_batch)).unwrap();
+        assert!(!epoch.has_write_in_flight(0, 4));
+    }
+
+    #[test]
+    fn aborted_compact_global_write_leaves_no_write_in_flight() {
+        let topology = LaunchTopology::new(1, 1, 1).unwrap();
+        let watched = PhysicalAllocationId::new(7);
+        let state =
+            RaceCheckLaunchState::with_direct_summary_for_topology_and_global_write_allocations(
+                topology,
+                [watched],
+            );
+        let epoch = Arc::clone(state.race.global_allocation_epochs.get(&watched).unwrap());
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::AtomicReadModifyWrite,
+            PhysicalAccessSpace::Global,
+            4,
+        )
+        .unwrap()
+        .with_memory_semantics(crate::MemoryAccessSemantics::scoped(
+            crate::MemoryOrder::Relaxed,
+            crate::MemoryScope::Sys,
+            crate::MemoryProxy::Generic,
+            crate::MemoryAccessClass::Reduction,
+        ));
+        let red = OperationContext::new(
+            DynamicOpId::new(0, 0, 1, StaticOpId::new(99), []),
+            OperationKind::Atomic,
+            WarpMask::from_bits(1),
+        );
+        let lane_spans = std::array::from_fn(|lane| {
+            (lane == 0).then_some(PhysicalByteSpan::new(watched, 0, 4).unwrap())
+        });
+        let batch = CompactPhysicalAccessBatch::new(&red, descriptor, None, false, &lane_spans);
+
+        <RaceCheckMode as EngineModeImpl>::before_compact_physical_access(&state, &batch).unwrap();
+        assert!(epoch.has_write_in_flight(0, 4));
+        <RaceCheckMode as EngineModeImpl>::abort_compact_physical_access(&state, &batch);
+        assert!(!epoch.has_write_in_flight(0, 4));
     }
 
     #[test]

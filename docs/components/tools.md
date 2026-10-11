@@ -23,6 +23,22 @@ NumSim, Synccheck, and Racecheck run on the CPU. See the
 The [Python API reference](../api/index.md) provides generated signatures,
 defaults, and return types for these tools.
 
+## Multi-GPU memory checks
+
+For a supported single-node multi-GPU kernel, pass a list of per-rank input
+dictionaries. `numsim.MulticastWindow` binds an NVLink multicast address;
+`numsim.SymmetricBuffer` binds peer-accessible replicas. All ranks execute
+inside one CPU engine. Racecheck checks physical conflicts, system-scoped
+publication, and proxy fences; Synccheck checks barrier protocols and liveness.
+The check still covers the paths selected by those concrete inputs.
+
+The feature guides put semantics, passing forms, counterexamples, and their
+tests before implementation details and benchmark results:
+
+- {repo}`Multimem/NVLS rules and tests <tools/docs/numsim/MULTI_GPU_MULTIMEM.md>`
+- {repo}`Peer-memory rules and tests <tools/docs/numsim/MULTI_GPU_PEER.md>`
+- {repo}`Draft validation status and remaining gates <tools/docs/numsim/MULTI_GPU_VALIDATION.md>`
+
 ## NumSim
 
 **When to use it.** Use NumSim when getting a real GPU run is costly or
@@ -103,7 +119,7 @@ before comparing their numerical contents.
 | --- | --- | --- |
 | `numsim.transpile(func, *, cache_dir=None)` | `func`: specialized TIRx function. `cache_dir`: optional artifact-cache directory. | `CompiledModule` |
 | `numsim.Engine(...)` | `max_workers=8`: positive CPU-worker count, or `"auto"` to use the detected CPU count. | Execution engine |
-| `engine.run(module, inputs, *, outputs=None)` | `module`: transpiled artifact. `inputs`: concrete binding dictionary. `outputs`: buffer names or a mapping from result names to buffer names; `None` selects bound output buffers. | `NumSimResult` |
+| `engine.run(module, inputs, *, outputs=None)` | `module`: transpiled artifact. `inputs`: concrete binding dictionary, or a list of per-rank dictionaries. `outputs`: buffer names or a mapping from result names to buffer names; `None` selects bound output buffers. | `NumSimResult` |
 
 `NumSimResult` exposes `.outputs`, `.diagnostics`, and `.stats`. Keep simulator
 diagnostics alongside the workload's numerical comparison result.
@@ -284,7 +300,7 @@ Synccheck and Racecheck share these public parameters:
 | Parameter | Meaning |
 | --- | --- |
 | `kernel` | A TIRx `PrimFunc`; pass `.func` from a TIRx-lite `Kernel`. |
-| `inputs=None` | Dictionary from parameter names to concrete scalars and CPU NumPy buffers, including output storage. Parameterless kernels may omit it; otherwise supply all runtime bindings. |
+| `inputs=None` | Dictionary from parameter names to concrete scalars and CPU NumPy buffers, including output storage, or a list of per-rank dictionaries for one multi-GPU launch. Parameterless kernels may omit it; otherwise supply all runtime bindings. |
 
 For tensor-map bindings, `tirx_harness.numsim.TensorMap(...).numpy()` constructs
 the simulator's descriptor array. The

@@ -120,7 +120,8 @@ pub enum MemoryScope {
 }
 
 impl MemoryScope {
-    /// Smallest scope covering two actors in the current single-device launch.
+    /// Smallest scope covering two actors of one launch. Warps on different
+    /// ranks run on different devices and therefore require `.sys`.
     /// Without topology, only equal warp IDs establish a shared CTA.
     pub(crate) fn required_between_warps(
         topology: Option<LaunchTopology>,
@@ -137,8 +138,10 @@ impl MemoryScope {
             Self::Cta
         } else if topology.cluster_id_for_warp(left) == topology.cluster_id_for_warp(right) {
             Self::Cluster
-        } else {
+        } else if topology.rank_of_warp(left) == topology.rank_of_warp(right) {
             Self::Gpu
+        } else {
+            Self::Sys
         }
     }
 }
@@ -161,6 +164,24 @@ pub enum MemoryProxy {
     Generic = 0,
     Async = 1,
     Mmio = 2,
+    /// Generic access through a multicast (multimem) virtual address. PTX
+    /// ISA 8.6: distinct virtual aliases behave as different proxies, so
+    /// ordering against unicast accesses of the same bytes needs an alias
+    /// proxy fence along the synchronization path.
+    MulticastAlias = 3,
+}
+
+impl MemoryProxy {
+    /// Strong atomics at the same physical bytes stay coherent across the
+    /// unicast and multicast aliases: a multimem atomic is performed at each
+    /// replica's memory. Only data ordering needs `fence.proxy.alias`.
+    pub(crate) const fn atomics_cohere(self, other: Self) -> bool {
+        self as u8 == other as u8
+            || matches!(
+                (self, other),
+                (Self::Generic, Self::MulticastAlias) | (Self::MulticastAlias, Self::Generic)
+            )
+    }
 }
 
 impl fmt::Display for MemoryProxy {
@@ -169,6 +190,7 @@ impl fmt::Display for MemoryProxy {
             Self::Generic => "generic",
             Self::Async => "async",
             Self::Mmio => "mmio",
+            Self::MulticastAlias => "multicast_alias",
         })
     }
 }
@@ -266,6 +288,12 @@ impl MemoryAccessSemantics {
             proxy,
             class,
         }
+    }
+
+    /// The same access performed through another proxy.
+    pub const fn with_proxy(mut self, proxy: MemoryProxy) -> Self {
+        self.proxy = proxy;
+        self
     }
 
     pub const fn volatile() -> Self {

@@ -1327,7 +1327,7 @@ impl<'a> Emitter<'a> {
         Ok(RustValue::new(result, rust_type, Uniformity::Varying))
     }
 
-    fn decoded_atomic_pointer(
+    pub(crate) fn decoded_atomic_pointer(
         &mut self,
         address_expression: &ObjectRef,
         op_name: &str,
@@ -1419,7 +1419,7 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    fn atomic_register_bits(&mut self, value: RustValue, rust_type: &str) -> RustValue {
+    pub(crate) fn atomic_register_bits(&mut self, value: RustValue, rust_type: &str) -> RustValue {
         let value = self.as_warp_value(value);
         if value.rust_type == rust_type {
             return value;
@@ -1437,7 +1437,7 @@ impl<'a> Emitter<'a> {
     /// b16 CAS can bind a half register. Store its bits
     /// directly: the numerical half carrier is f32, whose bit pattern is not a
     /// 16-bit register encoding.
-    fn atomic_result_store(
+    pub(crate) fn atomic_result_store(
         &mut self,
         destination: &ObjectRef,
         value: RustValue,

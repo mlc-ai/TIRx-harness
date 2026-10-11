@@ -584,13 +584,19 @@ pub fn decoded_proxy_space(decoded: &DecodedPtx) -> AResult<String> {
         return unsupported(format!("{op_name} requires the proxy modifier"));
     }
     let proxykind = decoded.modifier("proxykind")?;
+    let space = decoded.modifier("space")?.to_owned();
+    if proxykind == "alias" {
+        if !space.is_empty() {
+            return unsupported(format!("{op_name} fence.proxy.alias takes no state space"));
+        }
+        return Ok("alias".to_owned());
+    }
     if proxykind != "async" {
         return unsupported(format!(
-            "{op_name} proxy kind {:?} is not modeled; expected 'async'",
+            "{op_name} proxy kind {:?} is not modeled; expected 'async' or 'alias'",
             proxykind
         ));
     }
-    let space = decoded.modifier("space")?.to_owned();
     if !["", "global", "shared::cta", "shared::cluster"].contains(&space.as_str()) {
         return unsupported(format!("{op_name} has unsupported space {:?}", &space));
     }
@@ -1307,6 +1313,7 @@ pub fn proxy_marker(space: &str) -> &'static str {
         "global" => "Global",
         "shared::cta" => "SharedCta",
         "shared::cluster" => "SharedCluster",
+        "alias" => "Alias",
         _ => unreachable!("validated proxy space"),
     }
 }

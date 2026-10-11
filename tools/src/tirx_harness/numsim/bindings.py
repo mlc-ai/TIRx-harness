@@ -129,6 +129,85 @@ class _HostAllocation:
     owners: tuple[Any, ...] = ()
 
 
+class MulticastWindow:
+    """A multicast (multimem) address bound identically on every rank.
+
+    ``replicas[r]`` is rank ``r``'s unicast array behind the window. Window
+    byte ``i`` names byte ``i`` of every replica, so each replica must start
+    its own allocation and be at least as large as the window. Only
+    ``multimem`` instructions may access the window itself.
+    """
+
+    def __init__(self, replicas: Sequence[np.ndarray]) -> None:
+        replicas = tuple(replicas)
+        if not replicas or not all(isinstance(array, np.ndarray) for array in replicas):
+            raise TypeError("MulticastWindow requires one NumPy replica array per rank")
+        first = replicas[0]
+        if any(
+            array.dtype != first.dtype or array.shape != first.shape for array in replicas
+        ):
+            raise ValueError("MulticastWindow replicas must share one dtype and shape")
+        if not all(array.flags.c_contiguous for array in replicas):
+            raise ValueError("MulticastWindow replicas must be C-contiguous")
+        self.replicas = replicas
+        # Host address carrier only: its bytes are never read or written.
+        self._placeholder = np.zeros_like(first)
+
+    def __repr__(self) -> str:
+        first = self.replicas[0]
+        return (
+            f"MulticastWindow(ranks={len(self.replicas)}, dtype={first.dtype}, "
+            f"shape={first.shape})"
+        )
+
+
+class SymmetricBuffer:
+    """A symmetric-memory allocation: one array per rank, each mapped on every
+    rank, as an NVSHMEM or CUDA symmetric-memory tensor is.
+
+    Rank ``r``'s binding of a ``SymmetricBuffer`` is ``replicas[r]``. Its
+    kernel reaches rank ``p``'s replica at its own address plus
+    ``peer_offsets(r)[p]``, the byte distance the GPU launcher reads off the
+    symmetric-memory handle (``buffer_ptrs[p] - buffer_ptrs[r]``). Any other
+    array bound by one rank is that rank's private device memory: a peer
+    address into it is an error, as on a GPU, where it is unmapped.
+    """
+
+    def __init__(self, replicas: Sequence[np.ndarray]) -> None:
+        replicas = tuple(replicas)
+        if not replicas or not all(isinstance(array, np.ndarray) for array in replicas):
+            raise TypeError("SymmetricBuffer requires one NumPy array per rank")
+        first = replicas[0]
+        if any(array.dtype != first.dtype or array.shape != first.shape for array in replicas):
+            raise ValueError("SymmetricBuffer replicas must share one dtype and shape")
+        if not all(array.flags.c_contiguous for array in replicas):
+            raise ValueError("SymmetricBuffer replicas must be C-contiguous")
+        self.replicas = replicas
+
+    def peer_offsets(self, rank: int) -> np.ndarray:
+        """Byte offset from rank ``rank``'s replica to each rank's, as int64."""
+
+        base = self.replicas[rank].ctypes.data
+        return np.array([array.ctypes.data - base for array in self.replicas], np.int64)
+
+    def __repr__(self) -> str:
+        first = self.replicas[0]
+        return (
+            f"SymmetricBuffer(ranks={len(self.replicas)}, dtype={first.dtype}, "
+            f"shape={first.shape})"
+        )
+
+
+def rank_binding_name(name: str, rank: int) -> str:
+    """Flat binding name of one rank's input in a multi-rank launch."""
+
+    return f"{name}@rank{rank}"
+
+
+def _multicast_replica_name(window_index: int, rank: int) -> str:
+    return f"__numsim_multicast_replica__:{window_index}@rank{rank}"
+
+
 @dataclass
 class PreparedBindings:
     allocations: tuple[PreparedAllocation, ...]
@@ -139,6 +218,59 @@ class PreparedBindings:
     scalars: dict[str, PreparedScalar]
     _originals: dict[str, _OriginalBuffer] = field(repr=False, compare=False)
     _host_allocations: tuple[_HostAllocation, ...] = field(repr=False, compare=False)
+    # Multi-rank launches: per rank, kernel binding name -> flat binding name.
+    rank_names: tuple[dict[str, str], ...] = ()
+    # (window allocation, replica allocation per rank)
+    multicast: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    # Multi-rank launches: per allocation, None or (owner rank, symmetric, name).
+    rank_mappings: tuple[tuple[int, bool, str] | None, ...] = ()
+
+    def _rank_mapping_payload(self) -> list[dict[str, Any] | None]:
+        return [
+            None if mapping is None
+            else {"rank": mapping[0], "symmetric": mapping[1], "name": mapping[2]}
+            for mapping in self.rank_mappings
+        ]
+
+    @property
+    def world_size(self) -> int:
+        return len(self.rank_names) or 1
+
+    def multicast_window_allocations(self) -> frozenset[int]:
+        return frozenset(window for window, _ in self.multicast)
+
+    def multicast_replica_allocations(self) -> frozenset[int]:
+        return frozenset(
+            replica for _, replicas in self.multicast for replica in replicas
+        )
+
+    def _buffer_payload(self, name: str) -> dict[str, Any]:
+        buffer = self.buffers[name]
+        return {
+            "allocation": buffer.allocation,
+            "data_offset": buffer.data_offset,
+            "dtype": buffer.dtype,
+            "itemsize": buffer.itemsize,
+            "shape": list(buffer.shape),
+            "byte_strides": list(buffer.byte_strides),
+        }
+
+    def _rank_payloads(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "buffers": {
+                    name: self._buffer_payload(flat)
+                    for name, flat in sorted(names.items())
+                    if flat in self.buffers
+                },
+                "scalars": {
+                    name: {"value": self.scalars[flat].value, "dtype": self.scalars[flat].dtype}
+                    for name, flat in sorted(names.items())
+                    if flat in self.scalars
+                },
+            }
+            for names in self.rank_names
+        ]
 
     def _write_through_allocations(self) -> frozenset[int]:
         return frozenset(
@@ -297,6 +429,18 @@ class PreparedBindings:
                 name: {"dtype": scalar.dtype, "value": _scalar_identity_value(scalar.value)}
                 for name, scalar in sorted(self.scalars.items())
             },
+            **(
+                {
+                    "ranks": [dict(sorted(names.items())) for names in self.rank_names],
+                    "multicast": [
+                        {"window": window, "replicas": list(replicas)}
+                        for window, replicas in self.multicast
+                    ],
+                    "rank_mappings": self._rank_mapping_payload(),
+                }
+                if self.rank_names
+                else {}
+            ),
         }
 
     def with_allocation_state(self, states: Sequence[Any]) -> PreparedBindings:
@@ -419,6 +563,38 @@ class PreparedBindings:
             else frozenset()
         )
         host_backed = write_through_allocations | readonly_allocations
+        windows = self.multicast_window_allocations()
+        # multimem writes reach replicas through a window no buffer names.
+        replicas = self.multicast_replica_allocations()
+        payload = self._single_rank_payload(
+            returned_names, write_through_allocations, readonly_allocations, host_backed
+        )
+        if not self.rank_names:
+            return payload
+        payload["output_allocations"] = sorted(
+            (set(payload["output_allocations"]) | replicas) - windows
+        )
+        payload["written_allocations"] = sorted(
+            (set(payload["written_allocations"]) | replicas) - windows
+        )
+        ranks = self._rank_payloads()
+        payload["ranks"] = ranks
+        payload["buffers"] = ranks[0]["buffers"]
+        payload["scalars"] = ranks[0]["scalars"]
+        payload["multicast"] = [
+            {"window": window, "replicas": list(replica_allocations)}
+            for window, replica_allocations in self.multicast
+        ]
+        payload["rank_mappings"] = self._rank_mapping_payload()
+        return payload
+
+    def _single_rank_payload(
+        self,
+        returned_names: set[str],
+        write_through_allocations: frozenset[int],
+        readonly_allocations: frozenset[int],
+        host_backed: frozenset[int],
+    ) -> dict[str, Any]:
         return {
             "numsim_abi_version": NUMSIM_ABI_VERSION,
             "allocations": [
@@ -592,7 +768,10 @@ class PreparedBindings:
 
         outputs: dict[str, np.ndarray] = {}
         selected = output_names if output_names is not None else set(self.buffers)
+        windows = self.multicast_window_allocations()
         for name, descriptor in self.buffers.items():
+            if descriptor.allocation in windows:
+                continue
             original = self._originals[name]
             physical = copied[descriptor.allocation]
             if physical is None:
@@ -1440,4 +1619,153 @@ def prepare_bindings(
         scalars=scalars,
         _originals=originals,
         _host_allocations=tuple(host_allocations),
+    )
+
+
+def prepare_rank_bindings(
+    rank_inputs: Sequence[dict[str, Any]],
+    *,
+    expected_scalar_dtypes: dict[str, str] | None = None,
+    expected_buffer_dtypes: dict[str, str] | None = None,
+    expected_tensor_map_names: Sequence[set[str] | frozenset[str]] | None = None,
+) -> PreparedBindings:
+    """Prepare one launch whose ranks share a single physical memory.
+
+    Each rank binds the kernel's parameters independently. A
+    :class:`MulticastWindow` value binds a parameter to the multicast address
+    whose replicas are the window's per-rank arrays; a :class:`SymmetricBuffer`
+    binds rank ``r``'s parameter to replica ``r``.
+
+    Every allocation one rank alone binds is that rank's device memory.
+    Symmetric-buffer and multicast replicas are symmetric memory, which every
+    rank maps; arrays several ranks bind are host memory, unowned.
+    """
+
+    rank_inputs = tuple(rank_inputs)
+    if not rank_inputs or not all(isinstance(inputs, dict) for inputs in rank_inputs):
+        raise NumSimExecutionError("multi-rank NumSim inputs must be a non-empty list of dicts")
+    world_size = len(rank_inputs)
+    expected_scalar_dtypes = expected_scalar_dtypes or {}
+    expected_buffer_dtypes = expected_buffer_dtypes or {}
+    tensor_map_names = tuple(expected_tensor_map_names or (frozenset(),) * world_size)
+
+    windows: list[MulticastWindow] = []
+    symmetric_keys: dict[str, int] = {}
+    flat: dict[str, Any] = {}
+    flat_scalar_dtypes: dict[str, str] = {}
+    flat_buffer_dtypes: dict[str, str] = {}
+    flat_tensor_maps: set[str] = set()
+    rank_names: list[dict[str, str]] = []
+    for rank, inputs in enumerate(rank_inputs):
+        names: dict[str, str] = {}
+        for name, value in inputs.items():
+            key = rank_binding_name(name, rank)
+            names[name] = key
+            if isinstance(value, SymmetricBuffer):
+                if len(value.replicas) != world_size:
+                    raise NumSimExecutionError(
+                        f"symmetric buffer bound to {name!r} has {len(value.replicas)} "
+                        f"replicas for {world_size} ranks"
+                    )
+                value = value.replicas[rank]
+                symmetric_keys[key] = rank
+            elif isinstance(value, MulticastWindow):
+                if len(value.replicas) != world_size:
+                    raise NumSimExecutionError(
+                        f"multicast window bound to {name!r} has {len(value.replicas)} "
+                        f"replicas for {world_size} ranks"
+                    )
+                if not any(window is value for window in windows):
+                    windows.append(value)
+                value = value._placeholder
+            flat[key] = value
+            if name in expected_scalar_dtypes:
+                flat_scalar_dtypes[key] = expected_scalar_dtypes[name]
+            if name in expected_buffer_dtypes:
+                flat_buffer_dtypes[key] = expected_buffer_dtypes[name]
+            if rank < len(tensor_map_names) and name in tensor_map_names[rank]:
+                flat_tensor_maps.add(key)
+        rank_names.append(names)
+    for window_index, window in enumerate(windows):
+        for rank, replica in enumerate(window.replicas):
+            flat[_multicast_replica_name(window_index, rank)] = replica
+
+    prepared = prepare_bindings(
+        flat,
+        expected_scalar_dtypes=flat_scalar_dtypes,
+        expected_buffer_dtypes=flat_buffer_dtypes,
+        expected_tensor_map_names=flat_tensor_maps,
+    )
+
+    multicast: list[tuple[int, tuple[int, ...]]] = []
+    placeholder_allocations: set[int] = set()
+    for window_index, window in enumerate(windows):
+        placeholder = next(
+            prepared.buffers[key]
+            for key, value in flat.items()
+            if value is window._placeholder
+        )
+        window_allocation = placeholder.allocation
+        if prepared.allocations[window_allocation].byte_len != window._placeholder.nbytes:
+            raise NumSimExecutionError("multicast window placeholder shares its allocation")
+        replicas: list[int] = []
+        for rank in range(world_size):
+            replica = prepared.buffers[_multicast_replica_name(window_index, rank)]
+            if replica.data_offset != 0:
+                raise NumSimExecutionError(
+                    f"multicast replica for rank {rank} must start its allocation; it lies "
+                    f"{replica.data_offset} bytes into another bound array's storage"
+                )
+            if replica.allocation in replicas or replica.allocation == window_allocation:
+                raise NumSimExecutionError(
+                    f"multicast replica for rank {rank} aliases another replica's storage"
+                )
+            replicas.append(replica.allocation)
+        placeholder_allocations.add(window_allocation)
+        multicast.append((window_allocation, tuple(replicas)))
+    for left, (_, left_replicas) in enumerate(multicast):
+        for right_window, _ in multicast[left + 1 :]:
+            if right_window in left_replicas:
+                raise NumSimExecutionError("a multicast window cannot be another window's replica")
+
+    hidden = {
+        _multicast_replica_name(window_index, rank)
+        for window_index in range(len(windows))
+        for rank in range(world_size)
+    }
+    symmetric: dict[int, tuple[int, str]] = {}
+    for key, rank in symmetric_keys.items():
+        owner = symmetric.setdefault(prepared.buffers[key].allocation, (rank, key))
+        if owner[0] != rank:
+            raise NumSimExecutionError(
+                f"symmetric buffer {key!r} shares its storage with {owner[1]!r} of rank {owner[0]}"
+            )
+    for window_index, (_, replicas) in enumerate(multicast):
+        for rank, allocation in enumerate(replicas):
+            symmetric.setdefault(allocation, (rank, _multicast_replica_name(window_index, rank)))
+    binders: dict[int, dict[int, str]] = {}
+    for rank, names in enumerate(rank_names):
+        for key in names.values():
+            if key in prepared.buffers:
+                binders.setdefault(prepared.buffers[key].allocation, {}).setdefault(rank, key)
+    windows_allocations = {window for window, _ in multicast}
+    rank_mappings: list[tuple[int, bool, str] | None] = []
+    for allocation in range(len(prepared.allocations)):
+        if allocation in symmetric:
+            rank, key = symmetric[allocation]
+            rank_mappings.append((rank, True, key))
+        elif allocation in windows_allocations or len(binders.get(allocation, {})) != 1:
+            rank_mappings.append(None)
+        else:
+            ((rank, key),) = binders[allocation].items()
+            rank_mappings.append((rank, False, key))
+    return replace(
+        prepared,
+        buffers={name: value for name, value in prepared.buffers.items() if name not in hidden},
+        _originals={
+            name: value for name, value in prepared._originals.items() if name not in hidden
+        },
+        rank_names=tuple(rank_names),
+        multicast=tuple(multicast),
+        rank_mappings=tuple(rank_mappings),
     )

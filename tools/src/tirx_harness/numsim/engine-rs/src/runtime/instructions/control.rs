@@ -139,7 +139,11 @@ pub async fn clc_try_cancel<const MULTICAST: bool>(
     };
     for lane in context.active_mask().into_inner() {
         let issuing = context.with_active_mask(LaneMask::from_bits(1_u32 << lane));
-        let next_task = engine(warp).kernel().services().clc_tasks().try_cancel()?;
+        let next_task = engine(warp)
+            .kernel()
+            .services()
+            .clc_tasks()
+            .try_cancel(context.into_inner().rank())?;
         let mut response_bytes = [0_u8; 16];
         response_bytes[..4].copy_from_slice(&next_task.to_le_bytes());
         let operation = engine(warp).begin_optional_operation(
