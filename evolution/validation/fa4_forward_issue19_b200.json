@@ -1,0 +1,454 @@
+{
+  "schema_version": 1,
+  "gpu": "NVIDIA B200",
+  "scope": "Historical FA4 forward correctness evidence for issue #19, collected 2026-10-09. Evidence-only publication; GPU was not rerun.",
+  "artifacts": {
+    "full": {
+      "format": "json",
+      "original_sha256": "24f7ece9e05a748589f308e061aa55522b20bd3c48f87b9dfb553256f1f05b86",
+      "representation": "Task-filtered derivative of the original combined JSONL. Every forward case and all its fields, original metadata, and original combined summary are unchanged; the separately labeled forward summary is derived. No numerical field was removed or rounded.",
+      "content": {
+        "scope": "Forward cases only; original metadata and original_combined_summary describe the historical joint forward/backward run.",
+        "metadata": {
+          "kind": "metadata",
+          "python": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+          "torch": "2.9.1+cu128",
+          "cuda": "12.8",
+          "gpu": "NVIDIA B200",
+          "capability": [10, 0],
+          "package_versions": {
+            "torch": "2.9.1+cu128",
+            "flash-attn-4": "4.0.0b33",
+            "quack-kernels": "0.6.4",
+            "nvidia-cutlass-dsl": "4.6.2"
+          },
+          "tasks": ["forward", "backward"],
+          "max_workloads": 0,
+          "source_hashes": {
+            "forward": "5ca1fbbd615fd4a65b0fba67fc163de2c3421564394bb56e7ca1c62318c602ae",
+            "backward": "8bc02825df3fb4e685a529559eb373943a6e530c582d05388ea1518e41742fc8"
+          },
+          "source_revision": "6449c3d7bf3e965c71333a2200843446310953c7",
+          "oracle": "FP32 PyTorch SDPA MATH; sequential batch/head; backward autograd; TF32 disabled",
+          "forward_runtime": "validation-only substitution: FA4 CuTe _flash_attn_fwd",
+          "repository_forward_baseline": "flash_attn.flash_attn_func (FA2)",
+          "exact_unmodified_forward_baseline_validated": false,
+          "backward_runtime": "unmodified fa4_backward.baseline.run"
+        },
+        "cases": [
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.0005004405975341797, "max_rel": 244.1542205810547, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 0.0005004405975341797, "max_rel": 244.1542205810547, "max_rms_ratio": 0.00026498199440538883, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.00026498198979484446, "rms_reference": 0.03234582766890526, "max_abs": 0.0005004405975341797, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 1.83203125, "max_rel": 1.0, "max_rms_ratio": 0.0, "matched": 0.947669267654419, "note": "elementwise matched ratio 0.947669 < 0.999"}, "gated": {"passed": false, "max_abs": 1.83203125, "max_rel": 1.0, "max_rms_ratio": 0.9999996423721313, "matched": 0.947669267654419, "note": "elementwise matched ratio 0.947669 < 0.999; output 0 normalized RMS ratio 1 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.999999690841211, "rms_reference": 0.03234582766890526, "max_abs": 1.83203125, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 0.916015625, "max_rel": 122.22441864013672, "max_rms_ratio": 0.0, "matched": 0.9871373176574707, "note": "elementwise matched ratio 0.987137 < 0.999"}, "gated": {"passed": false, "max_abs": 0.916015625, "max_rel": 122.22441864013672, "max_rms_ratio": 0.500001072883606, "matched": 0.9871373176574707, "note": "elementwise matched ratio 0.987137 < 0.999; output 0 normalized RMS ratio 0.500001 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.5000011122974662, "rms_reference": 0.03234582766890526, "max_abs": 0.916015625, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd4096c-fa4-fp16-b1-s4096-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.0005285739898681641, "max_rel": 224.8340301513672, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 0.0005285739898681641, "max_rel": 224.8340301513672, "max_rms_ratio": 0.0002659237361513078, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.00026592371672515253, "rms_reference": 0.023791354149580002, "max_abs": 0.0005285739898681641, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd4096c-fa4-fp16-b1-s4096-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 1.75, "max_rel": 1.0, "max_rms_ratio": 0.0, "matched": 0.9748744964599609, "note": "elementwise matched ratio 0.974874 < 0.999"}, "gated": {"passed": false, "max_abs": 1.75, "max_rel": 1.0, "max_rms_ratio": 0.9999995827674866, "matched": 0.9748744964599609, "note": "elementwise matched ratio 0.974874 < 0.999; output 0 normalized RMS ratio 1 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.999999579679419, "rms_reference": 0.023791354149580002, "max_abs": 1.75, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd4096c-fa4-fp16-b1-s4096-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 0.875, "max_rel": 115.091552734375, "max_rms_ratio": 0.0, "matched": 0.9937610626220703, "note": "elementwise matched ratio 0.993761 < 0.999"}, "gated": {"passed": false, "max_abs": 0.875, "max_rel": 115.091552734375, "max_rms_ratio": 0.5000000596046448, "matched": 0.9937610626220703, "note": "elementwise matched ratio 0.993761 < 0.999; output 0 normalized RMS ratio 0.5 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.5000000638575414, "rms_reference": 0.023791354149580002, "max_abs": 0.875, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2x409-fa4-fp16-b2-s4096-h16-d128-causal", "axes": {"batch_size": 2, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.000546574592590332, "max_rel": 259.01666259765625, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 0.000546574592590332, "max_rel": 259.01666259765625, "max_rms_ratio": 0.00026665430050343275, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.00026665428865570807, "rms_reference": 0.023990919813513756, "max_abs": 0.000546574592590332, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2x409-fa4-fp16-b2-s4096-h16-d128-causal", "axes": {"batch_size": 2, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 2.21875, "max_rel": 1.0, "max_rms_ratio": 0.0, "matched": 0.9742336273193359, "note": "elementwise matched ratio 0.974234 < 0.999"}, "gated": {"passed": false, "max_abs": 2.21875, "max_rel": 1.0, "max_rms_ratio": 0.9999995827674866, "matched": 0.9742336273193359, "note": "elementwise matched ratio 0.974234 < 0.999; output 0 normalized RMS ratio 1 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.9999995831758052, "rms_reference": 0.023990919813513756, "max_abs": 2.21875, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2x409-fa4-fp16-b2-s4096-h16-d128-causal", "axes": {"batch_size": 2, "seq_len": 4096, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 1.109375, "max_rel": 128.3124237060547, "max_rms_ratio": 0.0, "matched": 0.993506669998169, "note": "elementwise matched ratio 0.993507 < 0.999"}, "gated": {"passed": false, "max_abs": 1.109375, "max_rel": 128.3124237060547, "max_rms_ratio": 0.4999992549419403, "matched": 0.993506669998169, "note": "elementwise matched ratio 0.993507 < 0.999; output 0 normalized RMS ratio 0.499999 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.49999924811100754, "rms_reference": 0.023990919813513756, "max_abs": 1.109375, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192c-fa4-fp16-b1-s8192-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.0006327629089355469, "max_rel": 421.106689453125, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 0.0006327629089355469, "max_rel": 421.106689453125, "max_rms_ratio": 0.00026851100847125053, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.000268511003811671, "rms_reference": 0.017418066039681435, "max_abs": 0.0006327629089355469, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192c-fa4-fp16-b1-s8192-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 1.69921875, "max_rel": 1.0, "max_rms_ratio": 0.0, "matched": 0.9874191880226135, "note": "elementwise matched ratio 0.987419 < 0.999"}, "gated": {"passed": false, "max_abs": 1.69921875, "max_rel": 1.0, "max_rms_ratio": 0.999999463558197, "matched": 0.9874191880226135, "note": "elementwise matched ratio 0.987419 < 0.999; output 0 normalized RMS ratio 0.999999 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.9999994258837785, "rms_reference": 0.017418066039681435, "max_abs": 1.69921875, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192c-fa4-fp16-b1-s8192-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 0.849609375, "max_rel": 210.3134002685547, "max_rms_ratio": 0.0, "matched": 0.9968880414962769, "note": "elementwise matched ratio 0.996888 < 0.999"}, "gated": {"passed": false, "max_abs": 0.849609375, "max_rel": 210.3134002685547, "max_rms_ratio": 0.4999995827674866, "matched": 0.9968880414962769, "note": "elementwise matched ratio 0.996888 < 0.999; output 0 normalized RMS ratio 0.5 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.49999955253567, "rms_reference": 0.017418066039681435, "max_abs": 0.849609375, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192n-fa4-fp16-b1-s8192-h16-d128-noncausal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": false, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 1.3278797268867493e-05, "max_rel": 180.3519287109375, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 1.3278797268867493e-05, "max_rel": 180.3519287109375, "max_rms_ratio": 0.0002953275397885591, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.00029532753415398045, "rms_reference": 0.005678992718458176, "max_abs": 1.3278797268867493e-05, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192n-fa4-fp16-b1-s8192-h16-d128-noncausal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": false, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.027595490217208862, "max_rel": 0.9999996423721313, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": false, "max_abs": 0.027595490217208862, "max_rel": 0.9999996423721313, "max_rms_ratio": 0.9999982714653015, "matched": 1.0, "note": "output 0 normalized RMS ratio 0.999998 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.9999982391274497, "rms_reference": 0.005678992718458176, "max_abs": 0.027595490217208862, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd8192n-fa4-fp16-b1-s8192-h16-d128-noncausal", "axes": {"batch_size": 1, "seq_len": 8192, "num_heads": 16, "head_dim": 128, "causal": false, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.013801544904708862, "max_rel": 88.34011840820312, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": false, "max_abs": 0.013801544904708862, "max_rel": 88.34011840820312, "max_rms_ratio": 0.5000036358833313, "matched": 1.0, "note": "output 0 normalized RMS ratio 0.500004 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.5000036293997069, "rms_reference": 0.005678992718458176, "max_abs": 0.013801544904708862, "rms_limit": 0.2}]}
+        ],
+        "original_combined_summary": {
+          "kind": "summary",
+          "passed": true,
+          "failed_expectations": 0,
+          "cases": 60,
+          "workload_counts": {
+            "forward": 5,
+            "backward": 5
+          },
+          "legacy_false_positives": {
+            "forward": 2,
+            "backward": 40
+          },
+          "preflight_only": false
+        },
+        "derived_forward_summary": {
+          "cases": 15,
+          "workloads": 5,
+          "expectations_met": 15,
+          "genuine_accepted": 5,
+          "corrupted_rejected": 10,
+          "legacy_false_positives": 2
+        }
+      }
+    },
+    "smoke": {
+      "format": "json",
+      "original_sha256": "9030de26b30f4fe2ee3ea60ffdfac4e20b37a2ab68f4e46f8dd1a8b2ecf95946",
+      "representation": "Task-filtered derivative of the original combined JSONL. Every forward case and all its fields, original metadata, and original combined summary are unchanged; the separately labeled forward summary is derived. No numerical field was removed or rounded.",
+      "content": {
+        "scope": "Forward cases only; original metadata and original_combined_summary describe the historical joint forward/backward run.",
+        "metadata": {
+          "kind": "metadata",
+          "python": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+          "torch": "2.9.1+cu128",
+          "cuda": "12.8",
+          "gpu": "NVIDIA B200",
+          "capability": [10, 0],
+          "package_versions": {
+            "torch": "2.9.1+cu128",
+            "flash-attn-4": "4.0.0b33",
+            "quack-kernels": "0.6.4",
+            "nvidia-cutlass-dsl": "4.6.2"
+          },
+          "tasks": ["forward", "backward"],
+          "max_workloads": 1,
+          "source_hashes": {
+            "forward": "5ca1fbbd615fd4a65b0fba67fc163de2c3421564394bb56e7ca1c62318c602ae",
+            "backward": "8bc02825df3fb4e685a529559eb373943a6e530c582d05388ea1518e41742fc8"
+          },
+          "source_revision": "6449c3d7bf3e965c71333a2200843446310953c7",
+          "oracle": "FP32 PyTorch SDPA MATH; sequential batch/head; backward autograd; TF32 disabled",
+          "forward_runtime": "validation-only substitution: FA4 CuTe _flash_attn_fwd",
+          "repository_forward_baseline": "flash_attn.flash_attn_func (FA2)",
+          "exact_unmodified_forward_baseline_validated": false,
+          "backward_runtime": "unmodified fa4_backward.baseline.run"
+        },
+        "cases": [
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "genuine", "expected_gate_pass": true, "expectation_met": true, "legacy": {"passed": true, "max_abs": 0.0005004405975341797, "max_rel": 244.1542205810547, "max_rms_ratio": 0.0, "matched": 1.0, "note": "ok"}, "gated": {"passed": true, "max_abs": 0.0005004405975341797, "max_rel": 244.1542205810547, "max_rms_ratio": 0.00026498199440538883, "matched": 1.0, "note": "ok"}, "per_output": [{"name": "out", "rms_error_ratio": 0.00026498198979484446, "rms_reference": 0.03234582766890526, "max_abs": 0.0005004405975341797, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 1.83203125, "max_rel": 1.0, "max_rms_ratio": 0.0, "matched": 0.947669267654419, "note": "elementwise matched ratio 0.947669 < 0.999"}, "gated": {"passed": false, "max_abs": 1.83203125, "max_rel": 1.0, "max_rms_ratio": 0.9999996423721313, "matched": 0.947669267654419, "note": "elementwise matched ratio 0.947669 < 0.999; output 0 normalized RMS ratio 1 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.999999690841211, "rms_reference": 0.03234582766890526, "max_abs": 1.83203125, "rms_limit": 0.2}]},
+          {"kind": "case", "task": "forward", "workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "axes": {"batch_size": 1, "seq_len": 2048, "num_heads": 16, "head_dim": 128, "causal": true, "sm_scale": 0.08838834764831843}, "variant": "0.5:out", "expected_gate_pass": false, "expectation_met": true, "legacy": {"passed": false, "max_abs": 0.916015625, "max_rel": 122.22441864013672, "max_rms_ratio": 0.0, "matched": 0.9871373176574707, "note": "elementwise matched ratio 0.987137 < 0.999"}, "gated": {"passed": false, "max_abs": 0.916015625, "max_rel": 122.22441864013672, "max_rms_ratio": 0.500001072883606, "matched": 0.9871373176574707, "note": "elementwise matched ratio 0.987137 < 0.999; output 0 normalized RMS ratio 0.500001 >= 0.2"}, "per_output": [{"name": "out", "rms_error_ratio": 0.5000011122974662, "rms_reference": 0.03234582766890526, "max_abs": 0.916015625, "rms_limit": 0.2}]}
+        ],
+        "original_combined_summary": {
+          "kind": "summary",
+          "passed": true,
+          "failed_expectations": 0,
+          "cases": 12,
+          "workload_counts": {
+            "forward": 1,
+            "backward": 1
+          },
+          "legacy_false_positives": {
+            "forward": 0,
+            "backward": 8
+          },
+          "preflight_only": false
+        },
+        "derived_forward_summary": {
+          "cases": 3,
+          "workloads": 1,
+          "expectations_met": 3,
+          "genuine_accepted": 1,
+          "corrupted_rejected": 2,
+          "legacy_false_positives": 0
+        }
+      }
+    },
+    "environment": {
+      "format": "json",
+      "original_sha256": "e2ec00120cf7c696213370313e7fd7b2ad9c11d97c0332c05b0a33d2e5e89f87",
+      "representation": "Lossless structured derivative of all 161 pip-freeze name/version pairs, in original order. Each version value is prefixed by the explicit label version: to distinguish four-part versions from addresses; removing that label recovers every original version string.",
+      "content": {
+        "packages": [
+          {"name": "anyio", "version": "version: 4.12.0"},
+          {"name": "apache-tvm-ffi", "version": "version: 0.1.14.post1"},
+          {"name": "argon2-cffi", "version": "version: 25.1.0"},
+          {"name": "argon2-cffi-bindings", "version": "version: 25.1.0"},
+          {"name": "arrow", "version": "version: 1.4.0"},
+          {"name": "asttokens", "version": "version: 3.0.1"},
+          {"name": "async-lru", "version": "version: 2.0.5"},
+          {"name": "attrs", "version": "version: 25.4.0"},
+          {"name": "babel", "version": "version: 2.17.0"},
+          {"name": "beautifulsoup4", "version": "version: 4.14.3"},
+          {"name": "bleach", "version": "version: 6.3.0"},
+          {"name": "blinker", "version": "version: 1.4"},
+          {"name": "certifi", "version": "version: 2025.11.12"},
+          {"name": "cffi", "version": "version: 2.0.0"},
+          {"name": "charset-normalizer", "version": "version: 3.4.4"},
+          {"name": "comm", "version": "version: 0.2.3"},
+          {"name": "cryptography", "version": "version: 3.4.8"},
+          {"name": "cuda-bindings", "version": "version: 13.4.3"},
+          {"name": "cuda-core", "version": "version: 1.2.1"},
+          {"name": "cuda-pathfinder", "version": "version: 1.8.3"},
+          {"name": "cuda-python", "version": "version: 13.4.1"},
+          {"name": "dbus-python", "version": "version: 1.2.18"},
+          {"name": "debugpy", "version": "version: 1.8.19"},
+          {"name": "decorator", "version": "version: 5.2.1"},
+          {"name": "defusedxml", "version": "version: 0.7.1"},
+          {"name": "distlib", "version": "version: 0.4.0"},
+          {"name": "distro", "version": "version: 1.7.0"},
+          {"name": "einops", "version": "version: 0.8.2"},
+          {"name": "executing", "version": "version: 2.2.1"},
+          {"name": "fastjsonschema", "version": "version: 2.21.2"},
+          {"name": "filelock", "version": "version: 3.20.1"},
+          {"name": "flash-attn-4", "version": "version: 4.0.0b33"},
+          {"name": "fqdn", "version": "version: 1.5.1"},
+          {"name": "fsspec", "version": "version: 2025.12.0"},
+          {"name": "h11", "version": "version: 0.16.0"},
+          {"name": "hf_transfer", "version": "version: 0.1.9"},
+          {"name": "httpcore", "version": "version: 1.0.9"},
+          {"name": "httplib2", "version": "version: 0.20.2"},
+          {"name": "httpx", "version": "version: 0.28.1"},
+          {"name": "idna", "version": "version: 3.11"},
+          {"name": "importlib-metadata", "version": "version: 4.6.4"},
+          {"name": "iniconfig", "version": "version: 2.3.1"},
+          {"name": "ipykernel", "version": "version: 7.1.0"},
+          {"name": "ipython", "version": "version: 9.8.0"},
+          {"name": "ipython_pygments_lexers", "version": "version: 1.1.1"},
+          {"name": "ipywidgets", "version": "version: 8.1.8"},
+          {"name": "isoduration", "version": "version: 20.11.0"},
+          {"name": "jedi", "version": "version: 0.19.2"},
+          {"name": "jeepney", "version": "version: 0.7.1"},
+          {"name": "Jinja2", "version": "version: 3.1.6"},
+          {"name": "json5", "version": "version: 0.12.1"},
+          {"name": "jsonpointer", "version": "version: 3.0.0"},
+          {"name": "jsonschema", "version": "version: 4.25.1"},
+          {"name": "jsonschema-specifications", "version": "version: 2025.9.1"},
+          {"name": "jupyter-archive", "version": "version: 3.4.0"},
+          {"name": "jupyter-events", "version": "version: 0.12.0"},
+          {"name": "jupyter-lsp", "version": "version: 2.3.0"},
+          {"name": "jupyter_client", "version": "version: 8.7.0"},
+          {"name": "jupyter_core", "version": "version: 5.9.1"},
+          {"name": "jupyter_server", "version": "version: 2.17.0"},
+          {"name": "jupyter_server_terminals", "version": "version: 0.5.3"},
+          {"name": "jupyterlab", "version": "version: 4.4.10"},
+          {"name": "jupyterlab_pygments", "version": "version: 0.3.0"},
+          {"name": "jupyterlab_server", "version": "version: 2.28.0"},
+          {"name": "jupyterlab_widgets", "version": "version: 3.0.16"},
+          {"name": "keyring", "version": "version: 23.5.0"},
+          {"name": "lark", "version": "version: 1.3.1"},
+          {"name": "launchpadlib", "version": "version: 1.10.16"},
+          {"name": "lazr.restfulclient", "version": "version: 0.14.4"},
+          {"name": "lazr.uri", "version": "version: 1.0.6"},
+          {"name": "MarkupSafe", "version": "version: 3.0.3"},
+          {"name": "matplotlib-inline", "version": "version: 0.2.1"},
+          {"name": "mistune", "version": "version: 3.1.4"},
+          {"name": "more-itertools", "version": "version: 8.10.0"},
+          {"name": "mpmath", "version": "version: 1.3.0"},
+          {"name": "nbclient", "version": "version: 0.10.2"},
+          {"name": "nbconvert", "version": "version: 7.16.6"},
+          {"name": "nbformat", "version": "version: 5.10.4"},
+          {"name": "nest-asyncio", "version": "version: 1.6.0"},
+          {"name": "networkx", "version": "version: 3.6.1"},
+          {"name": "notebook", "version": "version: 7.4.2"},
+          {"name": "notebook_shim", "version": "version: 0.2.4"},
+          {"name": "numpy", "version": "version: 2.5.3"},
+          {"name": "nvidia-cublas-cu12", "version": "version: 12.8.4.1"},
+          {"name": "nvidia-cuda-cupti-cu12", "version": "version: 12.8.90"},
+          {"name": "nvidia-cuda-nvdisasm", "version": "version: 13.4.92"},
+          {"name": "nvidia-cuda-nvrtc-cu12", "version": "version: 12.8.93"},
+          {"name": "nvidia-cuda-runtime-cu12", "version": "version: 12.8.90"},
+          {"name": "nvidia-cudnn-cu12", "version": "version: 9.10.2.21"},
+          {"name": "nvidia-cufft-cu12", "version": "version: 11.3.3.83"},
+          {"name": "nvidia-cufile-cu12", "version": "version: 1.13.1.3"},
+          {"name": "nvidia-curand-cu12", "version": "version: 10.3.9.90"},
+          {"name": "nvidia-cusolver-cu12", "version": "version: 11.7.3.90"},
+          {"name": "nvidia-cusparse-cu12", "version": "version: 12.5.8.93"},
+          {"name": "nvidia-cusparselt-cu12", "version": "version: 0.7.1"},
+          {"name": "nvidia-cutlass-dsl", "version": "version: 4.6.2"},
+          {"name": "nvidia-cutlass-dsl-libs-base", "version": "version: 4.6.2"},
+          {"name": "nvidia-cutlass-dsl-libs-core", "version": "version: 4.6.2"},
+          {"name": "nvidia-cutlass-dsl-libs-cu12", "version": "version: 4.6.2"},
+          {"name": "nvidia-nccl-cu12", "version": "version: 2.27.5"},
+          {"name": "nvidia-nvjitlink-cu12", "version": "version: 12.8.93"},
+          {"name": "nvidia-nvshmem-cu12", "version": "version: 3.3.20"},
+          {"name": "nvidia-nvtx-cu12", "version": "version: 12.8.90"},
+          {"name": "oauthlib", "version": "version: 3.2.0"},
+          {"name": "packaging", "version": "version: 25.0"},
+          {"name": "pandocfilters", "version": "version: 1.5.1"},
+          {"name": "parso", "version": "version: 0.8.5"},
+          {"name": "pexpect", "version": "version: 4.9.0"},
+          {"name": "platformdirs", "version": "version: 4.5.1"},
+          {"name": "pluggy", "version": "version: 1.6.0"},
+          {"name": "prometheus_client", "version": "version: 0.23.1"},
+          {"name": "prompt_toolkit", "version": "version: 3.0.52"},
+          {"name": "protobuf", "version": "version: 6.33.6"},
+          {"name": "psutil", "version": "version: 7.1.3"},
+          {"name": "ptyprocess", "version": "version: 0.7.0"},
+          {"name": "pure_eval", "version": "version: 0.2.3"},
+          {"name": "pycparser", "version": "version: 2.23"},
+          {"name": "Pygments", "version": "version: 2.19.2"},
+          {"name": "PyGObject", "version": "version: 3.42.1"},
+          {"name": "PyJWT", "version": "version: 2.3.0"},
+          {"name": "pyparsing", "version": "version: 2.4.7"},
+          {"name": "pytest", "version": "version: 8.4.2"},
+          {"name": "python-apt", "version": "version: 2.4.0+ubuntu4.1"},
+          {"name": "python-dateutil", "version": "version: 2.9.0.post0"},
+          {"name": "python-json-logger", "version": "version: 4.0.0"},
+          {"name": "PyYAML", "version": "version: 6.0.3"},
+          {"name": "pyzmq", "version": "version: 27.1.0"},
+          {"name": "quack-kernels", "version": "version: 0.6.4"},
+          {"name": "referencing", "version": "version: 0.37.0"},
+          {"name": "requests", "version": "version: 2.32.5"},
+          {"name": "rfc3339-validator", "version": "version: 0.1.4"},
+          {"name": "rfc3986-validator", "version": "version: 0.1.1"},
+          {"name": "rfc3987-syntax", "version": "version: 1.1.0"},
+          {"name": "rpds-py", "version": "version: 0.30.0"},
+          {"name": "SecretStorage", "version": "version: 3.3.1"},
+          {"name": "Send2Trash", "version": "version: 1.8.3"},
+          {"name": "setuptools", "version": "version: 80.9.0"},
+          {"name": "six", "version": "version: 1.16.0"},
+          {"name": "soupsieve", "version": "version: 2.8"},
+          {"name": "stack-data", "version": "version: 0.6.3"},
+          {"name": "sympy", "version": "version: 1.14.0"},
+          {"name": "terminado", "version": "version: 0.18.1"},
+          {"name": "tinycss2", "version": "version: 1.4.0"},
+          {"name": "torch", "version": "version: 2.9.1+cu128"},
+          {"name": "torch_c_dlpack_ext", "version": "version: 0.1.5"},
+          {"name": "torchaudio", "version": "version: 2.9.1+cu128"},
+          {"name": "tornado", "version": "version: 6.5.4"},
+          {"name": "traitlets", "version": "version: 5.14.3"},
+          {"name": "triton", "version": "version: 3.5.1"},
+          {"name": "typing_extensions", "version": "version: 4.15.0"},
+          {"name": "tzdata", "version": "version: 2025.3"},
+          {"name": "uri-template", "version": "version: 1.3.0"},
+          {"name": "urllib3", "version": "version: 2.6.2"},
+          {"name": "virtualenv", "version": "version: 20.35.4"},
+          {"name": "wadllib", "version": "version: 1.3.6"},
+          {"name": "wcwidth", "version": "version: 0.2.14"},
+          {"name": "webcolors", "version": "version: 25.10.0"},
+          {"name": "webencodings", "version": "version: 0.5.1"},
+          {"name": "websocket-client", "version": "version: 1.9.0"},
+          {"name": "widgetsnbextension", "version": "version: 4.0.15"},
+          {"name": "zipp", "version": "version: 1.0.0"}
+        ]
+      }
+    },
+    "source_manifest": {
+      "format": "json",
+      "original_sha256": "8e0cca163ca341ac484e070dda56f2b9a79d561fa72c081dac4638495a3c5549",
+      "representation": "Manifest derived by hashing the archived source bytes. All eight listed files are byte-identical to the PR implementation before this evidence-only update. The original source and result archives remain unchanged outside the PR.",
+      "content": {
+        "tested_base_revision": "6449c3d7bf3e965c71333a2200843446310953c7",
+        "tested_patch": "Forward normalized RMS limit (0.2,), its run_suite argument, and the forward CPU regression test match this PR. The historical source archive also contained the separate backward patch.",
+        "source_files_sha256": {
+          "evolution/benchmark/adapter.py": "b65a2e79d9f3eb3da3b138c303f7bfca942f5749a646ac4a4773deeb7e108259",
+          "evolution/benchmark/flashinfer_bench_evolve/benchmark_common.py": "3f8ba7d15d4cb4d07f9c3b86cb8b3b2680ff77c437cdf3c7e3d402dd50cacae1",
+          "evolution/benchmark/flashinfer_bench_evolve/tasks/fa4_forward/benchmark.py": "5ca1fbbd615fd4a65b0fba67fc163de2c3421564394bb56e7ca1c62318c602ae",
+          "evolution/benchmark/flashinfer_bench_evolve/tasks/fa4_forward/baseline.py": "3bfebec6aa6e027f94813e6844c62d9f1fd2b0fcfa061d5a8ff8e194fa3f153b",
+          "evolution/benchmark/flashinfer_bench_evolve/tasks/fa4_forward/definition.json": "f8f9ffa2eeb797dba8c10c3ac4623f6b2417829eba65f449ba3fe3a9cbd06fbb",
+          "evolution/benchmark/flashinfer_bench_evolve/tasks/fa4_forward/workload.jsonl": "399e7e49115e5f3616ccd4180190acaa6a845aaa4670a31c8844fc971c915e21",
+          "evolution/tests/test_fa4_forward_rms.py": "17c95a503f05d1d4df62833cc361a8c5ea268b7716d453d6cf91e19b3004ecbd",
+          "evolution/tests/test_input_dependence.py": "4b01e60b7605189e0785185286c8ef7c6325e874c054e15435544908277b201f"
+        },
+        "result_archive_sha256": "d7f6854211d721c225850fe5f873b28eb2c009acae6f3557e35ec3a27d731e72",
+        "files_verified_against": "639b83dd2fb028518b92924cd82ec4112c9df46a"
+      }
+    },
+    "validation_method": {
+      "format": "json",
+      "original_sha256": "cca4048c02155a11657060ea285262019be0c9be34cc365534cde2ed76197665",
+      "representation": "Method and invocation derivative of the original helper and archived workload source. The original helper hash identifies the historical execution script; the published helper hash identifies the adapted reproduction script. Input seeds are deterministically derived without GPU execution.",
+      "content": {
+        "published_helper": "evolution/validation/fa4_issue19_validate.py",
+        "published_helper_sha256": "0ca29f3953667820af80f2e6efa7656790838ed011a597ef5659b5a2c0ab910e",
+        "helper_adaptations": [
+          "Update the module description.",
+          "Require one explicit --task forward or --task backward instead of defaulting to both tasks.",
+          "Record the current Git HEAD instead of reading the historical source-revision override.",
+          "Use equivalent Python 3.10+ union syntax in isinstance for JSON sequence normalization to satisfy repository lint."
+        ],
+        "numerical_method": "The historical and published helpers retain the same oracle, input generation calls, variants, synchronization, comparisons, and numerical reporting. The published helper has not been rerun on GPU.",
+        "input_generation": "For each official workload, torch.manual_seed(_entry_seed(entry)); q, k, and v are sequential FP32 standard normal draws scaled by 0.5 and cast to FP16. The seeds below are derived from the archived benchmark and workload ordering, not additional measured output.",
+        "workload_inputs": [
+          {"workload": "fwd2048c-fa4-fp16-b1-s2048-h16-d128-causal", "shape": [1, 2048, 16, 128], "seed": 2894067797, "dtype": "float16", "causal": true, "sm_scale": 0.08838834764831843},
+          {"workload": "fwd4096c-fa4-fp16-b1-s4096-h16-d128-causal", "shape": [1, 4096, 16, 128], "seed": 378428603, "dtype": "float16", "causal": true, "sm_scale": 0.08838834764831843},
+          {"workload": "fwd2x409-fa4-fp16-b2-s4096-h16-d128-causal", "shape": [2, 4096, 16, 128], "seed": 1071686831, "dtype": "float16", "causal": true, "sm_scale": 0.08838834764831843},
+          {"workload": "fwd8192c-fa4-fp16-b1-s8192-h16-d128-causal", "shape": [1, 8192, 16, 128], "seed": 4007805548, "dtype": "float16", "causal": true, "sm_scale": 0.08838834764831843},
+          {"workload": "fwd8192n-fa4-fp16-b1-s8192-h16-d128-noncausal", "shape": [1, 8192, 16, 128], "seed": 3917596130, "dtype": "float16", "causal": false, "sm_scale": 0.08838834764831843}
+        ],
+        "oracle": "FP32 PyTorch SDPA MATH, sequential batch/head evaluation; dropout_p=0.0; TF32 disabled; highest FP32 matmul precision.",
+        "candidate": "Real FA4 CuTe _flash_attn_fwd. Zeroed and halved variants are formed from its outputs.",
+        "tolerances": {
+          "atol": 0.05,
+          "rtol": 0.05,
+          "required_matched_ratio": 0.999,
+          "required_rms_error_ratios": [0.2],
+          "rms_denominator_epsilon": 1e-08,
+          "rms_gate_absolute_error_floor": 1e-06
+        },
+        "scope_limits": [
+          "The original FA2 flash_attn_func baseline was not validated end to end.",
+          "GPU checks directly call the production comparator; CPU regression tests cover run_suite wiring.",
+          "No timing, throughput, speedup, or repeated-run stability was measured."
+        ],
+        "portable_historical_invocations": [
+          "\"${VALIDATION_PYTHON}\" \"${ORIGINAL_VALIDATOR}\" --max-workloads 1 --output \"${EVIDENCE_ROOT}/smoke.jsonl\"",
+          "\"${VALIDATION_PYTHON}\" \"${ORIGINAL_VALIDATOR}\" --output \"${EVIDENCE_ROOT}/full.jsonl\""
+        ],
+        "historical_invocation_note": "The original helper defaulted to both tasks. These are the original recipe commands with interpreter, script and output locations replaced by portable placeholders. New commands below use the published helper and explicitly select forward.",
+        "reproduction_commands": [
+          "\"${VALIDATION_ENV}/bin/python\" evolution/validation/fa4_issue19_validate.py --task forward --max-workloads 1 --output \"${EVIDENCE_ROOT}/forward-smoke.jsonl\"",
+          "\"${VALIDATION_ENV}/bin/python\" evolution/validation/fa4_issue19_validate.py --task forward --output \"${EVIDENCE_ROOT}/forward-full.jsonl\""
+        ]
+      }
+    },
+    "hardware": {
+      "format": "json",
+      "original_sha256": "65bf4ca3cfe4dad640171e73a48342012a03cbcb9bd2e5bdd0d17b1da34b811b",
+      "representation": "Hardware/software facts extracted from the original device report and run metadata. Execution timestamps, process listings and device identifiers are omitted; the original report remains unchanged outside the PR.",
+      "content": {
+        "gpu": "NVIDIA B200",
+        "architecture": "SM100",
+        "compute_capability": [10, 0],
+        "device_count": 1,
+        "memory_mib": 183359,
+        "driver": {
+          "version": "595.91.07"
+        },
+        "torch_cuda": {
+          "version": "12.8"
+        },
+        "driver_supported_cuda": {
+          "version": "13.2"
+        }
+      }
+    },
+    "full_warnings": {
+      "format": "json",
+      "original_sha256": "fb1b3fcbef833af91792b5271c22544aabfc5097045230c188de2db532478ff6",
+      "representation": "Warning-message derivative: removes only the execution-path prefix before UserWarning. Both original warning messages are preserved verbatim; numerical JSON records are retained in the task-filtered result artifacts.",
+      "content": {
+        "scope": "Warnings from the original combined forward/backward run.",
+        "warnings": [
+          "Argument aux_data (position 18) cannot be converted to a JitArgument for function 'cutlass___call___flash_attncuteflash_fwd_sm100FlashAttentionForwardSm100_object_at__Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgm'. Its type `<class 'flash_attn.cute.utils.AuxData'>` is not supported. If the value is known at compile time, annotate it: `aux_data: Constexpr`. Otherwise, implement the `JitArgument` or `DynamicExpression` protocol for type `<class 'flash_attn.cute.utils.AuxData'>`, or register a custom argument adapter.",
+          "Argument aux_data (position 21) cannot be converted to a JitArgument for function 'cutlass___call___flash_attncuteflash_bwd_sm100FlashAttentionBackwardSm100_object_at__Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorg'. Its type `<class 'flash_attn.cute.utils.AuxData'>` is not supported. If the value is known at compile time, annotate it: `aux_data: Constexpr`. Otherwise, implement the `JitArgument` or `DynamicExpression` protocol for type `<class 'flash_attn.cute.utils.AuxData'>`, or register a custom argument adapter."
+        ]
+      }
+    },
+    "smoke_warnings": {
+      "format": "json",
+      "original_sha256": "c15878195dc6323687467aa5171092c4e7555d819f92ae1e69367aaa90bf16ed",
+      "representation": "Warning-message derivative: removes only the execution-path prefix before UserWarning. Both original warning messages are preserved verbatim; numerical JSON records are retained in the task-filtered result artifacts.",
+      "content": {
+        "scope": "Warnings from the original combined forward/backward run.",
+        "warnings": [
+          "Argument aux_data (position 18) cannot be converted to a JitArgument for function 'cutlass___call___flash_attncuteflash_fwd_sm100FlashAttentionForwardSm100_object_at__Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgm'. Its type `<class 'flash_attn.cute.utils.AuxData'>` is not supported. If the value is known at compile time, annotate it: `aux_data: Constexpr`. Otherwise, implement the `JitArgument` or `DynamicExpression` protocol for type `<class 'flash_attn.cute.utils.AuxData'>`, or register a custom argument adapter.",
+          "Argument aux_data (position 21) cannot be converted to a JitArgument for function 'cutlass___call___flash_attncuteflash_bwd_sm100FlashAttentionBackwardSm100_object_at__Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorgmemoi64i64i641_Tensorg'. Its type `<class 'flash_attn.cute.utils.AuxData'>` is not supported. If the value is known at compile time, annotate it: `aux_data: Constexpr`. Otherwise, implement the `JitArgument` or `DynamicExpression` protocol for type `<class 'flash_attn.cute.utils.AuxData'>`, or register a custom argument adapter."
+        ]
+      }
+    },
+    "setup": {
+      "format": "json",
+      "original_sha256": "8c79df0537aa71289e65691341ecf7e4dcce432278f7a45ff16f528a4c3b8ca0",
+      "representation": "Setup-method derivative replacing execution locations with portable placeholders and preserving pinned dependencies. Warning text is extracted from the setup log, with its internal build-source prefix replaced by ${PYTORCH_SOURCE}; original script and log hashes are retained.",
+      "content": {
+        "setup_log_original_sha256": "03e6bdb4accba5fe5de3b2da09339f9cc0a689ba6b0965fe06ddeed78d49c795",
+        "warnings": [
+          "Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ${PYTORCH_SOURCE}/torch/csrc/utils/tensor_numpy.cpp:84.)",
+          "Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ${PYTORCH_SOURCE}/torch/csrc/utils/tensor_numpy.cpp:84.)",
+          "Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ${PYTORCH_SOURCE}/torch/csrc/utils/tensor_numpy.cpp:84.)"
+        ],
+        "warning_context": "The setup log contains three NumPy-unavailable warnings before dependency installation. The completed environment records numpy==2.5.3; the final numeric runs recorded no error-kind entries or failed expectations.",
+        "dependency_context": "The historical targeted environment reused PyTorch 2.9.1+cu128 and installed flash-attn-4==4.0.0b33 plus quack-kernels==0.6.4; CUTLASS DSL resolved to 4.6.2. The repository lock uses a different CUTLASS version, so this numeric validation is not an acceptance run of the full repository lock.",
+        "portable_setup_commands": [
+          "python3.12 -m venv \"${VALIDATION_ENV}\"",
+          "\"${VALIDATION_ENV}/bin/python\" -m pip install \"torch==2.9.1+cu128\" --index-url https://download.pytorch.org/whl/cu128",
+          "\"${VALIDATION_ENV}/bin/python\" -m pip install \"flash-attn-4==4.0.0b33\" \"quack-kernels==0.6.4\" \"nvidia-cutlass-dsl==4.6.2\" \"numpy==2.5.3\" \"pytest==8.4.2\""
+        ],
+        "setup_command_limit": "These portable commands recreate the principal validation dependencies in a fresh environment; they are adapted from the original setup and were not rerun for this evidence update. The full 161-package historical inventory is retained separately."
+      }
+    },
+    "regressions": {
+      "format": "text",
+      "original_sha256": "bee75c5bd79a714fc5745dfbd687412b09b7603026f030aaf4fc0e9dca868555",
+      "representation": "Verbatim log from the historical combined run of both FA4 regression files and input-dependence tests. Its 20 cases include the separate backward task and are not a current CI result.",
+      "content": "....................                                                     [100%]\n20 passed in 2.77s\n"
+    }
+  }
+}
