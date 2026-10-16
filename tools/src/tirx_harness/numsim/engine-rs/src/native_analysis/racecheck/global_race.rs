@@ -63,6 +63,7 @@ pub enum GlobalActorRelation {
     SameCta,
     SameCluster,
     CrossCluster,
+    CrossRank,
 }
 
 impl fmt::Display for GlobalActorRelation {
@@ -71,6 +72,7 @@ impl fmt::Display for GlobalActorRelation {
             Self::SameCta => "same_cta",
             Self::SameCluster => "same_cluster",
             Self::CrossCluster => "cross_cluster",
+            Self::CrossRank => "cross_rank",
         })
     }
 }
@@ -2321,6 +2323,24 @@ impl SparseLaneClock {
         );
         bridges.replace_direction(GlobalProxyBridgeDirection::GenericToAsync, frontier.clone());
         bridges.replace_direction(GlobalProxyBridgeDirection::AsyncToGeneric, frontier);
+        if let Some(alias) = bridges.alias_to_generic.clone() {
+            bridges.merge_direction(GlobalProxyBridgeDirection::AliasToAsync, &alias);
+        }
+    }
+
+    /// `fence.proxy.alias`: bi-directional generic/alias ordering for every
+    /// state space, plus the async side of earlier async/generic bridges.
+    fn apply_proxy_alias_fence(&mut self) {
+        let frontier = SparseClockFrontier::from_clock(self);
+        let bridges = Arc::make_mut(
+            self.proxy_bridges
+                .get_or_insert_with(|| Arc::new(GlobalProxyBridgeFrontiers::default())),
+        );
+        bridges.replace_direction(GlobalProxyBridgeDirection::GenericToAlias, frontier.clone());
+        bridges.replace_direction(GlobalProxyBridgeDirection::AliasToGeneric, frontier);
+        if let Some(async_bridge) = bridges.async_to_generic.clone() {
+            bridges.merge_direction(GlobalProxyBridgeDirection::AsyncToAlias, &async_bridge);
+        }
     }
 
     fn apply_implicit_async_completion(&mut self) {
@@ -2548,13 +2568,30 @@ impl SparseLaneClock {
 enum GlobalProxyBridgeDirection {
     GenericToAsync,
     AsyncToGeneric,
+    GenericToAlias,
+    AliasToGeneric,
+    AsyncToAlias,
+    AliasToAsync,
 }
 
 impl GlobalProxyBridgeDirection {
+    const ALL: [Self; 6] = [
+        Self::GenericToAsync,
+        Self::AsyncToGeneric,
+        Self::GenericToAlias,
+        Self::AliasToGeneric,
+        Self::AsyncToAlias,
+        Self::AliasToAsync,
+    ];
+
     const fn between(prior: MemoryProxy, current: MemoryProxy) -> Option<Self> {
         match (prior, current) {
             (MemoryProxy::Generic, MemoryProxy::Async) => Some(Self::GenericToAsync),
             (MemoryProxy::Async, MemoryProxy::Generic) => Some(Self::AsyncToGeneric),
+            (MemoryProxy::Generic, MemoryProxy::MulticastAlias) => Some(Self::GenericToAlias),
+            (MemoryProxy::MulticastAlias, MemoryProxy::Generic) => Some(Self::AliasToGeneric),
+            (MemoryProxy::Async, MemoryProxy::MulticastAlias) => Some(Self::AsyncToAlias),
+            (MemoryProxy::MulticastAlias, MemoryProxy::Async) => Some(Self::AliasToAsync),
             _ => None,
         }
     }
@@ -2608,6 +2645,13 @@ impl Eq for SparseClockFrontier {}
 struct GlobalProxyBridgeFrontiers {
     generic_to_async: Option<SparseClockFrontier>,
     async_to_generic: Option<SparseClockFrontier>,
+    // Alias bridges come from `fence.proxy.alias`. An async/alias pair needs
+    // both fences in order, so each composite frontier is the opposite-side
+    // generic bridge already present when the second fence executes.
+    generic_to_alias: Option<SparseClockFrontier>,
+    alias_to_generic: Option<SparseClockFrontier>,
+    async_to_alias: Option<SparseClockFrontier>,
+    alias_to_async: Option<SparseClockFrontier>,
     // Descriptor generations are assigned by the runtime registry. An acquire
     // is propagated by the existing causal clock, not by warp membership. PTX
     // proxy-preserved causality for a non-generic proxy is CTA-local.
@@ -2640,6 +2684,21 @@ impl GlobalProxyBridgeFrontiers {
         match direction {
             GlobalProxyBridgeDirection::GenericToAsync => self.generic_to_async.as_ref(),
             GlobalProxyBridgeDirection::AsyncToGeneric => self.async_to_generic.as_ref(),
+            GlobalProxyBridgeDirection::GenericToAlias => self.generic_to_alias.as_ref(),
+            GlobalProxyBridgeDirection::AliasToGeneric => self.alias_to_generic.as_ref(),
+            GlobalProxyBridgeDirection::AsyncToAlias => self.async_to_alias.as_ref(),
+            GlobalProxyBridgeDirection::AliasToAsync => self.alias_to_async.as_ref(),
+        }
+    }
+
+    fn slot(&mut self, direction: GlobalProxyBridgeDirection) -> &mut Option<SparseClockFrontier> {
+        match direction {
+            GlobalProxyBridgeDirection::GenericToAsync => &mut self.generic_to_async,
+            GlobalProxyBridgeDirection::AsyncToGeneric => &mut self.async_to_generic,
+            GlobalProxyBridgeDirection::GenericToAlias => &mut self.generic_to_alias,
+            GlobalProxyBridgeDirection::AliasToGeneric => &mut self.alias_to_generic,
+            GlobalProxyBridgeDirection::AsyncToAlias => &mut self.async_to_alias,
+            GlobalProxyBridgeDirection::AliasToAsync => &mut self.alias_to_async,
         }
     }
 
@@ -2648,10 +2707,7 @@ impl GlobalProxyBridgeFrontiers {
         direction: GlobalProxyBridgeDirection,
         frontier: &SparseClockFrontier,
     ) {
-        let slot = match direction {
-            GlobalProxyBridgeDirection::GenericToAsync => &mut self.generic_to_async,
-            GlobalProxyBridgeDirection::AsyncToGeneric => &mut self.async_to_generic,
-        };
+        let slot = self.slot(direction);
         if let Some(current) = slot {
             current.merge(frontier);
         } else {
@@ -2668,10 +2724,7 @@ impl GlobalProxyBridgeFrontiers {
         direction: GlobalProxyBridgeDirection,
         frontier: SparseClockFrontier,
     ) {
-        let slot = match direction {
-            GlobalProxyBridgeDirection::GenericToAsync => &mut self.generic_to_async,
-            GlobalProxyBridgeDirection::AsyncToGeneric => &mut self.async_to_generic,
-        };
+        let slot = self.slot(direction);
         debug_assert!(
             slot.as_ref()
                 .is_none_or(|current| frontier.as_clock().dominates(&current.as_clock())),
@@ -2681,10 +2734,7 @@ impl GlobalProxyBridgeFrontiers {
     }
 
     fn merge(&mut self, other: &Self) {
-        for direction in [
-            GlobalProxyBridgeDirection::GenericToAsync,
-            GlobalProxyBridgeDirection::AsyncToGeneric,
-        ] {
+        for direction in GlobalProxyBridgeDirection::ALL {
             if let Some(frontier) = other.frontier(direction) {
                 self.merge_direction(direction, frontier);
             }
@@ -2785,12 +2835,18 @@ impl ReleasePayload {
     /// Whether an acquire with `scope` and `proxy` is known to consume every
     /// head without any per-head scope or proxy check: all heads publish
     /// through `proxy`, and both the releases and the acquire are at least
-    /// GPU-scoped, which [`scope_covers`] accepts for any actor pair.
-    fn every_head_acquirable_by(&self, scope: MemoryScope, proxy: MemoryProxy) -> bool {
+    /// `launch_wide`, the scope [`scope_covers`] accepts for any actor pair of
+    /// the launch.
+    fn every_head_acquirable_by(
+        &self,
+        scope: MemoryScope,
+        proxy: MemoryProxy,
+        launch_wide: MemoryScope,
+    ) -> bool {
         !self.heads.is_empty()
             && self.uniform_proxy == Some(proxy)
-            && self.scope_floor.is_some_and(|floor| floor >= MemoryScope::Gpu)
-            && scope >= MemoryScope::Gpu
+            && self.scope_floor.is_some_and(|floor| floor >= launch_wide)
+            && scope >= launch_wide
     }
 
     fn join_head_clock(&mut self, clock: &SparseLaneClock) {
@@ -7710,16 +7766,21 @@ impl GlobalRaceState {
             mask: operation.active_mask(),
             effect,
         });
-        if !matches!(
-            effect.scope(),
-            ProxyAsyncFenceScope::All | ProxyAsyncFenceScope::Global
-        ) {
-            return Ok(());
-        }
+        let alias = match effect.scope() {
+            ProxyAsyncFenceScope::All | ProxyAsyncFenceScope::Global => false,
+            ProxyAsyncFenceScope::Alias => true,
+            ProxyAsyncFenceScope::SharedCta | ProxyAsyncFenceScope::SharedCluster => {
+                return Ok(());
+            }
+        };
         for lane in operation.active_mask() {
             let actor = GlobalActor::new(operation.id().global_warp_id(), lane);
             let state = self.actors.get_or_insert_default(actor);
-            state.clock.apply_proxy_async_fence();
+            if alias {
+                state.clock.apply_proxy_alias_fence();
+            } else {
+                state.clock.apply_proxy_async_fence();
+            }
             state.clock.tick(actor)?;
         }
         Ok(())
@@ -8673,7 +8734,7 @@ impl GlobalRaceState {
                     cursor = next;
                     continue;
                 }
-                if semantics.proxy() != version.carrier.semantics.proxy()
+                if !semantics.proxy().atomics_cohere(version.carrier.semantics.proxy())
                     && !clock.proxy_bridge_observes(
                         version.carrier.semantics.proxy(),
                         semantics.proxy(),
@@ -8959,6 +9020,7 @@ impl GlobalRaceState {
             .has_acquire()
             .then(|| semantics.scope())
             .flatten();
+        let launch_wide = launch_wide_scope(self.topology);
         let cache_hit = acquire_scope.is_some_and(|scope| {
             actor_state
                 .last_global_acquire
@@ -8975,7 +9037,7 @@ impl GlobalRaceState {
             && acquire_scope.is_some_and(|scope| {
                 version
                     .payload
-                    .every_head_acquirable_by(scope, semantics.proxy())
+                    .every_head_acquirable_by(scope, semantics.proxy(), launch_wide)
             })
         {
             // A poller re-reading the version it last acquired at this scope
@@ -9016,7 +9078,7 @@ impl GlobalRaceState {
             ) {
                 if version
                     .payload
-                    .every_head_acquirable_by(scope, semantics.proxy())
+                    .every_head_acquirable_by(scope, semantics.proxy(), launch_wide)
                 {
                     tcgen_acquisition.merge(joined_tcgen);
                     shared_acquisition.merge(&version.payload.shared_frontier);
@@ -9098,7 +9160,7 @@ impl GlobalRaceState {
                     proxy: semantics.proxy(),
                 });
             }
-        } else if semantics.order() == MemoryOrder::Relaxed {
+        } else if matches!(semantics.order(), MemoryOrder::Relaxed | MemoryOrder::Release) {
             merge_pending_acquire(
                 &mut actor_state.pending_acquire,
                 version.payload.heads.values().cloned(),
@@ -9117,7 +9179,7 @@ impl GlobalRaceState {
         tcgen_acquisition: &mut TcgenFenceFrontier,
         merge_clock: bool,
     ) -> bool {
-        if acquire_proxy != head.key.proxy
+        if !acquire_proxy.atomics_cohere(head.key.proxy)
             && !actor_state.clock.proxy_bridge_observes(
                 head.key.proxy,
                 acquire_proxy,
@@ -9185,7 +9247,12 @@ impl GlobalRaceState {
                     payload.extend(&predecessor.payload);
                 } else if cross_proxy_ordered {
                     payload.extend_release_heads(&predecessor.payload);
-                } else if predecessor.carrier.semantics.proxy() != access.semantics.proxy() {
+                } else if !predecessor
+                    .carrier
+                    .semantics
+                    .proxy()
+                    .atomics_cohere(access.semantics.proxy())
+                {
                     self.push_incomplete(RaceCheckIncompleteReason::GlobalMemoryModelUnsupported {
                         operation: operation.clone(),
                         kind: "cross_proxy_rmw_ancestry_unmodeled",
@@ -9338,22 +9405,6 @@ fn validate_batch_pair_in(
     );
 }
 
-/// A load: a read the generic proxy issued.
-///
-/// This is the side the morally-strong exemption is not entitled to speak for.
-/// It takes a value away, and which value it took is decided by the order the
-/// two ran in, so whether that order is the right one rests on an agreement
-/// the pair does not have -- the pair falls through to happens-before instead.
-///
-/// The generic proxy is what makes it a load. An async-proxy transfer also
-/// reads, but it is `cp.async`/TMA, not `ld`: its ordering is the async
-/// lifecycle's -- issue, completion, acquire -- and the exemption over a
-/// completed transfer is the one PTX ISA 8.7 states. Treating those as loads
-/// reports every relaxed async pair on one address.
-fn is_generic_proxy_load(kind: PhysicalAccessKind, semantics: MemoryAccessSemantics) -> bool {
-    kind == PhysicalAccessKind::Read && semantics.proxy() == MemoryProxy::Generic
-}
-
 fn validate_pair_in(
     topology: Option<LaunchTopology>,
     shared: &GlobalRaceShared,
@@ -9368,46 +9419,11 @@ fn validate_pair_in(
     if same_fragmented_event || !accesses_conflict(prior, current) {
         return;
     }
-    // A declared word owns its address (design §2.5). An access that reaches
-    // it without going through the primitive is a defect on its own, so it is
-    // settled before both early returns below: the morally-strong exemption
-    // would otherwise swallow the one shape the declaration exists to catch --
-    // a raw `red`/`atom` contribution alongside the primitive's, which is the
-    // same instruction and so is mutually morally strong -- and the
-    // happens-before return would swallow an ordered raw read.
-    // Two mutually morally-strong accesses, split by what the exemption was
-    // ever entitled to say. Runs are excluded: their spans are only comparable
-    // unit by unit, below.
     if prior.unit_bytes == 0
         && current.unit_bytes == 0
         && mutually_morally_strong(topology, prior, current)
     {
-        // Neither side is a plain read: each is one indivisible access to one
-        // naturally aligned word -- a single copy that only writes, or a
-        // read-modify-write the hardware serializes -- so coherence totally
-        // orders them and neither can tear the other. That is the shape PTX
-        // ISA 8.7's exemption is reasoning about, and it covers a release
-        // publication against the contributions that join its release
-        // sequence, not only a read-modify-write against another.
-        if !is_generic_proxy_load(prior.kind(), prior.semantics)
-            && !is_generic_proxy_load(current.kind(), current.semantics)
-        {
-            return;
-        }
-        // A plain read is the one side coherence cannot answer for: it takes a
-        // value away, and which value it took is decided by the order the two
-        // ran in, so whether that order is the right one depends on an
-        // agreement between them. The exemption was never entitled to say that
-        // agreement holds, so the pair falls through to happens-before, where
-        // an edge either orders it or does not.
-        //
-        // The spin that used to make this unsafe is no longer here to catch: a
-        // declared wait adjudicates no access of its own, so its failed polls
-        // -- which race the publisher by construction -- never reach this
-        // function. What does reach it is every *other* read of the word: a
-        // hand-written seed load beside the primitive, or a reader that skipped
-        // the protocol entirely. Those are the reads the declaration exists to
-        // adjudicate, and an unordered one is a finding, not an exemption.
+        return;
     }
     // Happens-before does not depend on the spans, so it is settled once
     // for a run; only the unordered pairs are expanded unit by unit.
@@ -9477,15 +9493,7 @@ fn validate_unordered_pair_in(
     current: &RecordedGlobalAccess,
     ordering_failure: PhysicalRaceOrderingFailure,
 ) {
-    // The same split `validate_pair_in` makes, and for the same reason: the
-    // exemption speaks for accesses coherence totally orders, and a plain read
-    // is not one of those -- which value it took is decided by the order the
-    // two ran in. A pair that got here has already been through
-    // happens-before, so its edge -- or the absence of one -- is the answer.
-    if mutually_morally_strong(topology, prior, current)
-        && !is_generic_proxy_load(prior.kind(), prior.semantics)
-        && !is_generic_proxy_load(current.kind(), current.semantics)
-    {
+    if mutually_morally_strong(topology, prior, current) {
         return;
     }
     if atomics_have_scope_mismatch(topology, prior, current) {
@@ -9554,7 +9562,15 @@ impl GlobalRaceState {
 }
 
 fn event_happens_before(left: &RecordedGlobalAccess, right: &GlobalAccess) -> bool {
-    if left.semantics.proxy() != right.semantics.proxy() {
+    // A strong multimem atomic is performed on each replica as an atomic on
+    // that location, so a strong unicast atomic synchronizing with it needs
+    // no bridge for the pair itself; data it publishes still does.
+    let coherent_strong_pair = left.semantics.class().is_atomic_class()
+        && right.semantics.class().is_atomic_class()
+        && left.semantics.order().is_strong()
+        && right.semantics.order().is_strong()
+        && left.semantics.proxy().atomics_cohere(right.semantics.proxy());
+    if left.semantics.proxy() != right.semantics.proxy() && !coherent_strong_pair {
         return right.clock.proxy_bridge_observes(
             left.semantics.proxy(),
             right.semantics.proxy(),
@@ -9585,7 +9601,7 @@ fn atomics_have_scope_mismatch(
         && left.semantics.order().is_strong()
         && right.semantics.order().is_strong()
         && same_access_elements(left, right)
-        && left.semantics.proxy() == right.semantics.proxy()
+        && left.semantics.proxy().atomics_cohere(right.semantics.proxy())
         && left.semantics.scope().is_some()
         && right.semantics.scope().is_some()
         && (!scope_covers(
@@ -9689,20 +9705,6 @@ fn same_access_elements(left: &RecordedGlobalAccess, right: &RecordedGlobalAcces
 
 /// PTX ISA 8.7: each side is strong and names a scope that reaches the other.
 ///
-/// `is_atomic_class`, not `is_read_modify_write`. Narrowing this to the
-/// read-modify-writes was tried,
-/// and it does not hold up: a correct undeclared flag protocol
-/// (`st.release.gpu` published, `ld.acquire.gpu` polled in a loop) then reports
-/// on the schedules where a poll reads the pre-publication value and stays
-/// clean on the schedules where it does not -- measured at 11 errors in 20
-/// runs with two workers, 0 in 20 with one, on
-/// `global_scoped_message_passing` mode 0. A verdict that moves with the
-/// worker count is worse than the hole it closes, and PTX ISA 8.7 counts a
-/// scoped single copy as strong, so the exemption is not wrong here, only
-/// blunt. Catching an undeclared protocol needs a finding that does not depend
-/// on which poll won the race -- an address-level claim like
-/// `declared_word_bypassed`, not a happens-before verdict. Until that exists
-/// the class stays out of it.
 fn semantics_are_mutually_morally_strong(
     topology: Option<LaunchTopology>,
     left: MemoryAccessSemantics,
@@ -9714,7 +9716,7 @@ fn semantics_are_mutually_morally_strong(
         && right.class().is_atomic_class()
         && left.order().is_strong()
         && right.order().is_strong()
-        && left.proxy() == right.proxy()
+        && left.proxy().atomics_cohere(right.proxy())
         && scopes_mutually_cover(topology, left, left_actor, right, right_actor)
 }
 
@@ -9741,7 +9743,18 @@ fn actor_relation(
     match MemoryScope::required_between_warps(topology, left.global_warp_id, right.global_warp_id) {
         MemoryScope::Cta => GlobalActorRelation::SameCta,
         MemoryScope::Cluster => GlobalActorRelation::SameCluster,
-        MemoryScope::Gpu | MemoryScope::Sys => GlobalActorRelation::CrossCluster,
+        MemoryScope::Gpu => GlobalActorRelation::CrossCluster,
+        MemoryScope::Sys => GlobalActorRelation::CrossRank,
+    }
+}
+
+/// The narrowest scope that reaches every actor pair of the launch: `.gpu`
+/// within one rank, `.sys` once the launch spans ranks.
+fn launch_wide_scope(topology: Option<LaunchTopology>) -> MemoryScope {
+    if topology.is_some_and(|topology| topology.ranks() > 1) {
+        MemoryScope::Sys
+    } else {
+        MemoryScope::Gpu
     }
 }
 
@@ -9874,7 +9887,19 @@ fn global_ordering_failure(
     current: &GlobalAccess,
     current_before_prior: bool,
 ) -> PhysicalRaceOrderingFailure {
-    if prior.semantics.proxy() != current.semantics.proxy() {
+    let ordinarily_ordered = current_before_prior
+        || current.clock.actor_epoch(prior.actor()) >= prior.issue_epoch();
+    // Multicast-alias accesses are synchronous, so their ordinary order is
+    // exact: a missing bridge explains the race only when ordinary
+    // synchronization already orders the accesses. An async-proxy access's
+    // completion is not in the generic clocks, so its bridge is reported first.
+    let alias_pair = [prior.semantics.proxy(), current.semantics.proxy()]
+        .contains(&MemoryProxy::MulticastAlias);
+    if prior.semantics.proxy() != current.semantics.proxy()
+        && (ordinarily_ordered
+            || !alias_pair
+            || prior.actor().global_warp_id == current.actor().global_warp_id)
+    {
         return PhysicalRaceOrderingFailure::MissingProxyBridge {
             prior_proxy: prior.semantics.proxy(),
             current_proxy: current.semantics.proxy(),
@@ -9882,8 +9907,6 @@ fn global_ordering_failure(
             current_domain: PhysicalRaceProxyDomain::Global,
         };
     }
-    let ordinarily_ordered = current_before_prior
-        || current.clock.actor_epoch(prior.actor()) >= prior.issue_epoch();
     if !ordinarily_ordered {
         let (prior_actor, current_actor) = (prior.actor(), current.actor());
         if prior_actor.global_warp_id == current_actor.global_warp_id
@@ -11919,17 +11942,11 @@ mod tests {
 
         let mut findings = state.findings().collect::<Vec<_>>();
         findings.sort_by_key(|finding| finding.overlap().byte_offset());
-        // Byte 0 is the payload: the relaxed publication carries no release,
-        // so the acquire on the flag has nothing to synchronize with and the
-        // payload is unordered. Byte 4 is the flag itself: one side of that
-        // pair is a load, and which value it took is decided by the order the
-        // two ran in, so the exemption does not speak for it either.
-        assert_eq!(findings.len(), 2);
+        assert_eq!(findings.len(), 1);
         assert!(findings
             .iter()
             .all(|finding| finding.kind() == PhysicalRaceKind::WriteRead));
         assert_eq!(findings[0].overlap().byte_offset(), 0);
-        assert_eq!(findings[1].overlap().byte_offset(), 4);
     }
 
     #[test]
@@ -12159,17 +12176,7 @@ mod tests {
             ),
         );
 
-        // The data word is bridged: the fence halves carry the plain write to
-        // the plain read with no execution edge between the volatile pair.
-        // The flag word itself is not, and is not meant to be. A volatile
-        // write against a volatile read is two single copies, not a
-        // read-modify-write, so it takes no exemption from PTX ISA 8.7 and is
-        // judged on happens-before -- which relaxed accesses do not create.
-        // Declaring the flag is what states the edge; raw, it is a race.
-        let findings = state.findings().collect::<Vec<_>>();
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].kind(), PhysicalRaceKind::WriteRead);
-        assert_eq!(findings[0].overlap().byte_offset(), 4);
+        assert!(state.findings().next().is_none());
         assert!(state.incomplete_reasons().next().is_none());
     }
 
@@ -12256,6 +12263,80 @@ mod tests {
     }
 
     #[test]
+    fn returned_release_rmw_can_feed_an_acquire_fence() {
+        for order in [MemoryOrder::Relaxed, MemoryOrder::Release] {
+            for access_class in [MemoryAccessClass::Atomic, MemoryAccessClass::Reduction] {
+                for fence_after_rmw in [false, true] {
+                    let mut state =
+                        GlobalRaceState::new(Some(LaunchTopology::new(2, 1, 1).unwrap()));
+                    commit(
+                        &mut state,
+                        &batch(
+                            0,
+                            0,
+                            1,
+                            PhysicalAccessKind::Write,
+                            0,
+                            MemoryAccessSemantics::plain(),
+                        ),
+                    );
+                    commit(
+                        &mut state,
+                        &batch(
+                            0,
+                            0,
+                            2,
+                            PhysicalAccessKind::Write,
+                            4,
+                            atomic(MemoryOrder::Release, MemoryScope::Gpu),
+                        ),
+                    );
+                    if !fence_after_rmw {
+                        gpu_fence(&mut state, 1, 1, MemoryOrder::Acquire);
+                    }
+                    commit(
+                        &mut state,
+                        &batch(
+                            1,
+                            0,
+                            2,
+                            PhysicalAccessKind::AtomicReadModifyWrite,
+                            4,
+                            MemoryAccessSemantics::scoped(
+                                order,
+                                MemoryScope::Gpu,
+                                MemoryProxy::Generic,
+                                access_class,
+                            ),
+                        ),
+                    );
+                    if fence_after_rmw {
+                        gpu_fence(&mut state, 1, 3, MemoryOrder::Acquire);
+                    }
+                    commit(
+                        &mut state,
+                        &batch(
+                            1,
+                            0,
+                            4,
+                            PhysicalAccessKind::Read,
+                            0,
+                            MemoryAccessSemantics::plain(),
+                        ),
+                    );
+                    let ordered = access_class == MemoryAccessClass::Atomic && fence_after_rmw;
+                    assert_eq!(
+                        state.findings().any(|finding| finding.overlap().byte_offset() == 0),
+                        !ordered,
+                        "{order:?}/{access_class:?}, fence_after_rmw={fence_after_rmw}",
+                    );
+                    assert!(state.incomplete_reasons().next().is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn repeated_relaxed_polls_keep_state_bounded_by_actors_and_bytes() {
         let topology = LaunchTopology::new(2, 1, 1).unwrap();
         let mut state = GlobalRaceState::new(Some(topology));
@@ -12278,7 +12359,7 @@ mod tests {
                     sequence,
                     PhysicalAccessKind::Read,
                     4,
-                    atomic(MemoryOrder::Relaxed, MemoryScope::Gpu),
+                    strong(MemoryOrder::Relaxed, MemoryScope::Gpu),
                 ),
             );
         }
@@ -12286,11 +12367,7 @@ mod tests {
         assert_eq!(actors, 2);
         assert_eq!(bytes, 4);
         assert_eq!(pending, 1);
-        // A relaxed poll is a plain read, so the pair goes to happens-before
-        // and an unordered one is reported -- which is the answer that asks
-        // the author for `wait_until`. What must not grow with the poll
-        // count is the record of it: one merged finding, not one per read.
-        assert_eq!(state.findings().count(), 1);
+        assert!(state.findings().next().is_none());
     }
 
     #[test]

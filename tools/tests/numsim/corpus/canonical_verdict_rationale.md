@@ -369,8 +369,13 @@ generic loads and before that stage can be selected again. This follows the
 PTX bulk-copy rule that accesses to one location through generic and async
 proxies require a cross-proxy fence. The original Racecheck overlap was shared
 allocation bytes `[0, 4)` between the lane-0 `ld.shared.v4.u32` and the next
-512-byte TMA write; the repaired full launch has no physical finding and
-retains one shared-pool alias advisory.
+512-byte TMA write; the repaired full launch has no physical finding. The
+completed unnamed TMA overwrite invalidates the old named provenance for the
+bytes it actually writes, so the later combine read no longer retains the
+former synthetic shared-pool alias advisory. The canonical case and all six
+performance configurations now require `clean` and no advisories. Focused
+partial-clear controls preserve untouched provenance and earlier findings;
+physical race checking remains enabled for the overwrite and subsequent read.
 
 The pinned Top-K corpus also exposed two single-GPU source ordering defects.
 `radix_topk_multi_cta` now performs a CTA barrier before thread 0 publishes

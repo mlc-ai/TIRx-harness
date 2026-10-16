@@ -2207,6 +2207,15 @@ pub struct PhysicalMemory {
     tmem: TmemMemory,
     ordering: Arc<crate::OrderingHub>,
     engine_progress: SemanticProgress,
+    backing_reuse: Arc<std::sync::Mutex<BackingReuse>>,
+}
+
+/// Launch-wide SMEM/TMEM/private backings recorded by the first rank's
+/// parameter preparation and replayed, in order, for every later rank.
+#[derive(Default)]
+struct BackingReuse {
+    entries: Vec<Arc<dyn std::any::Any + Send + Sync>>,
+    replay_cursor: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2294,7 +2303,45 @@ impl PhysicalMemory {
             tmem: TmemMemory::new(topology).with_read_policy(read_policy),
             ordering: Arc::new(crate::OrderingHub::new(topology)),
             engine_progress: SemanticProgress::disabled(),
+            backing_reuse: Arc::default(),
         }
+    }
+
+    /// Allocate one launch-wide backing, or replay the backing recorded at the
+    /// same position by an earlier rank's preparation.
+    pub fn reuse_backing<T, E>(
+        &self,
+        allocate: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Arc<T>, EngineError>
+    where
+        T: Send + Sync + 'static,
+        E: fmt::Display,
+    {
+        let mut reuse = self
+            .backing_reuse
+            .lock()
+            .expect("backing reuse mutex poisoned");
+        if let Some(cursor) = reuse.replay_cursor {
+            let entry = reuse.entries.get(cursor).cloned().ok_or_else(|| {
+                EngineError::message("rank preparation requested an unrecorded backing")
+            })?;
+            reuse.replay_cursor = Some(cursor + 1);
+            return entry.downcast::<T>().map_err(|_| {
+                EngineError::message("rank preparation replayed a backing of another type")
+            });
+        }
+        let backing =
+            Arc::new(allocate().map_err(|error| EngineError::message(error.to_string()))?);
+        reuse.entries.push(backing.clone());
+        Ok(backing)
+    }
+
+    /// Start replaying recorded backings for the next rank's preparation.
+    pub fn replay_backings(&self) {
+        self.backing_reuse
+            .lock()
+            .expect("backing reuse mutex poisoned")
+            .replay_cursor = Some(0);
     }
 
     pub(crate) fn convert_ptx_address(

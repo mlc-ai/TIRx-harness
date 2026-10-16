@@ -13,6 +13,7 @@ from .api import (
     run_case,
     transpile,
 )
+from .bindings import MulticastWindow, SymmetricBuffer, rank_binding_name
 from .cases import (
     ComparisonRegion,
     ComparisonSpec,
@@ -45,11 +46,14 @@ __all__ = [
     "ResourceLimits",
     "TensorMap",
     "Im2col",
+    "MulticastWindow",
+    "SymmetricBuffer",
     "UnmodeledTIRxFormError",
     "UnsupportedTIRxError",
     "compare",
     "dump_rust",
     "dump_semantic_manifest",
+    "rank_binding_name",
     "run_case",
     "transpile",
 ]

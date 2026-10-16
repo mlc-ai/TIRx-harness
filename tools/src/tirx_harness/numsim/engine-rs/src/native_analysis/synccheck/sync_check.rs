@@ -802,7 +802,7 @@ impl SyncCheckLaunchState {
     ) -> Self {
         let cta_thread_count = context
             .topology()
-            .map(|topology| (topology.warps_per_cta() * crate::WARP_SIZE) as u64);
+            .map(|topology| topology.threads_per_cta() as u64);
         Self {
             inner: Mutex::new(SyncCheckState::with_cta_thread_count(cta_thread_count)),
             cluster_inners: (0..context.cluster_shards())

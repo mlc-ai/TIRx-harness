@@ -81,6 +81,25 @@ pub enum SyncCallKind {
 }
 
 impl SyncCallKind {
+    fn validate_launch(self, emitter: &Emitter) -> AResult<()> {
+        if matches!(
+            self,
+            Self::BarArrive
+                | Self::BarSync
+                | Self::WarpSync
+                | Self::WarpgroupSync
+                | Self::CtaSync
+                | Self::ClusterSync
+                | Self::ClusterArrive
+                | Self::ClusterWait
+                | Self::GridSync
+                | Self::Setmaxnreg
+        ) {
+            emitter.require_whole_warps(&format!("{self:?}"))?;
+        }
+        Ok(())
+    }
+
     /// The kind of an mbarrier statement function.
     fn from_function(function: &str) -> SyncCallKind {
         match function {
@@ -584,13 +603,19 @@ pub fn decoded_proxy_space(decoded: &DecodedPtx) -> AResult<String> {
         return unsupported(format!("{op_name} requires the proxy modifier"));
     }
     let proxykind = decoded.modifier("proxykind")?;
+    let space = decoded.modifier("space")?.to_owned();
+    if proxykind == "alias" {
+        if !space.is_empty() {
+            return unsupported(format!("{op_name} fence.proxy.alias takes no state space"));
+        }
+        return Ok("alias".to_owned());
+    }
     if proxykind != "async" {
         return unsupported(format!(
-            "{op_name} proxy kind {:?} is not modeled; expected 'async'",
+            "{op_name} proxy kind {:?} is not modeled; expected 'async' or 'alias'",
             proxykind
         ));
     }
-    let space = decoded.modifier("space")?.to_owned();
     if !["", "global", "shared::cta", "shared::cluster"].contains(&space.as_str()) {
         return unsupported(format!("{op_name} has unsupported space {:?}", &space));
     }
@@ -1307,6 +1332,7 @@ pub fn proxy_marker(space: &str) -> &'static str {
         "global" => "Global",
         "shared::cta" => "SharedCta",
         "shared::cluster" => "SharedCluster",
+        "alias" => "Alias",
         _ => unreachable!("validated proxy space"),
     }
 }
@@ -1599,6 +1625,7 @@ impl<'a> Emitter<'a> {
     }
 
     pub(super) fn emit_scope_barrier(&mut self, scope: &str, source_op_id: i64) -> AResult<()> {
+        self.require_whole_warps("scope barrier")?;
         let mask = self.sync_mask(None)?;
         self.emit_line(&format!("if !{mask}.is_empty() {{"));
         self.indent += 1;
@@ -2418,7 +2445,7 @@ impl<'a> Emitter<'a> {
 pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let decoded = call.table()?;
     let parts = ptx_sync_parts(emitter.ctx, decoded)?;
-    ptx_sync_kind(&decoded.op_name, &parts, false)?;
+    ptx_sync_kind(&decoded.op_name, &parts, false)?.validate_launch(emitter)?;
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_ptx_sync(decoded, &parts, source_op_id)?;
     Ok(None)
@@ -2426,6 +2453,7 @@ pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>>
 
 pub fn emit_legacy(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let parts = validate_raw_sync_call(call.node, &call.op_name)?;
+    parts.signature().0.validate_launch(emitter)?;
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_raw_sync(call.node, parts, source_op_id)?;
     Ok(None)

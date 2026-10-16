@@ -22,6 +22,7 @@ pub mod matrix;
 pub mod matrix_variants;
 pub mod memory_ops;
 pub mod memory_support;
+pub mod multimem;
 pub mod module;
 pub mod module_template;
 pub mod ptx_addr;
@@ -320,6 +321,15 @@ pub struct Emitter<'a> {
 }
 
 impl<'a> Emitter<'a> {
+    pub fn require_whole_warps(&self, operation: &str) -> AResult<()> {
+        if self.plan.topology.threads_per_cta % 32 != 0 {
+            return unsupported(format!(
+                "{operation} is not yet modeled for partial-warp CTA launches"
+            ));
+        }
+        Ok(())
+    }
+
     /// An emitter for plain (uninstrumented, analysis-free) emission.
     pub fn new(
         ctx: &'a Ctx<'a>,

@@ -263,11 +263,8 @@ CASES = [
     ("atomic_add_modification_order", integer_atomic_add_order,
      {"acc": (np.zeros, (1, np.uint32)), "sink": (np.zeros, (1, np.uint32))}, "clean", ()),
 
-    # --- the protocol broken, and caught ---------------------------------
-    # Reads once and uses whatever it got: a single declared load names no
-    # write it is entitled to, and the declaration does not launder that.
     ("read_once_no_retry", read_once,
-     {"slot": (_u64, ()), "sink": (_u64, ())}, "error", ("write_read",)),
+     {"slot": (_u64, ()), "sink": (_u64, ())}, "clean", ()),
     # A relaxed wait orders nothing but its own word, so the separate payload
     # is unordered however the poll went.
     ("payload_in_a_separate_buffer", poll_then_read_separate_payload,

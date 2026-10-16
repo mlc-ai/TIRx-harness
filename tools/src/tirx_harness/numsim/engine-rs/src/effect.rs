@@ -223,6 +223,9 @@ pub enum ProxyAsyncFenceScope {
     SharedCta,
     SharedCluster,
     Global,
+    /// `fence.proxy.alias`: orders generic accesses against virtual-alias
+    /// (multicast) accesses rather than against the async proxy.
+    Alias,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

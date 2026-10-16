@@ -620,6 +620,11 @@ def generated_source_identity(source: Any) -> str:
         if cached is not None:
             return cached
     payload = {"kernels": [semantic_ir_json(func) for func in funcs]}
+    from .parameter_buffers import parameter_buffer_names
+
+    parameter_buffers = [list(parameter_buffer_names(func)) for func in funcs]
+    if any(parameter_buffers):
+        payload["parameter_buffers"] = parameter_buffers
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     identity = hashlib.sha256(encoded).hexdigest()
     if len(funcs) == 1:

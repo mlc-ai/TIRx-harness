@@ -110,6 +110,9 @@ pub mod variant {
     pub struct SharedCta;
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct SharedCluster;
+    /// `fence.proxy.alias`, carried by the same proxy-fence specialization.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Alias;
 
     /// `barrier.cluster.arrive` spelling. `ALIGNED` is a PTX qualifier, not a
     /// runtime lane predicate.
@@ -1504,6 +1507,7 @@ proxy_space!(variant::All, "");
 proxy_space!(variant::Global, "global");
 proxy_space!(variant::SharedCta, "shared::cta");
 proxy_space!(variant::SharedCluster, "shared::cluster");
+proxy_space!(variant::Alias, "alias");
 
 instruction_variant! {
     [impl<S: ProxySpace>] fence_proxy_async_spec, variant::ProxyAsync<S>,

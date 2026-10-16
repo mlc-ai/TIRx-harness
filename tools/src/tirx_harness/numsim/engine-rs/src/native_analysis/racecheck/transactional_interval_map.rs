@@ -575,7 +575,8 @@ impl<T> IndexedEntries<T> {
             .expect("prepared indexed span lies inside the page table");
         if value == EMPTY_CELL {
             if let Some(page) = page_slot.as_mut() {
-                debug_assert!(page.fill(local_start, local_end, value).is_none());
+                let widened = page.fill(local_start, local_end, value);
+                debug_assert!(widened.is_none());
             }
             return;
         }
@@ -989,6 +990,59 @@ mod tests {
             map.state_until(2, 6, |segment| segment.end),
             (Some(&Segment { end: 4, value: 1 }), 4)
         );
+    }
+
+    #[test]
+    fn clearing_a_range_removes_its_byte_occupancy() {
+        let mut map = TransactionalIntervalMap::default();
+        map.insert_prepared(0, 32, Segment { end: 32, value: 1 });
+        assert!(map
+            .try_replace_range(
+                0,
+                32,
+                Vec::new(),
+                |_| 0,
+                |segment| segment.end,
+                |segment, _, split_end| Segment {
+                    end: split_end,
+                    value: segment.value,
+                },
+            )
+            .is_ok());
+
+        assert!(map.is_empty());
+        assert_eq!(map.state_until(0, 32, |segment| segment.end), (None, 32));
+        map.insert_prepared(0, 8, Segment { end: 8, value: 2 });
+        assert_eq!(map.state_until(8, 32, |segment| segment.end), (None, 32));
+    }
+
+    #[test]
+    fn clearing_a_subrange_preserves_only_the_untouched_fragments() {
+        #[derive(Debug, PartialEq, Eq)]
+        struct Span {
+            start: usize,
+            end: usize,
+        }
+
+        let mut map = TransactionalIntervalMap::default();
+        map.insert_prepared(0, 32, Span { start: 0, end: 32 });
+        assert!(map
+            .try_replace_range(
+                8,
+                24,
+                Vec::new(),
+                |span| span.start,
+                |span| span.end,
+                |_, split_start, split_end| Span {
+                    start: split_start,
+                    end: split_end,
+                },
+            )
+            .is_ok());
+
+        assert_eq!(map.get(0), Some(&Span { start: 0, end: 8 }));
+        assert_eq!(map.get(24), Some(&Span { start: 24, end: 32 }));
+        assert_eq!(map.state_until(8, 24, |span| span.end), (None, 24));
     }
 
     #[test]

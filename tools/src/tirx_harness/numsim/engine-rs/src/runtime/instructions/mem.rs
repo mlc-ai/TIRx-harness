@@ -31,13 +31,30 @@ sync_instruction_generic_args!(ld_spec, LdVariant, ld);
 sync_instruction_generic_args!(st_spec, StVariant, st);
 async_instruction!(atom_spec, AtomVariant, atom);
 async_instruction!(red_spec, RedVariant, red);
+async_instruction!(multimem_spec, MultimemVariant, multimem);
 sync_instruction!(ldmatrix_spec, LdmatrixVariant, ldmatrix);
 sync_instruction!(stmatrix_spec, StmatrixVariant, stmatrix);
 sync_instruction!(st_bulk_spec, StBulkVariant, st_bulk);
 
+#[path = "multimem.rs"]
+mod multimem_impl;
+
 /// Static specializations for lane-wise `ld` and `st`.
 pub mod variant {
     use super::PhantomData;
+
+    /// `multimem.ld_reduce`/`st`/`red`. The const codes are decoded by
+    /// `multimem_impl::MultimemForm::decode`; operands and results travel as
+    /// up to four little-endian 32-bit words.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Multimem<
+        const KIND: u8,
+        const TYPE: u8,
+        const OP: u8,
+        const VEC: u8,
+        const SEM: u8,
+        const SCOPE: u8,
+    >;
 
     /// One scalar lane value not already represented by a register marker.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2233,6 +2250,21 @@ instruction_variant! {
         )
         .await?;
         Ok(())
+    }
+}
+
+instruction_variant! {
+    [impl<const KIND: u8, const TYPE: u8, const OP: u8, const VEC: u8, const SEM: u8, const SCOPE: u8>]
+    multimem_spec, variant::Multimem<KIND, TYPE, OP, VEC, SEM, SCOPE>,
+    (Address<Global>, R<[u32; 4]>) => R<[u32; 4]>;
+    async fn execute(
+        warp: &mut super::Engine,
+        context: ExecCtx,
+        site: SiteId,
+        (address, operand): Self::Args,
+    ) -> Result<Self::Output, super::EngineError> {
+        let form = multimem_impl::MultimemForm::decode(KIND, TYPE, OP, VEC, SEM, SCOPE)?;
+        multimem_impl::execute(warp, context, site, form, address, operand).await
     }
 }
 

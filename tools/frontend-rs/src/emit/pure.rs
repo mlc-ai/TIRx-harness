@@ -966,15 +966,15 @@ impl<'a> Emitter<'a> {
             "smid" => Some("0_u32".to_owned()),
             "warpid" => Some("ctx.warp_id_in_cta()".to_owned()),
             "nwarpid" => Some(format!("{SM100_MAX_WARP_IDS}_usize")),
-            "ctaid.x" => Some("ctx.global_cta_id()".to_owned()),
-            "nctaid.x" => Some("ctx.topology().cta_count()".to_owned()),
-            "clusterid.x" => Some("ctx.cluster_id()".to_owned()),
-            "nclusterid.x" => Some("ctx.topology().clusters()".to_owned()),
+            "ctaid.x" => Some("ctx.kernel_cta_id()".to_owned()),
+            "nctaid.x" => Some("ctx.kernel_topology().cta_count()".to_owned()),
+            "clusterid.x" => Some("ctx.kernel_cluster_id()".to_owned()),
+            "nclusterid.x" => Some("ctx.kernel_topology().clusters()".to_owned()),
             "cluster_ctaid.x" => Some("ctx.cta_id_in_cluster()".to_owned()),
             "cluster_nctaid.x" => Some("ctx.topology().ctas_per_cluster()".to_owned()),
             "cluster_ctarank" => Some("ctx.cta_id_in_cluster()".to_owned()),
             "cluster_nctarank" => Some("ctx.topology().ctas_per_cluster()".to_owned()),
-            "ntid.x" => Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned()),
+            "ntid.x" => Some("ctx.topology().threads_per_cta()".to_owned()),
             _ => None,
         };
         if ZERO.contains(&register_name) || ONE.contains(&register_name) {
@@ -1156,6 +1156,7 @@ impl<'a> Emitter<'a> {
         result_type: &str,
         mode: &str,
     ) -> AResult<RustValue> {
+        self.require_whole_warps("warp shuffle")?;
         let args = call_args(expr);
         if args.len() != 4 && args.len() != 5 {
             return unsupported(format!(
@@ -1489,6 +1490,7 @@ impl<'a> Emitter<'a> {
         operation: &str,
         width: i64,
     ) -> AResult<RustValue> {
+        self.require_whole_warps("warp reduction")?;
         let args = call_args(expr);
         let value = self.emit_expr(&args[0])?;
         let value = self.as_warp_value(value);
@@ -1828,6 +1830,7 @@ impl<'a> Emitter<'a> {
         operation: &str,
         num_warps: i64,
     ) -> AResult<RustValue> {
+        self.require_whole_warps("CTA reduction")?;
         let source_op_id = self.static_op_id(expr)?;
         let args = call_args(expr);
         let value = self.emit_expr(&args[0])?;
@@ -2143,6 +2146,7 @@ pub fn cuda_cta_reduce(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<
         .map(Some)
 }
 pub fn cuda_elect_sync(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emitter.require_whole_warps(&call.op_name)?;
     let signature = signature(call.node, call.call)?;
     check_signature(
         &signature,
@@ -2563,6 +2567,29 @@ pub fn cuda_make_float2(emitter: &mut Emitter, call: &Decoded) -> AResult<Option
         })
         .map(Some)
 }
+fn emit_launch_rank_value(
+    emitter: &mut Emitter,
+    call: &Decoded,
+    code: &'static str,
+) -> AResult<Option<RustValue>> {
+    let signature = signature(call.node, call.call)?;
+    check_signature(&signature, exact(&signature, "int32", &[]))?;
+    emitter
+        .with_call_expr(call.node, |_emitter| {
+            Ok(RustValue::new(
+                format!("({code}) as i32"),
+                "i32",
+                Uniformity::Uniform,
+            ))
+        })
+        .map(Some)
+}
+pub fn nvshmem_my_pe(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emit_launch_rank_value(emitter, call, "ctx.rank()")
+}
+pub fn nvshmem_n_pes(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emit_launch_rank_value(emitter, call, "ctx.topology().ranks()")
+}
 pub fn cuda_mov_sreg(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let signature = signature(call.node, call.call)?;
     check_signature(&signature, validate_cuda_mov_sreg(emitter.ctx, &signature))?;
@@ -2702,6 +2729,7 @@ pub fn cuda_uint_as_float(emitter: &mut Emitter, call: &Decoded) -> AResult<Opti
         .map(Some)
 }
 pub fn cuda_warp_reduce(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    emitter.require_whole_warps(&call.op_name)?;
     let signature = signature(call.node, call.call)?;
     check_signature(
         &signature,

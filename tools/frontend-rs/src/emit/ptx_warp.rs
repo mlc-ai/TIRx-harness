@@ -192,6 +192,9 @@ pub fn resolve_ptx_warp(decoded: &DecodedPtx) -> AResult<Vec<ObjectRef>> {
 
 /// Validate and emit one instruction through the registry callback.
 pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    if call.op_name != "tirx.ptx.activemask" {
+        emitter.require_whole_warps(&call.op_name)?;
+    }
     let decoded = call.table()?;
     let parts = WarpParts {
         destinations: resolve_ptx_warp(decoded)?,

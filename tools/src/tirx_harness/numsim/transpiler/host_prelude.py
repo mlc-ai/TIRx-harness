@@ -1,4 +1,4 @@
-"""Normalize host-created TensorMaps through the native frontend."""
+"""Normalize host descriptors and immutable kernel-parameter values."""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ from typing import Any
 from tvm.tirx import PrimFunc
 
 from .native_frontend import normalize_host_tensor_maps
+from .parameter_buffers import normalize_parameter_buffers
 
 
 def normalize_host_tensor_map_prelude(func: PrimFunc) -> PrimFunc:
     """Promote the host TensorMap prelude to implicit typed parameters."""
     if not isinstance(func, PrimFunc):
         raise TypeError(f"expected tvm.tirx.PrimFunc, got {type(func).__name__}")
-    return normalize_host_tensor_maps(func)
+    return normalize_parameter_buffers(normalize_host_tensor_maps(func))
 
 
 def normalize_transpile_source(source: Any) -> Any:

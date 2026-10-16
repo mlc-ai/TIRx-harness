@@ -1732,6 +1732,48 @@ RUNTIME_CASES = (
             "runtime/test_raw_tma_codegen.py::test_raw_tma_tensor_map_selector_branches_at_runtime",
         ),
     ),
+    RuntimeCase(
+        target_ids=("call:tirx.nvshmem.my_pe", "call:tirx.nvshmem.n_pes"),
+        tests=("runtime/test_multimem.py::test_nvshmem_rank_queries_report_the_launch",),
+    ),
+    RuntimeCase(
+        target_ids=(
+            "call:tirx.ptx.multimem_ld_reduce",
+            "call:tirx.ptx.multimem_ld_reduce_f",
+            "call:tirx.ptx.multimem_ld_reduce_f_vec",
+        ),
+        tests=(
+            "runtime/test_multimem.py::test_ld_reduce_returns_the_same_sum_on_every_rank",
+            "runtime/test_multimem.py::test_float_ld_reduce_models_the_nvls_accumulator",
+            "runtime/test_multimem.py::test_one_shot_all_reduce_gives_every_rank_the_sum",
+            "runtime/test_multimem_kernels.py::test_cutlass_two_shot_all_reduce_sums_every_rank",
+            "microtests/test_multimem.py::test_multimem_matches_gpu",
+        ),
+    ),
+    RuntimeCase(
+        target_ids=(
+            "call:tirx.ptx.multimem_red",
+            "call:tirx.ptx.multimem_red_f",
+            "call:tirx.ptx.multimem_red_f_vec",
+        ),
+        tests=(
+            "runtime/test_multimem.py::test_red_reduces_into_each_replica",
+            "runtime/test_multimem.py::test_float_red_adds_exactly_and_f32_flushes_subnormals",
+            "microtests/test_multimem.py::test_multimem_matches_gpu",
+        ),
+    ),
+    RuntimeCase(
+        target_ids=(
+            "call:tirx.ptx.multimem_st",
+            "call:tirx.ptx.multimem_st_f",
+            "call:tirx.ptx.multimem_st_f_vec",
+        ),
+        tests=(
+            "runtime/test_multimem.py::test_st_writes_every_replica",
+            "runtime/test_multimem_kernels.py::test_gemm_all_reduce_two_shot_sums_every_rank",
+            "microtests/test_multimem.py::test_multimem_matches_gpu",
+        ),
+    ),
 )
 
 

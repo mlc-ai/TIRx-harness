@@ -55,7 +55,7 @@ impl WarpContext {
             cluster_id,
             cta_id_in_cluster,
             warp_id_in_cta,
-            active_mask: WarpMask::FULL,
+            active_mask: topology.launched_lanes(warp_id_in_cta),
             control_provenance: ControlProvenance::None,
         }
     }
@@ -80,6 +80,26 @@ impl WarpContext {
         self.cluster_id * self.topology.ctas_per_cluster() + self.cta_id_in_cluster
     }
 
+    /// Device rank executing this warp.
+    pub const fn rank(self) -> usize {
+        self.topology.rank_of_cluster(self.cluster_id)
+    }
+
+    /// Kernel-visible cluster index within this warp's rank grid.
+    pub const fn kernel_cluster_id(self) -> usize {
+        self.cluster_id % self.topology.clusters_per_rank()
+    }
+
+    /// Kernel-visible linear CTA index within this warp's rank grid.
+    pub const fn kernel_cta_id(self) -> usize {
+        self.kernel_cluster_id() * self.topology.ctas_per_cluster() + self.cta_id_in_cluster
+    }
+
+    /// Kernel-visible launch dimensions of one rank.
+    pub fn kernel_topology(self) -> LaunchTopology {
+        self.topology.rank_local()
+    }
+
     pub const fn warp_id_in_cta(self) -> usize {
         self.warp_id_in_cta
     }
@@ -89,11 +109,13 @@ impl WarpContext {
     }
 
     pub fn set_active_mask(&mut self, active_mask: WarpMask) {
-        self.active_mask = active_mask;
+        self.active_mask =
+            active_mask.intersection(self.topology.launched_lanes(self.warp_id_in_cta));
     }
 
     pub const fn with_active_mask(mut self, active_mask: WarpMask) -> Self {
-        self.active_mask = active_mask;
+        self.active_mask =
+            active_mask.intersection(self.topology.launched_lanes(self.warp_id_in_cta));
         self
     }
 
@@ -116,7 +138,8 @@ impl WarpContext {
         entry_mask: WarpMask,
         branch_mask: WarpMask,
     ) -> Self {
-        self.active_mask = branch_mask;
+        self.active_mask =
+            branch_mask.intersection(self.topology.launched_lanes(self.warp_id_in_cta));
         self.control_provenance = self
             .control_provenance
             .enter_elect_sync(entry_mask, branch_mask);

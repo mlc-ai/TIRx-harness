@@ -3381,6 +3381,58 @@ impl RaceCheckLaunchState {
         Ok(())
     }
 
+    /// Undo `before_compact_physical_access` for an access whose numeric
+    /// effect failed. Its write spans would otherwise stay in flight, and an
+    /// overlapping atomic of any other warp would wait on them forever.
+    fn abort_compact_physical_access(&self, batch: &CompactPhysicalAccessBatch<'_>) {
+        let operation = batch.operation();
+        if self.race.global_memory_model_enabled
+            && batch.descriptor().space() == PhysicalAccessSpace::Global
+        {
+            if batch.descriptor().kind().writes() {
+                self.finish_global_write_spans(batch.lane_spans().map(|(_, span)| span));
+            }
+            if let Ok(mut global) = self.global_for_warp(operation.id().global_warp_id()) {
+                global.discard_batch(operation.id());
+            }
+            return;
+        }
+        if let Ok(mut state) = self.race_for_operation(operation) {
+            if state
+                .staged_compact_access
+                .as_ref()
+                .is_some_and(|staged| *staged.operation == *operation.id())
+            {
+                state.staged_compact_access = None;
+            }
+        }
+    }
+
+    /// Undo `before_effect` for a physical access whose numeric effect failed.
+    fn abort_physical_access(&self, operation: &OperationContext, batch: &PhysicalAccessBatch) {
+        if self.race.global_memory_model_enabled {
+            if batch.descriptor().space() == PhysicalAccessSpace::Global
+                && batch.descriptor().kind().writes()
+            {
+                self.finish_global_write_spans(
+                    batch
+                        .lanes()
+                        .iter()
+                        .flat_map(|lane| lane.footprint().spans())
+                        .copied(),
+                );
+            }
+            if batch.descriptor().space().has_read_from_versions() {
+                if let Ok(mut global) = self.global_for_warp(operation.id().global_warp_id()) {
+                    global.discard_batch(operation.id());
+                }
+            }
+        }
+        if let Ok(mut state) = self.race_for_operation(operation) {
+            state.staged_accesses.remove(operation.id());
+        }
+    }
+
     fn after_compact_physical_access(
         &self,
         batch: &CompactPhysicalAccessBatch<'_>,
@@ -7248,6 +7300,72 @@ impl AliasAllocationWriters {
         );
     }
 
+    fn forget_range(&mut self, byte_offset: usize, byte_end: usize) {
+        if self.segments.is_empty() {
+            return;
+        }
+        let (covering, covered_until) =
+            self.segments
+                .state_until(byte_offset, byte_end, |segment| segment.byte_end);
+        if covering.is_none() && covered_until == byte_end {
+            return;
+        }
+        if self
+            .segments
+            .try_replace_range(
+                byte_offset,
+                byte_end,
+                Vec::new(),
+                |segment| segment.byte_offset,
+                |segment| segment.byte_end,
+                |segment, split_start, split_end| AliasWriterSegment {
+                    byte_offset: split_start,
+                    byte_end: split_end,
+                    writer_index: segment.writer_index,
+                    writer: Arc::clone(&segment.writer),
+                },
+            )
+            .is_ok()
+        {
+            return;
+        }
+        let segments = self.segments.general_mut();
+        let mut overlapping = Vec::new();
+        if let Some((&key, segment)) = segments.range(..byte_offset).next_back() {
+            if segment.byte_end > byte_offset {
+                overlapping.push(key);
+            }
+        }
+        overlapping.extend(segments.range(byte_offset..byte_end).map(|(&key, _)| key));
+        for key in overlapping {
+            let segment = segments
+                .remove(&key)
+                .expect("overlapping alias writer remains present");
+            if segment.byte_offset < byte_offset {
+                segments.insert(
+                    segment.byte_offset,
+                    AliasWriterSegment {
+                        byte_offset: segment.byte_offset,
+                        byte_end: byte_offset,
+                        writer_index: segment.writer_index,
+                        writer: Arc::clone(&segment.writer),
+                    },
+                );
+            }
+            if segment.byte_end > byte_end {
+                segments.insert(
+                    byte_end,
+                    AliasWriterSegment {
+                        byte_offset: byte_end,
+                        byte_end: segment.byte_end,
+                        writer_index: segment.writer_index,
+                        writer: segment.writer,
+                    },
+                );
+            }
+        }
+    }
+
     fn cannot_alias_read(&self, logical_buffer: &str, byte_offset: usize, byte_end: usize) -> bool {
         self.segments.is_empty()
             || self.writer_bounds.iter().all(|bounds| {
@@ -7592,10 +7710,25 @@ impl AliasTracker {
         });
         let operation = batch.operation().id();
         let Some(logical_buffer) = batch.logical_buffer() else {
-            // Alias advisories require both logical buffer identities. Avoid
-            // scanning every lane merely to rediscover that an anonymous
-            // access can neither produce nor consume one.
             crate::profile_count(ProfileKind::RaceAliasNoLogicalBuffer);
+            if descriptor.kind().writes() && !self.last_writers.is_empty() {
+                if let Some(geometry) = geometry.filter(|value| value.has_contiguous_coverage()) {
+                    if let Some(writers) =
+                        self.last_writers.get_mut(&(space, geometry.allocation()))
+                    {
+                        let (byte_offset, byte_end) = geometry.byte_range();
+                        writers.forget_range(byte_offset, byte_end);
+                    }
+                } else {
+                    for (_, span) in batch.lane_spans() {
+                        if let Some(writers) =
+                            self.last_writers.get_mut(&(space, span.allocation()))
+                        {
+                            writers.forget_range(span.byte_offset(), span.byte_end());
+                        }
+                    }
+                }
+            }
             return;
         };
         let common_allocation_range = geometry
@@ -7668,9 +7801,6 @@ impl AliasTracker {
             }
         }
 
-        // An anonymous writer can never produce an alias advisory: read-side
-        // comparison deliberately requires both logical-buffer identities.
-        // Avoid building byte-interval provenance that no result can observe.
         if descriptor.kind().writes() {
             crate::profile_count(ProfileKind::RaceAliasWrite);
             let writer = AliasWriterRef {
@@ -7784,6 +7914,17 @@ impl AliasTracker {
             return;
         }
         let Some(logical_buffer) = logical_buffer else {
+            if descriptor.kind().writes() && !self.last_writers.is_empty() {
+                for lane in lanes {
+                    for span in lane.footprint().spans() {
+                        if let Some(writers) =
+                            self.last_writers.get_mut(&(space, span.allocation()))
+                        {
+                            writers.forget_range(span.byte_offset(), span.byte_end());
+                        }
+                    }
+                }
+            }
             return;
         };
         let common_allocation_range = common_lane_allocation_range(lanes);
@@ -7838,8 +7979,6 @@ impl AliasTracker {
             }
         }
 
-        // See the compact path above: unnamed writers are not observable by
-        // this advisory and need no retained interval state.
         if descriptor.kind().writes() {
             let writer = AliasWriterRef {
                 logical_buffer: Some(logical_buffer.as_ref()),
@@ -8119,6 +8258,13 @@ impl EngineModeImpl for RaceCheckMode {
         }
     }
 
+    fn abort_compact_physical_access(
+        state: &Self::LaunchState,
+        batch: &CompactPhysicalAccessBatch<'_>,
+    ) {
+        state.abort_compact_physical_access(batch);
+    }
+
     fn begin_cached_global_read(
         state: &Self::LaunchState,
         access: CachedGlobalReadAccess,
@@ -8228,6 +8374,16 @@ impl EngineModeImpl for RaceCheckMode {
             return Self::apply_warp_sync(state, operation, sync.mask());
         }
         state.after_effect(operation, effect)
+    }
+
+    fn abort_effect(
+        state: &Self::LaunchState,
+        operation: &OperationContext,
+        effect: OperationEffect<'_>,
+    ) {
+        if let OperationEffect::PhysicalAccess(batch) = effect {
+            state.abort_physical_access(operation, batch);
+        }
     }
 
     fn before_completion(
@@ -8845,6 +9001,92 @@ mod tests {
                 std::iter::empty(),
             );
         assert!(differential.records_resolved_transitions());
+    }
+
+    fn global_red(operation: &OperationContext, allocation: PhysicalAllocationId) -> PhysicalAccessBatch {
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::AtomicReadModifyWrite,
+            PhysicalAccessSpace::Global,
+            4,
+        )
+        .unwrap()
+        .with_memory_semantics(crate::MemoryAccessSemantics::scoped(
+            crate::MemoryOrder::Relaxed,
+            crate::MemoryScope::Sys,
+            crate::MemoryProxy::Generic,
+            crate::MemoryAccessClass::Reduction,
+        ));
+        PhysicalAccessBatch::resolve(operation.clone(), descriptor, |_| {
+            Ok::<_, std::convert::Infallible>(vec![PhysicalByteSpan::new(allocation, 0, 4).unwrap()])
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn aborted_global_write_leaves_no_write_in_flight() {
+        // An overlapping atomic of any other warp waits until no write there
+        // is in flight; one whose numeric effect failed never reaches
+        // `after_effect`.
+        let topology = LaunchTopology::new(1, 1, 2).unwrap();
+        let watched = PhysicalAllocationId::new(71);
+        let state =
+            RaceCheckLaunchState::for_topology_and_global_write_allocations(topology, [watched]);
+        let epoch = Arc::clone(state.race.global_allocation_epochs.get(&watched).unwrap());
+        let red = operation(0, 0, OperationKind::Atomic);
+        let batch = global_red(&red, watched);
+
+        before(&state, &red, OperationEffect::PhysicalAccess(&batch)).unwrap();
+        assert!(epoch.has_write_in_flight(0, 4));
+        <RaceCheckMode as EngineModeImpl>::abort_effect(
+            &state,
+            &red,
+            OperationEffect::PhysicalAccess(&batch),
+        );
+        assert!(!epoch.has_write_in_flight(0, 4));
+
+        let peer = operation(1, 0, OperationKind::Atomic);
+        let peer_batch = global_red(&peer, watched);
+        before(&state, &peer, OperationEffect::PhysicalAccess(&peer_batch)).unwrap();
+        after(&state, &peer, OperationEffect::PhysicalAccess(&peer_batch)).unwrap();
+        assert!(!epoch.has_write_in_flight(0, 4));
+    }
+
+    #[test]
+    fn aborted_compact_global_write_leaves_no_write_in_flight() {
+        let topology = LaunchTopology::new(1, 1, 1).unwrap();
+        let watched = PhysicalAllocationId::new(7);
+        let state =
+            RaceCheckLaunchState::with_direct_summary_for_topology_and_global_write_allocations(
+                topology,
+                [watched],
+            );
+        let epoch = Arc::clone(state.race.global_allocation_epochs.get(&watched).unwrap());
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::AtomicReadModifyWrite,
+            PhysicalAccessSpace::Global,
+            4,
+        )
+        .unwrap()
+        .with_memory_semantics(crate::MemoryAccessSemantics::scoped(
+            crate::MemoryOrder::Relaxed,
+            crate::MemoryScope::Sys,
+            crate::MemoryProxy::Generic,
+            crate::MemoryAccessClass::Reduction,
+        ));
+        let red = OperationContext::new(
+            DynamicOpId::new(0, 0, 1, StaticOpId::new(99), []),
+            OperationKind::Atomic,
+            WarpMask::from_bits(1),
+        );
+        let lane_spans = std::array::from_fn(|lane| {
+            (lane == 0).then_some(PhysicalByteSpan::new(watched, 0, 4).unwrap())
+        });
+        let batch = CompactPhysicalAccessBatch::new(&red, descriptor, None, false, &lane_spans);
+
+        <RaceCheckMode as EngineModeImpl>::before_compact_physical_access(&state, &batch).unwrap();
+        assert!(epoch.has_write_in_flight(0, 4));
+        <RaceCheckMode as EngineModeImpl>::abort_compact_physical_access(&state, &batch);
+        assert!(!epoch.has_write_in_flight(0, 4));
     }
 
     #[test]
@@ -9652,6 +9894,198 @@ mod tests {
 
         tracker.observe_batch(&reader);
         assert!(tracker.advisories().is_empty());
+    }
+
+    #[test]
+    fn unnamed_write_clears_only_overwritten_alias_provenance() {
+        for force_general in [false, true] {
+            let mut tracker = AliasTracker::default();
+            let writer = batch_range(
+                operation(0, 0, OperationKind::Store),
+                PhysicalAccessKind::Write,
+                7,
+                16,
+                16,
+            )
+            .with_logical_buffer("old_view");
+            tracker.observe_batch(&writer);
+            if force_general {
+                tracker
+                    .last_writers
+                    .get_mut(&(PhysicalAccessSpace::Shared, PhysicalAllocationId::new(7)))
+                    .unwrap()
+                    .segments
+                    .general_mut();
+            }
+            tracker.observe_batch(&batch_at(
+                operation(0, 1, OperationKind::Store),
+                PhysicalAccessKind::Write,
+                7,
+                20,
+            ));
+            tracker.observe_batch(
+                &batch_range(
+                    operation(0, 2, OperationKind::Load),
+                    PhysicalAccessKind::Read,
+                    7,
+                    16,
+                    16,
+                )
+                .with_logical_buffer("new_view"),
+            );
+
+            let advisories = tracker.advisories();
+            assert_eq!(advisories.len(), 1);
+            let overlaps = advisories[0]
+                .overlaps()
+                .iter()
+                .map(|span| (span.byte_offset(), span.byte_len()))
+                .collect::<Vec<_>>();
+            assert_eq!(overlaps, vec![(16, 4), (24, 8)]);
+        }
+    }
+
+    #[test]
+    fn unnamed_compact_writes_preserve_provenance_between_lanes() {
+        let mut tracker = AliasTracker::default();
+        tracker.observe_batch(
+            &batch_range(
+                operation(0, 0, OperationKind::Store),
+                PhysicalAccessKind::Write,
+                7,
+                16,
+                16,
+            )
+            .with_logical_buffer("old_view"),
+        );
+        let write = OperationContext::new(
+            DynamicOpId::new(0, 0, 1, StaticOpId::new(2), []),
+            OperationKind::Store,
+            WarpMask::from_bits(3),
+        );
+        let spans = std::array::from_fn(|lane| {
+            (lane < 2).then(|| {
+                PhysicalByteSpan::new(PhysicalAllocationId::new(7), 16 + lane * 8, 4).unwrap()
+            })
+        });
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::Write,
+            PhysicalAccessSpace::Shared,
+            4,
+        )
+        .unwrap();
+        let anonymous = CompactPhysicalAccessBatch::new(&write, descriptor, None, false, &spans);
+        tracker.observe_compact_batch(&anonymous);
+        tracker.observe_batch(
+            &batch_range(
+                operation(0, 2, OperationKind::Load),
+                PhysicalAccessKind::Read,
+                7,
+                16,
+                16,
+            )
+            .with_logical_buffer("new_view"),
+        );
+
+        let advisories = tracker.advisories();
+        assert_eq!(advisories.len(), 1);
+        let overlaps = advisories[0]
+            .overlaps()
+            .iter()
+            .map(|span| (span.byte_offset(), span.byte_len()))
+            .collect::<Vec<_>>();
+        assert_eq!(overlaps, vec![(20, 4), (28, 4)]);
+    }
+
+    #[test]
+    fn unnamed_contiguous_compact_write_clears_alias_provenance() {
+        let mut tracker = AliasTracker::default();
+        tracker.observe_batch(
+            &batch_range(
+                operation(0, 0, OperationKind::Store),
+                PhysicalAccessKind::Write,
+                7,
+                16,
+                16,
+            )
+            .with_logical_buffer("old_view"),
+        );
+        let write = OperationContext::new(
+            DynamicOpId::new(0, 0, 1, StaticOpId::new(2), []),
+            OperationKind::Store,
+            WarpMask::from_bits(1),
+        );
+        let spans = std::array::from_fn(|lane| {
+            (lane == 0).then(|| PhysicalByteSpan::new(PhysicalAllocationId::new(7), 16, 8).unwrap())
+        });
+        let descriptor = PhysicalAccessDescriptor::new(
+            PhysicalAccessKind::Write,
+            PhysicalAccessSpace::Shared,
+            8,
+        )
+        .unwrap();
+        let anonymous = CompactPhysicalAccessBatch::new(&write, descriptor, None, false, &spans);
+        let geometry = crate::race_shadow::RaceShadow::new(1)
+            .compact_direct_geometry(&anonymous)
+            .unwrap();
+        assert!(geometry.has_contiguous_coverage());
+        tracker.observe_compact_batch_with_geometry(&anonymous, Some(geometry));
+        tracker.observe_batch(
+            &batch_range(
+                operation(0, 2, OperationKind::Load),
+                PhysicalAccessKind::Read,
+                7,
+                16,
+                16,
+            )
+            .with_logical_buffer("new_view"),
+        );
+
+        let advisories = tracker.advisories();
+        assert_eq!(advisories.len(), 1);
+        assert_eq!(advisories[0].overlaps()[0].byte_offset(), 24);
+        assert_eq!(advisories[0].overlaps()[0].byte_len(), 8);
+    }
+
+    #[test]
+    fn unnamed_reads_and_other_allocations_do_not_clear_alias_provenance() {
+        let mut tracker = AliasTracker::default();
+        tracker.observe_batch(&named_batch(
+            operation(0, 0, OperationKind::Store),
+            PhysicalAccessKind::Write,
+            "old_view",
+        ));
+        tracker.observe_batch(&batch_at(
+            operation(0, 1, OperationKind::Load),
+            PhysicalAccessKind::Read,
+            7,
+            16,
+        ));
+        tracker.observe_batch(&batch_at(
+            operation(0, 2, OperationKind::Store),
+            PhysicalAccessKind::Write,
+            8,
+            16,
+        ));
+        tracker.observe_batch(&named_batch(
+            operation(0, 3, OperationKind::Load),
+            PhysicalAccessKind::Read,
+            "new_view",
+        ));
+
+        assert_eq!(tracker.advisories().len(), 1);
+        tracker.observe_batch(&batch_at(
+            operation(0, 4, OperationKind::Store),
+            PhysicalAccessKind::Write,
+            7,
+            16,
+        ));
+        let writers = tracker
+            .last_writers
+            .get(&(PhysicalAccessSpace::Shared, PhysicalAllocationId::new(7)))
+            .unwrap();
+        assert!(writers.segments.is_empty());
+        assert_eq!(tracker.advisories().len(), 1);
     }
 
     fn committed_arrive(

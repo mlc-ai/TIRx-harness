@@ -1054,6 +1054,8 @@ impl RaceVectorClock {
             ProxyAsyncFenceScope::Global => &[ProxyMemoryDomain::Global],
             ProxyAsyncFenceScope::SharedCta => &[ProxyMemoryDomain::SharedCta],
             ProxyAsyncFenceScope::SharedCluster => &[ProxyMemoryDomain::SharedCluster],
+            // Shared memory has no modeled virtual aliases.
+            ProxyAsyncFenceScope::Alias => &[],
         };
         lane_bridges.merge_masked_with(active_mask, |bridges| {
             for prior_domain in prior_domains.iter().copied() {
@@ -6104,7 +6106,7 @@ fn witness_is_globally_observed(
     let current_proxy = match prior_proxy {
         MemoryProxy::Generic => MemoryProxy::Async,
         MemoryProxy::Async => MemoryProxy::Generic,
-        MemoryProxy::Mmio => return false,
+        MemoryProxy::Mmio | MemoryProxy::MulticastAlias => return false,
     };
     let current_domains: &[ProxyMemoryDomain] = match prior_domain {
         ProxyMemoryDomain::Global => &[ProxyMemoryDomain::Global],
@@ -11219,7 +11221,9 @@ mod tests {
         let semantics = match proxy {
             MemoryProxy::Generic => MemoryAccessSemantics::plain(),
             MemoryProxy::Async => MemoryAccessSemantics::async_proxy(),
-            MemoryProxy::Mmio => unreachable!("proxy-async tests do not use MMIO"),
+            MemoryProxy::Mmio | MemoryProxy::MulticastAlias => {
+                unreachable!("proxy-async tests do not use MMIO or multicast aliases")
+            }
         };
         single(warp_id, sequence, source, kind, allocation, 0, 4)
             .with_memory_semantics(semantics)
@@ -11239,7 +11243,9 @@ mod tests {
         let semantics = match proxy {
             MemoryProxy::Generic => MemoryAccessSemantics::plain(),
             MemoryProxy::Async => MemoryAccessSemantics::async_proxy(),
-            MemoryProxy::Mmio => unreachable!("proxy-async tests do not use MMIO"),
+            MemoryProxy::Mmio | MemoryProxy::MulticastAlias => {
+                unreachable!("proxy-async tests do not use MMIO or multicast aliases")
+            }
         };
         batch(warp_id, sequence, source, 1_u32 << lane, kind, 4, |_| {
             span(allocation, 0, 4)
