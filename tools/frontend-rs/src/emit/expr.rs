@@ -397,6 +397,14 @@ impl<'a> Emitter<'a> {
         target_dtype: &str,
     ) -> AResult<(String, String)> {
         let target_type = expr_rust_type(self.ctx.schema, target_dtype)?;
+        if self.ctx.schema.high_precision && crate::tables::is_promoted_float(target_dtype) {
+            let promoted = if source_type == "bool" {
+                format!("if {code} {{ 1.0_f64 }} else {{ 0.0_f64 }}")
+            } else {
+                format!("({code}) as f64")
+            };
+            return Ok((promoted, target_type));
+        }
         if dtype_by_rust_type(source_type).is_none() {
             return unsupported(format!("Unknown Rust scalar source type {source_type}"));
         }
@@ -1202,6 +1210,11 @@ impl<'a> Emitter<'a> {
     }
 
     pub fn emit_expr(&mut self, expr: &ObjectRef) -> AResult<RustValue> {
+        if self.ctx.schema.high_precision {
+            if let Ok(dtype) = dtype_of(expr) {
+                super::high_precision::validate_dtype(&dtype)?;
+            }
+        }
         if self.diagnostics.invalid_values.contains(expr) {
             return Err(util::Failure::Recorded);
         }
@@ -1263,6 +1276,13 @@ impl<'a> Emitter<'a> {
                 }
                 _ => code,
             };
+            if self.ctx.schema.high_precision {
+                return Ok(RustValue::new(
+                    format!("({code}) as f64"),
+                    "f64",
+                    Uniformity::Uniform,
+                ));
+            }
             return Ok(RustValue {
                 quantized_dtype: if is_low_precision_float(&dtype) {
                     Some(dtype)

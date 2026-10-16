@@ -62,7 +62,7 @@ pub fn v2_memory_space_rust(space: &str) -> AResult<&'static str> {
 
 pub fn stmt_rust_scalar_type(schema: &crate::schema::Schema, dtype: &str) -> Option<String> {
     stmt_rust_scalar_by_dtype(dtype)
-        .map(str::to_owned)
+        .map(|native| crate::tables::precision_scalar_type(schema, dtype, native).to_owned())
         .or_else(|| vector_rust_type(schema, dtype))
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class NumSimReport:
     ok: bool
     mismatches: list[Mismatch] = field(default_factory=list)
     diagnostics: list[dict] = field(default_factory=list)
+    precision: Literal["native", "high"] = "native"
 
     @property
     def verdict(self) -> str:

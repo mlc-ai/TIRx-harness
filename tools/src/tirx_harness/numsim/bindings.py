@@ -6,6 +6,7 @@ import ctypes
 import hashlib
 import math
 import struct
+from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
@@ -140,6 +141,90 @@ class PreparedBindings:
     _originals: dict[str, _OriginalBuffer] = field(repr=False, compare=False)
     _host_allocations: tuple[_HostAllocation, ...] = field(repr=False, compare=False)
 
+    def validate_high_precision(self) -> None:
+        if self.tensor_map_outputs or self.descriptor_allocations:
+            raise NumSimExecutionError("high precision does not support TensorMap bindings")
+
+    def high_precision_outputs(
+        self, outputs: dict[str, np.ndarray], values: list
+    ) -> dict[str, np.ndarray]:
+        formats = {
+            "float16": 1,
+            "bfloat16": 2,
+            "float32": 3,
+            "float64": 4,
+            "float8_e4m3fn": 5,
+            "float8_e8m0fnu": 6,
+        }
+        if len(values) != len(self.allocations):
+            raise NumSimExecutionError("NumSim high precision allocation count mismatch")
+        result = dict(outputs)
+        for name, array in outputs.items():
+            descriptor = self.buffers.get(name)
+            if descriptor is None:
+                raise NumSimExecutionError(
+                    "high precision TensorMap output decoding is not implemented"
+                )
+            format_id = formats.get(descriptor.dtype, 0)
+            if descriptor.dtype == "bfloat16":
+                promoted = (
+                    (array.view(np.uint16).astype(np.uint32) << np.uint32(16))
+                    .view(np.float32)
+                    .astype(np.float64)
+                )
+            elif descriptor.dtype == "float8_e4m3fn":
+                bits = array.view(np.uint8)
+                exponent = (bits >> 3) & 15
+                mantissa = bits & 7
+                promoted = np.where(
+                    exponent == 0,
+                    mantissa * 2.0**-9,
+                    (1 + mantissa / 8) * np.exp2(exponent.astype(np.int32) - 7),
+                )
+                promoted = np.where(bits & 128, -promoted, promoted)
+                promoted = np.where((bits & 127) == 127, np.nan, promoted)
+            elif descriptor.dtype == "float8_e8m0fnu":
+                bits = array.view(np.uint8)
+                promoted = np.where(bits == 255, np.nan, np.exp2(bits.astype(np.int32) - 127))
+            elif format_id:
+                promoted = array.view(np.dtype(descriptor.dtype)).astype(np.float64)
+            else:
+                promoted = array
+            shadow = {
+                offset: (width, kind, value)
+                for offset, width, kind, value in values[descriptor.allocation]
+            }
+            offsets = sorted(shadow)
+            for coordinate in np.ndindex(descriptor.shape):
+                offset = descriptor.data_offset + sum(
+                    index * stride for index, stride in zip(coordinate, descriptor.byte_strides)
+                )
+                value = shadow.get(offset)
+                if value is not None:
+                    width, kind, number = value
+                    if width != descriptor.itemsize or kind != format_id:
+                        raise NumSimExecutionError(
+                            f"high precision output {name!r} aliases a different typed cell"
+                        )
+                    if format_id:
+                        promoted[coordinate] = number
+                else:
+                    position = bisect_right(offsets, offset) - 1
+                    overlaps_previous = (
+                        position >= 0 and offsets[position] + shadow[offsets[position]][0] > offset
+                    )
+                    following = bisect_left(offsets, offset)
+                    overlaps_next = (
+                        following < len(offsets)
+                        and offsets[following] < offset + descriptor.itemsize
+                    )
+                    if overlaps_previous or overlaps_next:
+                        raise NumSimExecutionError(
+                            f"high precision output {name!r} reads a partial typed value"
+                        )
+            result[name] = promoted
+        return result
+
     def _write_through_allocations(self) -> frozenset[int]:
         return frozenset(
             index
@@ -160,8 +245,7 @@ class PreparedBindings:
         return replace(
             self,
             allocations=tuple(
-                replace(allocation, data=allocation.snapshot())
-                for allocation in self.allocations
+                replace(allocation, data=allocation.snapshot()) for allocation in self.allocations
             ),
         )
 
@@ -567,9 +651,7 @@ class PreparedBindings:
         copied: list[bytes | memoryview | None] = []
         for index, (actual, expected) in enumerate(zip(allocation_bytes, self.allocations)):
             if actual is None:
-                copied.append(
-                    expected.data if index in write_through_allocations else None
-                )
+                copied.append(expected.data if index in write_through_allocations else None)
                 continue
             value = bytes(actual)
             if len(value) != expected.byte_len:
@@ -579,9 +661,7 @@ class PreparedBindings:
                 )
             copied.append(value)
 
-        for index, (physical, host) in enumerate(
-            zip(copied, self._host_allocations, strict=True)
-        ):
+        for index, (physical, host) in enumerate(zip(copied, self._host_allocations, strict=True)):
             if physical is None or not host.implicit:
                 continue
             if index in write_through_allocations:
@@ -1139,7 +1219,8 @@ def _decode_tensor_maps(array: np.ndarray) -> tuple[_DecodedTensorMap, ...]:
         if swizzle_code:
             try:
                 swizzle = next(
-                    name for name, code in _TENSOR_MAP_SWIZZLES.items()
+                    name
+                    for name, code in _TENSOR_MAP_SWIZZLES.items()
                     if code == (swizzle_code, atomicity)
                 )
             except StopIteration:

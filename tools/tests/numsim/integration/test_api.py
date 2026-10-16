@@ -309,7 +309,7 @@ def test_run_case_requires_reference_keys_to_name_selected_outputs(monkeypatch):
         outputs=("output",),
         reference=lambda: {"wrong_name": np.zeros(1, dtype=np.int32)},
     )
-    monkeypatch.setattr(numsim_api, "transpile", lambda kernel: kernel)
+    monkeypatch.setattr(numsim_api, "transpile", lambda kernel, *, precision: kernel)
 
     with pytest.raises(numsim.NumSimExecutionError, match="must name selected"):
         numsim.run_case(case, engine=engine)
@@ -329,7 +329,7 @@ def test_run_case_rejects_empty_reference_before_execution(monkeypatch):
         outputs=("output",),
         reference=lambda: {},
     )
-    monkeypatch.setattr(numsim_api, "transpile", lambda kernel: kernel)
+    monkeypatch.setattr(numsim_api, "transpile", lambda kernel, *, precision: kernel)
 
     with pytest.raises(numsim.NumSimExecutionError, match="must not be empty"):
         numsim.run_case(case, engine=engine)
@@ -352,7 +352,7 @@ def test_run_case_freezes_bindings_before_mutating_reference(monkeypatch):
         outputs=("output",),
         reference=mutating_reference,
     )
-    monkeypatch.setattr(numsim_api, "transpile", lambda kernel: kernel)
+    monkeypatch.setattr(numsim_api, "transpile", lambda kernel, *, precision: kernel)
     engine = _FrozenNoOpEngine(source)
 
     report = numsim.run_case(case, engine=engine)

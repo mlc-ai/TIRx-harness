@@ -2199,6 +2199,7 @@ impl_byte_view_io!(WarpPrivateMemory, WarpPrivateView);
 /// All physical address spaces for one launch.
 #[derive(Clone)]
 pub struct PhysicalMemory {
+    pub(crate) high_precision: Arc<crate::high_precision::ShadowMemory>,
     topology: LaunchTopology,
     global: GlobalMemory,
     shared: SharedMemory,
@@ -2279,6 +2280,7 @@ impl PhysicalMemory {
         let semantic_progress = global.semantic_progress();
         let read_policy = global.uninitialized_read_policy();
         Self {
+            high_precision: Arc::default(),
             topology,
             global,
             shared: SharedMemory::with_semantic_progress(topology, semantic_progress.clone())

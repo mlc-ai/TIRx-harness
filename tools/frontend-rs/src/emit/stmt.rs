@@ -79,7 +79,9 @@ pub fn is_int_imm_value(node: &ObjectRef, expected: i64) -> bool {
 impl<'a> Emitter<'a> {
     pub fn rust_scalar_type(&self, dtype: &str) -> Option<String> {
         stmt_rust_scalar_by_dtype(dtype)
-            .map(str::to_owned)
+            .map(|native| {
+                crate::tables::precision_scalar_type(self.ctx.schema, dtype, native).to_owned()
+            })
             .or_else(|| vector_rust_type(self.ctx.schema, dtype))
     }
 
@@ -545,6 +547,9 @@ impl<'a> Emitter<'a> {
                 plan.dynamic_data_var.is_some(),
             )
         };
+        if self.ctx.schema.high_precision {
+            super::high_precision::validate_memory(self, &dtype, space, zero_fill_invalid)?;
+        }
         if let Some(register_mask) = register_access_mask {
             if access_mask.is_some() {
                 return unsupported(
@@ -633,7 +638,7 @@ impl<'a> Emitter<'a> {
             dtype.clone()
         };
         let mut decoder = load_plan.decoder;
-        if dtype == "float16" || dtype == "bfloat16" {
+        if dtype == "float16" || dtype == "bfloat16" || self.ctx.schema.high_precision {
             decoder = None;
         }
         if matches!(load_plan.backend, WarpLoadBackend::RuntimeFloat4) {
@@ -645,7 +650,9 @@ impl<'a> Emitter<'a> {
             access_index = byte_index;
             memory_dtype = "uint8".to_owned();
             decoder = None;
-        } else if dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu" {
+        } else if !self.ctx.schema.high_precision
+            && (dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu")
+        {
             memory_dtype = "uint8".to_owned();
         }
         let marker = v2_memory_type_rust(self.ctx.schema, &memory_dtype)?;
@@ -1839,6 +1846,9 @@ impl<'a> Emitter<'a> {
                 plan.dynamic_data_var.is_some(),
             )
         };
+        if self.ctx.schema.high_precision {
+            super::high_precision::validate_memory(self, &dtype, space, false)?;
+        }
         let mut raw_value = self.emit_expr(&oref(stmt.value.clone()))?;
         if raw_value.rust_type == "PhysicalPtr" {
             let address = self.control_name("stored_generic_address");
@@ -1896,7 +1906,9 @@ impl<'a> Emitter<'a> {
         };
         let mut stored_value = value.code.clone();
         let mut memory_dtype = dtype.clone();
-        if dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu" {
+        if !self.ctx.schema.high_precision
+            && (dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu")
+        {
             memory_dtype = "uint8".to_owned();
             stored_value = self.control_name("float8_store_bits");
             let encoder = if dtype == "float8_e4m3fn" {

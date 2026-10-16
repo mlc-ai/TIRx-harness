@@ -23,6 +23,7 @@ fn row_json(ir_name: &str, row: &OpRow) -> Json {
 
 #[derive(Default)]
 pub struct Schema {
+    pub high_precision: bool,
     pub registered_ops: HashMap<String, OpRow>,
     pub supported_cast_dtypes: HashSet<String>,
     pub supported_buffer_dtypes: HashSet<String>,
@@ -190,6 +191,7 @@ impl Schema {
             }
         }
         Ok(Schema {
+            high_precision: false,
             registered_ops,
             supported_cast_dtypes: crate::dtypes::with_capability("cast"),
             supported_buffer_dtypes: crate::dtypes::with_capability("buffer"),

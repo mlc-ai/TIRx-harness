@@ -6484,6 +6484,54 @@ where
     let c_buffer = c.allocation().inner().clone();
     let d_buffer = destination.allocation().inner().clone();
 
+    if physical.global().high_precision_enabled() {
+        use crate::high_precision::{Bf16, F16, F32, Value};
+        let read_input = |buffer: &crate::runtime::RuntimeBuffer, element| -> Result<f64, EngineError> {
+            match Input::SPEC.format {
+                GemmInputFormat::F16 => {
+                    Ok(read_regular::<Value<F16>>(&physical, &inner, buffer, element)?.value)
+                }
+                GemmInputFormat::Bf16 => {
+                    Ok(read_regular::<Value<Bf16>>(&physical, &inner, buffer, element)?.value)
+                }
+                _ => Err(EngineError::message(
+                    "high precision warp GEMM supports FP16 and BF16 inputs",
+                )),
+            }
+        };
+        let left = a_elements
+            .iter()
+            .map(|&element| read_input(&a_buffer, element))
+            .collect::<Result<Vec<_>, _>>()?;
+        let right = b_elements
+            .iter()
+            .map(|&element| read_input(&b_buffer, element))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut output = match c_elements.as_deref() {
+            Some(elements) => elements
+                .iter()
+                .map(|&element| {
+                    read_regular::<Value<F32>>(&physical, &inner, &c_buffer, element)
+                        .map(|value| value.value)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            None => vec![0.0_f64; d_elements.len()],
+        };
+        for row in 0..config.m {
+            for column in 0..config.n {
+                let accumulator = &mut output[row * config.n + column];
+                for reduction in 0..config.k {
+                    *accumulator = left[row * config.k + reduction]
+                        .mul_add(right[column * config.k + reduction], *accumulator);
+                }
+            }
+        }
+        for (&element, &value) in d_elements.iter().zip(&output) {
+            write_regular(&physical, &inner, &d_buffer, element, Value::<F32>::new(value))?;
+        }
+        return Ok(());
+    }
+
     let mut a_values = Vec::with_capacity(a_elements.len());
     for &element in &a_elements {
         a_values.push(read_gemm_value::<Input>(

@@ -98,6 +98,7 @@ fn run_impl(
         }
     }
     let global = GlobalMemory::new_reviewing_uninitialized_reads();
+    if __NUMSIM_HIGH_PRECISION__ { global.enable_high_precision(); }
     let allocation_ids = extract_allocations(inputs, &global, NUMSIM_ABI_VERSION)?;
     let output_allocations = extract_output_allocations(inputs, allocation_ids.len())?;
     let mut run_result = RunResultBuilder::new();

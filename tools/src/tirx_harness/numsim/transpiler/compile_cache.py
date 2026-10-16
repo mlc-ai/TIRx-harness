@@ -225,6 +225,7 @@ def _write_cached(
 def compile_module_cached(
     source: Any,
     *,
+    precision: str = "native",
     analysis_capable: bool,
     analysis_checker: Literal["synccheck", "racecheck"] | None,
 ) -> tuple[ModuleSpec, str]:
@@ -238,7 +239,7 @@ def compile_module_cached(
 
     funcs = source_kernels(source)
     identity = _compile_identity(
-        generated_source_identity(funcs),
+        generated_source_identity(funcs, precision=precision),
         kind=artifact_kind(analysis_capable=analysis_capable, analysis_checker=analysis_checker),
     )
     key = _cache_key(identity)
@@ -259,6 +260,7 @@ def compile_module_cached(
 
         compiled = compile_native_module(
             funcs,
+            precision=precision,
             analysis_capable=analysis_capable,
             analysis_checker=analysis_checker,
         )

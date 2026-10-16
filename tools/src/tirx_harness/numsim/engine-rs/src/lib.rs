@@ -19,6 +19,7 @@ mod effect;
 mod engine_mode;
 mod executor;
 mod hardware_barriers;
+pub mod high_precision;
 mod instruction_codec;
 #[cfg(feature = "profile")]
 mod instruction_profile;
@@ -251,4 +252,4 @@ pub(crate) use runtime::operand::PhysicalAddress;
 
 /// Increment for an incompatible generated-code, binding, or result boundary change.
 #[cfg(feature = "python")]
-pub(crate) const NUMSIM_ABI_VERSION: u32 = 38;
+pub(crate) const NUMSIM_ABI_VERSION: u32 = 39;

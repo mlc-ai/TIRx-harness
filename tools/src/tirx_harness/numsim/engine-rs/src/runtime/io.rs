@@ -2399,6 +2399,14 @@ pub(crate) fn load_scalar_warp_at_byte_offsets<T: RuntimeScalar>(
     mask: WarpMask,
     source: Option<ReadSource>,
 ) -> Result<WarpValue<T>, EngineError> {
+    if T::HIGH_FORMAT != 0 || physical.global().high_precision_enabled() {
+        let mut values = WarpValue::splat(T::zero());
+        for lane in mask {
+            values[lane] =
+                crate::high_precision::read(physical, context, buffer, lane, byte_offsets[lane])?;
+        }
+        return Ok(values);
+    }
     let owner_private = match buffer {
         RuntimeBuffer::Local {
             allocations,
@@ -2551,6 +2559,14 @@ fn load_scalar_lane_impl<T: RuntimeScalar>(
         EngineError::out_of_bounds(format!("negative buffer index {index} on lane {lane}"))
     })?;
     let byte_offset = element_byte_offset(buffer, index, T::BYTE_LEN, lane)?;
+    if T::HIGH_FORMAT != 0 || physical.global().high_precision_enabled() {
+        if zero_filled {
+            return Err(EngineError::message(
+                "high precision does not support zero-filled scalar reads",
+            ));
+        }
+        return crate::high_precision::read(physical, context, buffer, lane, byte_offset);
+    }
     let mut bytes = [0_u8; MAX_RUNTIME_SCALAR_BYTES];
     if zero_filled {
         read_runtime_bytes_zero_filled_into(
@@ -2660,7 +2676,20 @@ pub fn load_warp_private_scalar_at_thread<T: RuntimeScalar>(
             "warp-private owner transport read from target warp {target_warp_id_in_cta}, lane {lane}, index {index}: {error}"
         ))
     })?;
-    T::decode_le(&bytes[..T::BYTE_LEN])
+    let native = T::decode_le(&bytes[..T::BYTE_LEN])?;
+    if T::HIGH_FORMAT != 0 || physical.global().high_precision_enabled() {
+        let target_context = WarpContext::from_topology(topology, target_global);
+        let access = resolve_runtime_physical_access(
+            &target_context,
+            buffer,
+            lane,
+            byte_offset,
+            T::BYTE_LEN,
+            PhysicalAccessKind::Read,
+        )?;
+        return crate::high_precision::decode(physical, access.space(), access.span(), native);
+    }
+    Ok(native)
 }
 
 #[inline]
@@ -2685,6 +2714,19 @@ pub(crate) fn store_scalar_warp_at_byte_offsets<T: RuntimeScalar>(
     values: &WarpValue<T>,
     mask: WarpMask,
 ) -> Result<(), EngineError> {
+    if T::HIGH_FORMAT != 0 || physical.global().high_precision_enabled() {
+        for lane in mask {
+            crate::high_precision::write(
+                physical,
+                context,
+                buffer,
+                lane,
+                byte_offsets[lane],
+                values[lane],
+            )?;
+        }
+        return Ok(());
+    }
     let owner_private = match buffer {
         RuntimeBuffer::Local {
             allocations,

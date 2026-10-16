@@ -686,7 +686,7 @@ impl<'a> Emitter<'a> {
         expr_rust_type(self.ctx.schema, dtype)
     }
 
-    fn emit_arguments(&mut self, expr: &ObjectRef) -> AResult<Vec<RustValue>> {
+    pub(super) fn emit_arguments(&mut self, expr: &ObjectRef) -> AResult<Vec<RustValue>> {
         let mut values = Vec::new();
         for argument in call_args(expr) {
             values.push(self.emit_expr(&argument)?);
@@ -1496,7 +1496,11 @@ impl<'a> Emitter<'a> {
             return unsupported("warp_reduce value/result Rust types disagree");
         }
         let result = self.temp(&format!("warp_reduce_{operation}"));
-        let logical_dtype = dtype_of(expr)?;
+        let logical_dtype = if self.ctx.schema.high_precision && result_type == "f64" {
+            "float64".to_owned()
+        } else {
+            dtype_of(expr)?
+        };
         let site = self.expr_site(expr);
         let participants = self.temp("warp_reduce_participants");
         let controls = self.temp("warp_reduce_controls");

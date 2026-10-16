@@ -39,6 +39,8 @@ sync_instruction!(st_bulk_spec, StBulkVariant, st_bulk);
 pub mod variant {
     use super::PhantomData;
 
+    pub struct High<F>(PhantomData<F>);
+
     /// One scalar lane value not already represented by a register marker.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Bool;
@@ -205,6 +207,18 @@ pub trait MemoryType: memory_type_sealed::Sealed {
 
     fn encode_warp(values: R<Self::Scalar>) -> R<Self::Storage> {
         values.map(|_lane, value| Self::encode(value))
+    }
+}
+
+impl<F: crate::high_precision::Format> memory_type_sealed::Sealed for variant::High<F> {}
+impl<F: crate::high_precision::Format> MemoryType for variant::High<F> {
+    type Scalar = f64;
+    type Storage = crate::high_precision::Value<F>;
+    fn decode(value: Self::Storage) -> f64 {
+        value.value
+    }
+    fn encode(value: f64) -> Self::Storage {
+        crate::high_precision::Value::new(value)
     }
 }
 
@@ -1235,6 +1249,16 @@ macro_rules! mem_axis {
     (@class $gate:ident, $entry:ident, w128, $spaces:tt, $extra:tt) => {
         mem_axis!(@types $gate, $entry, [variant::U64x2], $spaces, $extra);
     };
+    (@class $gate:ident, $entry:ident, high, $spaces:tt, $extra:tt) => {
+        mem_axis!(@types $gate, $entry, [
+            variant::High<crate::high_precision::F16>,
+            variant::High<crate::high_precision::Bf16>,
+            variant::High<crate::high_precision::F32>,
+            variant::High<crate::high_precision::F64>,
+            variant::High<crate::high_precision::E4m3>,
+            variant::High<crate::high_precision::E8m0>,
+        ], $spaces, $extra);
+    };
     // PTX's sub-word `.type` suffixes. `.b8`/`.u8`/`.s8` move one byte but
     // name a 32-bit register, so they need the widening carriers above.
     // `.b16`/`.u16`/`.s16` may name either a 16-bit register (class `w16`,
@@ -1299,6 +1323,8 @@ macro_rules! mem_order_scopes {
 }
 
 // --- lane-wise `ld` rows ---------------------------------------------------
+mem_axis!(test_visible, scalar_ld_for_mode, [high], modeled, [variant::Plain]);
+mem_axis!(test_visible, scalar_st_for_mode, [high], modeled, [variant::Plain]);
 mem_axis!(
     test_visible,
     scalar_ld_for_mode,

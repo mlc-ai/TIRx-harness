@@ -20,6 +20,7 @@ def _normalize_funcs(func: Any) -> tuple[Any, ...]:
 def compile_native_module(
     funcs: tuple[Any, ...],
     *,
+    precision: str = "native",
     analysis_capable: bool,
     analysis_checker: str | None,
 ) -> tuple[
@@ -30,6 +31,7 @@ def compile_native_module(
     return native_frontend.compile_module(
         funcs,
         {
+            "high_precision": precision == "high",
             "analysis_capable": analysis_capable,
             "analysis_checker": "" if analysis_checker is None else analysis_checker,
             "numsim_abi_version": NUMSIM_ABI_VERSION,

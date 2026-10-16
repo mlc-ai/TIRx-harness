@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-NUMSIM_ABI_VERSION = 38
+NUMSIM_ABI_VERSION = 39
 
 
 def abi_metadata() -> dict[str, int]:

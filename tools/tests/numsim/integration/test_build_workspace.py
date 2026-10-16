@@ -167,7 +167,9 @@ def test_generated_profile_keeps_all_source_sizes_at_o3():
 def test_prepare_analysis_artifact_keeps_o3_default(monkeypatch, tmp_path):
     _mock_build_environment(monkeypatch, tmp_path)
     monkeypatch.delenv(build._GENERATED_OPT_LEVEL_ENV, raising=False)
-    monkeypatch.setattr(build, "generated_source_identity", lambda _source: "source-identity")
+    monkeypatch.setattr(
+        build, "generated_source_identity", lambda _source, *, precision="native": "source-identity"
+    )
     monkeypatch.setattr(build, "_codegen_fingerprint", lambda: "codegen-fingerprint")
 
     prepared = build.prepare_generated_artifact(
