@@ -5,7 +5,7 @@
 
 Run the CPU preflight first:
 
-    python -m benchmarks.multimem.numsim_preflight --world 4
+    python -m benchmarks.multimem.common --world 4
 
 The CUTLASS kernel is imported unchanged from ``$CUTLASS_DIR``; ``origins``
 restates only its host wrapper, to launch on the capturing stream.

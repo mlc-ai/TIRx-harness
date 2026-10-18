@@ -149,7 +149,7 @@ rank-local binding pattern on real GPUs. Run the CPU preflight first, then use
 the benchmark entry point for the device comparison:
 
 ```bash
-python -m benchmarks.multimem.numsim_preflight --world 4
+python -m benchmarks.multimem.common --world 4
 python -m benchmarks.multimem.two_shot_all_reduce --world 4
 python -m benchmarks.multimem.gemm_all_reduce compare --shapes cutlass_default
 python -m benchmarks.peer.all_gather_gemm compare --shapes cutlass_default

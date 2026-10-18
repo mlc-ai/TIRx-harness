@@ -1,14 +1,19 @@
-"""Launch, symmetric-memory, and timing utilities shared by the multimem benchmarks.
+"""Common utilities for the multimem and peer GPU benchmarks.
 
 Every implementation of a kernel is timed the same way, in the same processes,
 on the same buffers: one CUDA graph per implementation replays ``launches``
 back-to-back launches that cycle through the workspaces, and the trials of all
 implementations are interleaved so drift affects each alike. A rank's time per
 launch is the median over trials; the reported time is the slowest rank's.
+
+Run the distributed two-shot kernel's CPU preflight before reserving GPUs:
+
+    python -m benchmarks.multimem.common --world 4
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -18,9 +23,12 @@ import sys
 import tempfile
 import time
 import traceback
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from tirx_harness import numsim
 
 CUTLASS_DIR = Path(os.environ.get("CUTLASS_DIR", "~/src/cutlass")).expanduser()
 FLASHINFER_DIR = Path(os.environ.get("FLASHINFER_DIR", "~/src/flashinfer")).expanduser()
@@ -263,3 +271,81 @@ def table(rows: list[dict], columns: list[tuple[str, str, str]]) -> str:
     lines += ["| " + " | ".join(format(row[key], spec) for key, _, spec in columns) + " |"
               for row in rows]
     return "\n".join(lines)
+
+
+def rank_inputs(
+    world: int, *, tiles: int | None = None, seed: int = 0
+) -> tuple[list[dict], np.ndarray]:
+    """Build the two-shot kernel's NumSim bindings and float64 reference."""
+
+    from ported.cutlass.sm100_all_reduce import TILE
+    from tirx_harness.numsim import MulticastWindow
+
+    tiles = world if tiles is None else tiles
+    if world <= 0 or tiles <= 0 or tiles % world:
+        raise ValueError("tiles must be a positive multiple of world")
+    shape = (TILE * tiles, TILE)
+    rng = np.random.default_rng(seed)
+    sources = [rng.standard_normal(shape).astype(np.float32) for _ in range(world)]
+    outputs = [np.zeros(shape, dtype=np.float32) for _ in range(world)]
+    flags = [np.zeros(tiles // world, dtype=np.int32) for _ in range(world)]
+    input_window = MulticastWindow(sources)
+    output_window = MulticastWindow(outputs)
+    flag_window = MulticastWindow(flags)
+    bindings = [
+        {
+            "rank": np.int32(rank),
+            "data_in": sources[rank],
+            "data_out": outputs[rank],
+            "in_mc": input_window,
+            "out_mc": output_window,
+            "flag": flags[rank],
+            "flag_mc": flag_window,
+        }
+        for rank in range(world)
+    ]
+    reference = sum(
+        (source.astype(np.float64) for source in sources), start=np.zeros(shape, np.float64)
+    )
+    return bindings, reference
+
+
+def run_preflight(world: int, *, tiles: int | None = None, seed: int = 0) -> numsim.NumSimResult:
+    """Run NumSim, Racecheck, and Synccheck for the distributed two-shot kernel."""
+
+    from ported.cutlass.sm100_all_reduce import two_shot_all_reduce
+    from tirx_harness import numsim, racecheck, synccheck
+
+    tiles = world if tiles is None else tiles
+    kernel = two_shot_all_reduce(tiles, world, 1)
+    race_inputs, _ = rank_inputs(world, tiles=tiles, seed=seed)
+    racecheck(kernel, race_inputs).require_clean()
+    sync_inputs, _ = rank_inputs(world, tiles=tiles, seed=seed)
+    synccheck(kernel, sync_inputs).require_clean()
+
+    inputs, reference = rank_inputs(world, tiles=tiles, seed=seed)
+    module = numsim.transpile(kernel)
+    result = numsim.Engine().run(module, inputs, outputs=("data_out", "flag"))
+    for rank in range(world):
+        output = result.outputs[numsim.rank_binding_name("data_out", rank)]
+        np.testing.assert_allclose(output, reference, rtol=1e-6, atol=1e-6)
+        flag = result.outputs[numsim.rank_binding_name("flag", rank)]
+        np.testing.assert_array_equal(flag, 0)
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="CPU preflight for the distributed two-shot NVLS benchmark kernel."
+    )
+    parser.add_argument("--world", type=int, default=4)
+    parser.add_argument("--tiles", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+    result = run_preflight(args.world, tiles=args.tiles, seed=args.seed)
+    print(f"NumSim/Racecheck/Synccheck passed for {args.world} ranks")
+    print(f"outputs: {sorted(result.outputs)}")
+
+
+if __name__ == "__main__":
+    main()

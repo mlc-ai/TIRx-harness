@@ -858,7 +858,7 @@ From `tools/`:
 
 ```bash
 # CPU preflight for the benchmark's actual distributed two-shot kernel.
-python -m benchmarks.multimem.numsim_preflight --world 4
+python -m benchmarks.multimem.common --world 4
 
 python -m pytest -q -n 16 \
   tests/numsim/runtime/test_multimem.py \
