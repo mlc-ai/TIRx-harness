@@ -69,7 +69,8 @@ spec: |
 
   Correctness uses the independent fp32 sparse-attention oracle's bf16
   output. Both outputs are cast to fp32, and every element must satisfy
-  abs(candidate-ref)<=8e-4+2e-2*abs(ref). RMS is diagnostic only.
+  abs(candidate-ref)<=8e-4+2e-2*abs(ref).
+  Normalized RMS error must also be below 0.2.
   Repeated checks and output poisoning
   remain enabled. The adapter scores only the selected official row, keeping
   its original published seed. Scoring is baseline latency / candidate latency,

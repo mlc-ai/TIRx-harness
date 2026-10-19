@@ -23,10 +23,11 @@ TASK_NAME = "mla_dsv4"
 ATOL = 8e-4
 RTOL = 2e-2
 REQUIRED_MATCHED_RATIO = None
-REQUIRED_RMS_ERROR_RATIOS = None
+# Bound output scale as well as elementwise error.
+REQUIRED_RMS_ERROR_RATIOS = (0.2,)
 FP8_ATOL = 1e-1
 FP8_RTOL = 1e-1
-FP8_REQUIRED_RMS_ERROR_RATIOS = None
+FP8_REQUIRED_RMS_ERROR_RATIOS = (0.2,)
 compare = partial(compare_tensors, cast_to_float32=True)
 
 

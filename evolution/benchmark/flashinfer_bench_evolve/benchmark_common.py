@@ -849,7 +849,10 @@ def input_dependence_check(
     inputs = [
         tensor
         for tensor in _tensors(bound_args)
-        if tensor.is_floating_point() and tensor.numel() > 1 and bool(torch.isfinite(tensor).all())
+        if tensor.is_floating_point()
+        and tensor.numel() > 1
+        # FP8 does not implement isfinite on every supported device.
+        and bool(torch.isfinite(tensor.float() if tensor.element_size() == 1 else tensor).all())
     ]
     bound = {tensor.untyped_storage().data_ptr() for tensor in _tensors(candidate_runner.args)}
     if not inputs or any(t.untyped_storage().data_ptr() not in bound for t in inputs):
