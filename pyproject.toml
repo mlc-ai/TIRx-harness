@@ -133,12 +133,10 @@ unfixable = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["tvm", "tirx_kernels", "tirx_harness", "evolution"]
-split-on-trailing-comma = false
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = true
 line-ending = "auto"
 docstring-code-format = false
 docstring-code-line-length = "dynamic"
