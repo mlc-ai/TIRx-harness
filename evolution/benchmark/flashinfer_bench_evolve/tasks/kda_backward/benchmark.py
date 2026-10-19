@@ -22,7 +22,8 @@ TASK_NAME = "kda_backward"
 ATOL = 1e-2
 RTOL = 1e-2
 REQUIRED_MATCHED_RATIO = None
-REQUIRED_RMS_ERROR_RATIOS = None
+# Apply a separate bound to every forward output and raw-input gradient.
+REQUIRED_RMS_ERROR_RATIOS = (0.2,) * 10
 compare = partial(compare_tensors, cast_to_float32=False)
 
 
