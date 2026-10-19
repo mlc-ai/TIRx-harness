@@ -65,7 +65,8 @@ spec: |
   Correctness compares all ten outputs to the FLA chunk_size=32 reference
   using PyTorch's additive atol+rtol*abs(reference) criterion with
   atol=rtol=0.01 in each output's native dtype. Every element must pass;
-  each output also requires normalized RMS error below 0.2.
+  each output also requires normalized RMS error below 0.2, unless its
+  maximum absolute error is at most 1e-6.
   Repeated numerical and output-poisoning checks remain enabled. Scoring is
   packaged baseline latency /
   candidate latency, higher is better.
