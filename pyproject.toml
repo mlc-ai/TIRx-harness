@@ -114,6 +114,7 @@ ignore = [
   "UP028", # yield-in-for-loop
   "UP030", # format-literals
   "UP031", # printf-string-formatting
+  "UP038", # non-pep604-isinstance
   # ruff (preview rules, not yet stable)
   "RUF043", # pytest-raises-ambiguous-pattern
   "RUF059", # unused-unpacked-variable
@@ -128,6 +129,7 @@ unfixable = []
 "evolution/preparation/**/*.py" = ["E501"]
 "evolution/cli.py" = ["E501"]
 "evolution/tests/**/*.py" = ["E501"]
+"tools/tests/**/*.py" = ["E501", "F821"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["tvm", "tirx_kernels", "tirx_harness", "evolution"]
