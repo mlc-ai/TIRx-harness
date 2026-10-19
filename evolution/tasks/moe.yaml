@@ -41,6 +41,12 @@ spec: |
   FlashInfer, PyTorch tensor operators, Triton, CUTE DSL, raw CUDA, or an
   existing solution kernel for production computation.
 
-  Correctness uses atol=1.0, rtol=0.3, and matched_ratio>=0.9. The 19 official
-  trace rows span T=1..14107; the adapter scores all of them plus the T=32768
-  synthetic stress row.
+  Correctness uses atol=1.0, rtol=0.3, and elementwise matched_ratio>=0.9.
+  It also requires global normalized RMS error < 0.2, unless the maximum
+  absolute error over the entire output is <=1e-6. At least 99.99% of tokens
+  must each have normalized RMS error < 0.2 or maximum absolute error <=1e-6
+  within that token. Normalized RMS error is RMS(candidate-reference) /
+  (RMS(reference)+1e-8), computed in fp32 over the entire output for the
+  global check and over the hidden dimension for each token check.
+  The 19 official trace rows span T=1..14107; the adapter scores all of them
+  plus the T=32768 synthetic stress row.

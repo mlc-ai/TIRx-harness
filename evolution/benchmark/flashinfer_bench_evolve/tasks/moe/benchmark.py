@@ -196,12 +196,8 @@ def compare_moe_outputs(
     if reference.numel() == 0:
         return result
     error = output - reference
-    token_rms = error.square().mean(dim=-1).sqrt() / (
-        reference.square().mean(dim=-1).sqrt() + 1e-8
-    )
-    bad_tokens = (token_rms >= required_rms_error_ratios[0]) & (
-        error.abs().amax(dim=-1) > 1e-6
-    )
+    token_rms = error.square().mean(dim=-1).sqrt() / (reference.square().mean(dim=-1).sqrt() + 1e-8)
+    bad_tokens = (token_rms >= required_rms_error_ratios[0]) & (error.abs().amax(dim=-1) > 1e-6)
     bad_count = int(bad_tokens.sum().item())
     token_matched = 1.0 - bad_count / bad_tokens.numel()
     if token_matched < REQUIRED_TOKEN_MATCHED_RATIO:
