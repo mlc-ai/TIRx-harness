@@ -128,14 +128,12 @@ def prepare_fp16_bf16_case(dtype: str, M: int, N: int, K: int, seed: int = 0) ->
         b = b_f32.astype(np.float16)
         output = np.zeros((M, N), dtype=np.float16)
         expected = (a.astype(np.float32) @ b.astype(np.float32).T).astype(np.float16)
-        buffer_dtype = "float16"
     else:
         a = _float32_to_bfloat16_bits(a_f32)
         b = _float32_to_bfloat16_bits(b_f32)
         output = np.zeros((M, N), dtype=np.uint16)
         expected_f32 = _bfloat16_bits_to_float32(a) @ _bfloat16_bits_to_float32(b).T
         expected = _float32_to_bfloat16_bits(expected_f32)
-        buffer_dtype = "bfloat16"
 
     args = {
         "a": a,

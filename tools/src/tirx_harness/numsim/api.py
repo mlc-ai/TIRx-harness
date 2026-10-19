@@ -1174,7 +1174,8 @@ def _normalize_comparison_selector(
 ) -> tuple[int | slice, ...]:
     if len(selector) > rank:
         raise NumSimExecutionError(
-            f"NumSim comparison selector {field} has rank {len(selector)}, exceeding array rank {rank}"
+            f"NumSim comparison selector {field} has rank {len(selector)}, "
+            f"exceeding array rank {rank}"
         )
     normalized: list[int | slice] = []
     for value in selector:

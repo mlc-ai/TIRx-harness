@@ -1012,7 +1012,6 @@ def fp8_scale_permute_tmem_roundtrip(
     T.device_entry()
     warp = T.warp_id([4])
     lane = T.lane_id([32])
-    row = T.meta_var(warp * 32 + lane)
     dense_shared = T.alloc_buffer((128,), "uint32", scope="shared")
     permuted_shared = dense_shared.view(128, layout=_TEST_PERMUTED_SHARED_LAYOUT)
     scale_shared = dense_shared.view("float8_e8m0fnu").view(

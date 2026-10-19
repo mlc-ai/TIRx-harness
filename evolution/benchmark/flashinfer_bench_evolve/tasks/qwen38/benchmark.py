@@ -120,7 +120,10 @@ def _run_case(model, case, cfg, seed, candidate_fn, candidate_prepare_fn):
     if case.all_logits:
         prepared["verify"] = True
     saved = baseline.save_state(cache)
-    reset = lambda: baseline.restore(cache, saved, prepared)
+
+    def reset():
+        return baseline.restore(cache, saved, prepared)
+
     reference = baseline.Runner(lambda: model._forward(cache, **prepared), case.graph, reset)
     reset()
     expected = baseline.snapshot(reference())

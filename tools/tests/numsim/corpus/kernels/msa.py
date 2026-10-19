@@ -277,7 +277,7 @@ def prepare_msa_sparse_atten_fwd_combine_case() -> NumSimCase:
     """Reduce three live fp32 partials and invert K1's fake-column order."""
 
     topk = 4
-    total_q = head_q = head_kv = qhead_per_kv = num_batches = 1
+    total_q = head_q = qhead_per_kv = num_batches = 1
     live_splits = 3
     module = load_tirx_kernel("msa_sparse_atten_fwd_combine_sm100")
     kernel = _specialize(

@@ -129,7 +129,7 @@ def test_fp8_reference_applies_one_e8m0_scale_per_128_k_values():
 def test_prepare_fp8_numsim_case_is_cpu_only_deterministic_and_full_launch(config, monkeypatch):
     module = _fp8_kernel_module()
     M, N, K = config["M"], config["N"], config["K"]
-    kernel_spec = module._spec_for({"M": M, "N": N, "K": K, "num_sms": FP8_1D1D_NUM_SMS})
+    module._spec_for({"M": M, "N": N, "K": K, "num_sms": FP8_1D1D_NUM_SMS})
     original_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):

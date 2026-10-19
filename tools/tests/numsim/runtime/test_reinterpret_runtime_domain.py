@@ -333,7 +333,7 @@ def _identity_arguments() -> tuple[dict[str, object], dict[str, np.ndarray]]:
         suffix = _identifier(dtype)
         arguments[f"source_{suffix}"] = source
         output = np.zeros_like(source)
-        arguments[f"output_{suffix}"] = output if dtype == "bfloat16" else output
+        arguments[f"output_{suffix}"] = output
         expected[f"output_{suffix}"] = source.view(np.uint8).copy()
     return arguments, expected
 

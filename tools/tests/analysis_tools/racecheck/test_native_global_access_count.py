@@ -30,7 +30,7 @@ def native_global_read_write(source: T.Buffer((32,), "int32"), output: T.Buffer(
 def native_global_atomic_only(flag: T.Buffer((1,), "int32")):
     T.device_entry()
     _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    _lane = T.lane_id([32])
     T.evaluate(T.cuda.atomic_add(flag.ptr_to([0]), T.int32(1)))
 
 

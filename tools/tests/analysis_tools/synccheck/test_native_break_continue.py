@@ -268,7 +268,7 @@ def test_public_native_data_dependent_for_break_has_no_phantom_iterations(native
 
 
 def test_public_native_lane_divergent_break_is_exact_collective_error(native_cache_dir):
-    replay = _assert_deadlock_error(
+    _assert_deadlock_error(
         synccheck(
             native_lane_divergent_break,
             inputs={},

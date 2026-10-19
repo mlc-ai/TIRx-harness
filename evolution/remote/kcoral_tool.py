@@ -76,7 +76,10 @@ def add_wrapper_args(parser):
         action="append",
         default=[],
         metavar="NAME[=VALUE]",
-        help="set a variable for this request's subprocess; NAME alone copies its local value (repeatable)",
+        help=(
+            "set a variable for this request's subprocess; "
+            "NAME alone copies its local value (repeatable)"
+        ),
     )
 
 

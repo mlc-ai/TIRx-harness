@@ -33,7 +33,7 @@ def _raw_mxf8_cta2_m128(
     shared_a = T.alloc_buffer((64, 32), "float8_e4m3fn", scope="shared", layout=_A_LAYOUT)
     shared_b = T.alloc_buffer((16, 32), "float8_e4m3fn", scope="shared", layout=_B_LAYOUT)
     # Declare the physical allocation used by the raw TMEM addresses below.
-    tmem = T.decl_buffer(
+    tmem = T.decl_buffer(  # noqa: F841
         (128, 32),
         "uint32",
         scope="tmem",

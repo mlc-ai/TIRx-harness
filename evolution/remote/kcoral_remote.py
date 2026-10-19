@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Score candidates or run kernel diagnostics on an existing kcoral benchmark server.
 
-    python evolution/remote/kcoral_remote.py <workload> [version] --remote URL                  # score vN (or the baseline)
-    python evolution/remote/kcoral_remote.py --remote URL --cmd 'nvidia-smi'                    # inspect GPU status
+    # score vN (or the baseline)
+    python evolution/remote/kcoral_remote.py <workload> [version] --remote URL
+    # inspect GPU status
+    python evolution/remote/kcoral_remote.py --remote URL --cmd 'nvidia-smi'
 
 Use the server's existing tools and dependencies. Do not install, upgrade, or
 remove packages, run setup scripts, edit server configuration, or manage server
@@ -235,7 +237,10 @@ def main(argv=None) -> None:
         "--cmd",
         metavar="CMD",
         default=None,
-        help="run a kernel diagnostic CMD under bash (or a diagnostic bash file); no remote environment changes",
+        help=(
+            "run a kernel diagnostic CMD under bash (or a diagnostic bash file); "
+            "no remote environment changes"
+        ),
     )
     parser.add_argument(
         "--send",

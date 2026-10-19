@@ -289,7 +289,7 @@ def _invalid_forced_thread_owned_local_copy():
     ],
 )
 def test_ldstmatrix_dispatch_hint_does_not_select_numsim_semantics(kernel, tmp_path):
-    module = numsim.transpile(kernel, cache_dir=tmp_path)
+    numsim.transpile(kernel, cache_dir=tmp_path)
 
 
 @pytest.mark.parametrize(

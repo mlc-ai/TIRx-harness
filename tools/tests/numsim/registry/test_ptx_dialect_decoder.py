@@ -192,7 +192,7 @@ def kernel():
 
     reparsed = tvm.script.from_source(func.script(), {"T": T})
     tvm.ir.assert_structural_equal(func, reparsed)
-    reparsed_call = [call for call in _calls(reparsed, "tirx.ptx.")][0]
+    reparsed_call = next(iter(_calls(reparsed, "tirx.ptx.")))
     assert decode_ptx_call(reparsed_call).operand("d")[0] is PTX_SINK
 
 
@@ -290,7 +290,7 @@ def kernel(dst: T.handle):
 """
     )
 
-    mma_call = [call for call in _calls(func, "tirx.ptx.tcgen05_mma_")][0]
+    mma_call = next(iter(_calls(func, "tirx.ptx.tcgen05_mma_")))
     mma = decode_ptx_call(mma_call)
     assert len(mma.operand("enable_input_d")) == 1
     assert mma.predicate is None

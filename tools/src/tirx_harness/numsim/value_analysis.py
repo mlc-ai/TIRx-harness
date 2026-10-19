@@ -96,7 +96,10 @@ def attach_value_analysis(payload: dict[str, Any], module: Any) -> dict[str, Any
                 {
                     "kind": "value_analysis_incomplete",
                     "reason": reason,
-                    "message": f"cannot establish a fixed value at source op {summary['source_op_id']}: {reason}",
+                    "message": (
+                        "cannot establish a fixed value at source op "
+                        f"{summary['source_op_id']}: {reason}"
+                    ),
                     "site": summary,
                 }
             )
@@ -109,7 +112,10 @@ def attach_value_analysis(payload: dict[str, Any], module: Any) -> dict[str, Any
                 "kind": "schedule_dependent_atomic_value",
                 "status": "error",
                 "reason": "concurrent_rmw_order",
-                "message": "concurrent atomic RMW order is not fixed; returned values or accumulated results may depend on scheduling",
+                "message": (
+                    "concurrent atomic RMW order is not fixed; returned values or accumulated "
+                    "results may depend on scheduling"
+                ),
                 "group": group,
             }
         )

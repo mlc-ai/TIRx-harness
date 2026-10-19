@@ -732,7 +732,10 @@ def check_candidate_runs(
             elif not outputs_equal_exact_values(got, first_outputs):
                 return stats.check(
                     ok=False,
-                    note=f"{phase} run {run_idx}/{runs}: outputs are not repeatable across identical calls",
+                    note=(
+                        f"{phase} run {run_idx}/{runs}: "
+                        "outputs are not repeatable across identical calls"
+                    ),
                     passed_runs=run_idx,
                     unstable=True,
                 )

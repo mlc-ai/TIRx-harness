@@ -63,7 +63,10 @@ def _cu_seqlens_k(cu_seqlens_k, seqused_k):
 def _minimax_args(
     q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale
 ):
-    """Build the CSR reverse index and the forward schedule, as the PR's bench does outside timing."""
+    """Build the CSR reverse index and the forward schedule.
+
+    Runs outside timing, as the PR's bench does.
+    """
 
     import fmha_sm100
 

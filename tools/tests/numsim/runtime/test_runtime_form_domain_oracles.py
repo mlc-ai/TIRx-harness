@@ -483,10 +483,10 @@ def test_cuda_ldg_complete_finite_domain_executes_with_exact_physical_oracle(tmp
     expected: dict[str, np.ndarray] = {}
     for dtype in CUDA_LDG_DTYPES:
         name = dtype.replace("_", "")
-        source, needs_binding = _storage(dtype, initialized=True)
+        source, _ = _storage(dtype, initialized=True)
         output, _ = _storage(dtype, initialized=False)
-        arguments[f"source_{name}"] = source if needs_binding else source
-        arguments[f"output_{name}"] = output if needs_binding else output
+        arguments[f"source_{name}"] = source
+        arguments[f"output_{name}"] = output
         expected[f"output_{name}"] = source.copy()
 
     result = numsim.Engine(max_workers=1).run(module, arguments)

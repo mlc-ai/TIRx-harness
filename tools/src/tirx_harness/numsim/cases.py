@@ -261,7 +261,8 @@ class TensorMap:
                 raise ValueError("U6 TensorMap does not support interleave")
             if global_shape[0] % 128 or box_shape[0] != 128:
                 raise ValueError(
-                    "SM100 U6 TensorMap requires dimension zero in multiples of 128 and box zero 128"
+                    "SM100 U6 TensorMap requires dimension zero in multiples of 128 "
+                    "and box zero 128"
                 )
             if pointer % 32 or any(stride % 32 for stride in global_strides):
                 raise ValueError("SM100 U6 TensorMap address and strides must be 32-byte aligned")

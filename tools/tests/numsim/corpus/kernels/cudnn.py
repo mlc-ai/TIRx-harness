@@ -1619,23 +1619,23 @@ def prepare_cudnn_gdn2_bprop_case() -> NumSimCase:
         ("base_dwo", dw, "bfloat16", 2, 64),
         ("base_db", dbeta, "bfloat16", 2, 64),
     )
-    host_descriptors = _host_descriptors(
-        tuple(
-            (
-                name,
-                _headed_map(
-                    binding,
-                    dtype=dtype,
-                    channels=128,
-                    heads=1,
-                    tokens=1,
-                    element_bytes=element_bytes,
-                    box_channels=box_channels,
-                ),
-            )
-            for name, binding, dtype, element_bytes, box_channels in descriptor_entries
+    headed_maps = tuple(
+        (
+            name,
+            _headed_map(
+                binding,
+                dtype=dtype,
+                channels=128,
+                heads=1,
+                tokens=1,
+                element_bytes=element_bytes,
+                box_channels=box_channels,
+            ),
         )
-        + (("base_checkpoint", _checkpoint_map(checkpoint, rows=1, heads=1)),)
+        for name, binding, dtype, element_bytes, box_channels in descriptor_entries
+    )
+    host_descriptors = _host_descriptors(
+        (*headed_maps, ("base_checkpoint", _checkpoint_map(checkpoint, rows=1, heads=1)))
     )
     return NumSimCase(
         kernel=gdn2_bprop_f16.get_kernel(**config),

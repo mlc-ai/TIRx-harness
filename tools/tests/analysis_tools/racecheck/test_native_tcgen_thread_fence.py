@@ -228,7 +228,7 @@ def same_thread_nonpipelined_copies(
     """Two overlapping CP operations, which are not an implicit PTX pair."""
 
     T.device_entry()
-    warp = T.warp_id([1])
+    _warp = T.warp_id([1])
     lane = T.lane_id([32])
     address = T.alloc_buffer((1,), "uint32", scope="shared")
     barriers = T.alloc_buffer((2,), "uint64", scope="shared")

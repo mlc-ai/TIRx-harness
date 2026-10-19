@@ -1005,7 +1005,7 @@ pyo3 = {{ version = "={PYO3_VERSION}", features = ["extension-module"] }}
 opt-level = {profile["opt_level"]}
 codegen-units = {profile["codegen_units"]}
 {strip_line}
-"""
+"""  # noqa: E501
 
 
 def _build_environment(
