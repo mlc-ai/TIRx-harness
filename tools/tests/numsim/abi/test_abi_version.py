@@ -1,11 +1,10 @@
 from pathlib import Path
 
+from tests.numsim.support.kernels import lane_add
 from tirx_harness.numsim import abi
 from tirx_harness.numsim.abi import NUMSIM_ABI_VERSION, abi_metadata
-from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
-
-from tests.numsim.support.kernels import lane_add
+from tirx_harness.numsim.transpiler.frontend import analyze
 
 
 def test_numsim_uses_one_artifact_abi_version():

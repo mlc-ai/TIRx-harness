@@ -1,11 +1,10 @@
 """Whole b128 reads can observe the bytes left by multiple masked-write versions."""
 
 import numpy as np
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import racecheck, synccheck
-
+from tvm.script import tirx as T
 
 _MODES = ("volatile", "acquire", "relaxed", "cas")
 
@@ -72,4 +71,6 @@ def test_mixed_version_does_not_publish_later_data():
         report = racecheck(kernel, inputs())
         assert report.verdict == "error", report.format()
         assert not any(f.status == "incomplete" for f in report.findings), report.format()
-        assert any(f.details["access_pair"] in {"write_read", "read_write"} for f in report.findings), report.format()
+        assert any(
+            f.details["access_pair"] in {"write_read", "read_write"} for f in report.findings
+        ), report.format()

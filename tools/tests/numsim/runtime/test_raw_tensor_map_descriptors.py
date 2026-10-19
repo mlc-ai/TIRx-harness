@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.ir.type import PointerType, PrimType
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
 from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-
+from tvm.ir.type import PointerType, PrimType
+from tvm.script import tirx as T
 
 _FLASHKDA_ACQUIRE_SOURCE = r"""__device__ __forceinline__ void flashkda_tensormap_acquire(const void *tmap_ptr) {
     asm volatile(

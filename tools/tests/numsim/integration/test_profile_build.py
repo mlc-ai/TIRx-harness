@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import lane_add
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import build
 
 

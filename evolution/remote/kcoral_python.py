@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from evolution.remote.kcoral_tool import (  # noqa: E402
+from evolution.remote.kcoral_tool import (
     add_wrapper_args,
     build_program,
     execute,

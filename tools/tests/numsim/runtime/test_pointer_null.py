@@ -1,9 +1,9 @@
 """Null predicates on integer addresses and internal local pointers."""
 
 import numpy as np
-from tvm.script import tirx as T
 
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 @T.prim_func

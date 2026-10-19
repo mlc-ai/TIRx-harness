@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import (
     tmem_b_lane_column_mapping,
     tmem_d_alias_per_cta,
@@ -12,6 +11,7 @@ from tests.numsim.support.kernels import (
     tmem_packed_alias,
     tmem_uninitialized_read,
 )
+from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 

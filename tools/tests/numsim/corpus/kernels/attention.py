@@ -7,13 +7,13 @@ from typing import Any
 
 import numpy as np
 
+from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tirx_harness.numsim.bindings import _tensor_map_base_array
 from tirx_harness.numsim.cases import (
     ComparisonSpec,
     NumSimCase,
     TensorMap,
 )
-from tirx_harness.numsim.bindings import _tensor_map_base_array
-from tests.numsim.support._tirx_kernels import load_tirx_kernel
 
 flash_attention4 = load_tirx_kernel("flash_attention4")
 flash_attention_backward = load_tirx_kernel("flash_attention_backward_sm100")
@@ -459,11 +459,11 @@ def prepare_flash_attention_backward_persistent_analysis_case() -> NumSimCase:
 
 
 __all__ = [
-    "FLASH_ATTENTION_BACKWARD_CONFIGS",
     "FLASH_ATTENTION4_CONFIGS",
+    "FLASH_ATTENTION_BACKWARD_CONFIGS",
     "numpy_attention_reference",
-    "prepare_flash_attention_backward_case",
-    "prepare_flash_attention_backward_persistent_analysis_case",
     "prepare_flash_attention4_case",
     "prepare_flash_attention4_fp4_case",
+    "prepare_flash_attention_backward_case",
+    "prepare_flash_attention_backward_persistent_analysis_case",
 ]

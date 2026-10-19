@@ -11,10 +11,10 @@ from __future__ import annotations
 import threading
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
+from tvm.script import tirx as T
 
 
 def _flag_inputs():
@@ -153,7 +153,7 @@ def test_a_declared_wait_merges_its_tcgen_frontier_without_deadlocking():
                 handoff=1,  # the declared relaxed flag between the fence halves
                 cache_dir=None,
             )
-        except BaseException as exc:  # noqa: BLE001 - surfaced below
+        except BaseException as exc:
             box["error"] = exc
         finally:
             finished.set()
@@ -506,9 +506,9 @@ def test_a_wait_does_not_bridge_the_async_proxy():
     report = racecheck(_proxy_publication(proxy="async"), _proxy_inputs())
     assert report.verdict == "error", report.format()
     findings = report.to_dict()["native"]["findings"]
-    assert any(
-        finding["ordering_failure"] == "missing_proxy_bridge" for finding in findings
-    ), report.format()
+    assert any(finding["ordering_failure"] == "missing_proxy_bridge" for finding in findings), (
+        report.format()
+    )
 
 
 def test_a_generic_payload_behind_the_same_wait_is_clean():

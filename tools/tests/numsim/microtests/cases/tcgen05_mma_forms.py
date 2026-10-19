@@ -9,9 +9,7 @@ from typing import Any
 
 import numpy as np
 from tests.numsim.microtests.harness import PairedBuffer
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import ComposeLayout, S, TileLayout, tmem_datapath_layout, wg_local_layout
+
 from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
     sf_smem_layout,
     sf_tmem_layout,
@@ -20,7 +18,9 @@ from tvm.backend.cuda.tile_primitive.tma_utils import (
     SwizzleMode,
     mma_shared_layout,
 )
-
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
+from tvm.tirx.layout import ComposeLayout, S, TileLayout, tmem_datapath_layout, wg_local_layout
 
 _F16_SMEM_LAYOUT = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 _FP8_A_SMEM_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (128, 32))

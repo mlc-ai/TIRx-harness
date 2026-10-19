@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
 from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
 from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import tmem_datapath_layout
-
 
 _FP4_A_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (128, 32))
 _FP4_B_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (8, 32))

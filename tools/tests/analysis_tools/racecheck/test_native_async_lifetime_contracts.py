@@ -323,7 +323,9 @@ def _assert_physical_finding(
     finding = native["findings"][0]
     assert finding["status"] == expected_status
     expected_kinds = {expected_kind} if isinstance(expected_kind, str) else expected_kind
-    assert finding["kind"] == ("tmem_lifetime_review" if expected_status == "review" else "data_race")
+    assert finding["kind"] == (
+        "tmem_lifetime_review" if expected_status == "review" else "data_race"
+    )
     assert finding["access_pair"] in expected_kinds
     assert finding["overlap"]["byte_len"] > 0
     for witness in (finding["prior"], finding["current"]):
@@ -374,8 +376,7 @@ def test_tcgen_waits_do_not_mask_missing_cross_warpgroup_ordering():
     assert native["incomplete"] == []
     assert native["findings"]
     assert {
-        (finding["ordering_domain"], finding["ordering_failure"])
-        for finding in native["findings"]
+        (finding["ordering_domain"], finding["ordering_failure"]) for finding in native["findings"]
     } == {("execution", "missing_inter_actor_sync")}
     assert {
         endpoint["space"]
@@ -452,8 +453,7 @@ def test_tma_store_wait_does_not_mask_missing_cross_warp_ordering():
     assert native["incomplete"] == []
     assert native["findings"]
     assert {
-        (finding["ordering_domain"], finding["ordering_failure"])
-        for finding in native["findings"]
+        (finding["ordering_domain"], finding["ordering_failure"]) for finding in native["findings"]
     } == {("execution", "missing_inter_actor_sync")}
     assert {
         endpoint["space"]
@@ -543,8 +543,7 @@ def test_classic_cp_async_cross_warp_source_race_reports_missing_ordering():
     assert native["incomplete"] == []
     assert native["findings"]
     assert {
-        (finding["ordering_domain"], finding["ordering_failure"])
-        for finding in native["findings"]
+        (finding["ordering_domain"], finding["ordering_failure"]) for finding in native["findings"]
     } == {("execution", "missing_inter_actor_sync")}
     assert {
         endpoint["space"]

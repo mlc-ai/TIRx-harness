@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
+
 import tvm
+from tests.numsim.support.execution import run_checked
 from tvm.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
 from tvm.script import tirx as T
-
-from tests.numsim.support.execution import run_checked
 
 
 def cvt_carrier_case(ptx_type):

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
 
-from tirx_harness import numsim
+import tvm
 from tests.numsim.support.kernels import ordering_only_control_calls
 from tests.numsim.support.manifest import emitted_calls
+from tirx_harness import numsim
 from tvm.script import tirx as T
 
 

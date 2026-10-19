@@ -2,22 +2,27 @@
 
 import numpy as np
 import pytest
-from tvm import tirx
-from tvm.ir import Expr
 from tvm_ffi import structural_map, structural_walk
-from tvm.script import tirx as T
-from tvm.tirx import Stmt
 
 from tests.numsim.microtests.harness import require_numsim_gpu, run_gpu_primfunc
 from tests.numsim.runtime.test_tcgen_collectors import collector_case
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tests.numsim.support.tcgen_descriptor import INSTR_DESC, encode_dense_instr_descriptor_fields
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
+from tvm import tirx
+from tvm.ir import Expr
+from tvm.script import tirx as T
+from tvm.tirx import Stmt
 
 
 def dispatch_case(
-    *, bf16=False, enabled=True, multiple_issuers=False, input_descriptor=False,
-    descriptor_xor=0, tmem_a=False,
+    *,
+    bf16=False,
+    enabled=True,
+    multiple_issuers=False,
+    input_descriptor=False,
+    descriptor_xor=0,
+    tmem_a=False,
 ):
     kernel, inputs, expected = collector_case(("",), tmem_a=tmem_a)
     kernel = kernel.with_attr("tirx.cuda_arch", "sm_100a")
@@ -53,7 +58,9 @@ def dispatch_case(
                     decoded.scalar_operand("d_tmem"),
                     decoded.scalar_operand("a_tmem" if tmem_a else "a_desc"),
                     decoded.scalar_operand("b_desc"),
-                    selector if input_descriptor else T.Select(
+                    selector
+                    if input_descriptor
+                    else T.Select(
                         tirx.NE(selector, T.uint32(0)),
                         T.uint32(descriptor | (1 << 7) | (1 << 10)),
                         T.uint32(descriptor),
@@ -115,9 +122,7 @@ def test_tcgen_runtime_descriptor_dispatch():
     for input_descriptor in (False, True):
         for bf16, enabled in ((False, True), (True, True), (True, False)):
             replay(*dispatch_case(bf16=bf16, enabled=enabled, input_descriptor=input_descriptor))
-        kernel, inputs, _ = dispatch_case(
-            multiple_issuers=True, input_descriptor=input_descriptor
-        )
+        kernel, inputs, _ = dispatch_case(multiple_issuers=True, input_descriptor=input_descriptor)
         assert_rejected(kernel, inputs, "requires exactly one issuing lane")
 
     # The descriptor is not a whitelist: signs stay runtime fields, and
@@ -172,9 +177,19 @@ def _descriptor_values(kernel, descriptor):
         neg_a, neg_b, sat_d, sparse = map(bool, flags)
         values.add(
             encode_dense_instr_descriptor_fields(
-                d_dtype=d_dtype, a_dtype=a_dtype, b_dtype=b_dtype, m=m, n=n, k=k,
-                trans_a=bool(trans_a), trans_b=bool(trans_b), cta_group=cta_group,
-                neg_a=neg_a, neg_b=neg_b, sat_d=sat_d, sparse=sparse,
+                d_dtype=d_dtype,
+                a_dtype=a_dtype,
+                b_dtype=b_dtype,
+                m=m,
+                n=n,
+                k=k,
+                trans_a=bool(trans_a),
+                trans_b=bool(trans_b),
+                cta_group=cta_group,
+                neg_a=neg_a,
+                neg_b=neg_b,
+                sat_d=sat_d,
+                sparse=sparse,
             )
         )
 
@@ -196,8 +211,12 @@ def with_input_descriptor(kernel):
         assert resolved
         values.update(resolved)
         return type(node)(
-            node.op, [parameter if arg.same_as(descriptor) else arg for arg in node.args],
-            attrs=node.attrs, ty_args=node.ty_args, span=node.span, ret_ty=node.ty,
+            node.op,
+            [parameter if arg.same_as(descriptor) else arg for arg in node.args],
+            attrs=node.attrs,
+            ty_args=node.ty_args,
+            span=node.span,
+            ret_ty=node.ty,
         )
 
     body = structural_map(kernel.body, replace)
@@ -210,9 +229,12 @@ def with_input_descriptor(kernel):
 
 def input_codec_cases():
     from tests.numsim.microtests.cases.tcgen05_mma_forms import (
-        e5m2_layout_f_reference, f16_destination_reference,
-        make_raw_e4m3_e5m2_arguments, make_raw_e5m2_arguments,
-        make_raw_f16_destination_arguments, raw_e5m2_e4m3_f16_d_ss_m128_layout_d,
+        e5m2_layout_f_reference,
+        f16_destination_reference,
+        make_raw_e4m3_e5m2_arguments,
+        make_raw_e5m2_arguments,
+        make_raw_f16_destination_arguments,
+        raw_e5m2_e4m3_f16_d_ss_m128_layout_d,
         raw_e5m2_ss_m64_layout_f_valid_descriptor,
     )
     from tests.numsim.runtime.test_tcgen05_i8 import i8_case
@@ -224,8 +246,10 @@ def input_codec_cases():
     ):
         inputs = make_inputs()
         inputs["input_descriptor"] = (descriptor & ~(7 << 7)) | (a_format << 7)
-        yield kernel, inputs, e5m2_layout_f_reference(
-            inputs, a_dtype=a_dtype, b_dtype="float8_e5m2"
+        yield (
+            kernel,
+            inputs,
+            e5m2_layout_f_reference(inputs, a_dtype=a_dtype, b_dtype="float8_e5m2"),
         )
     kernel, descriptor = with_input_descriptor(raw_e5m2_e4m3_f16_d_ss_m128_layout_d)
     inputs = make_raw_f16_destination_arguments()

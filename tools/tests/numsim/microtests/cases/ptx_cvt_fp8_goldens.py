@@ -568,9 +568,9 @@ SOURCE_BY_SECTION = {
 
 __all__ = [
     "BF16X2_SOURCE",
+    "F8X2_SOURCE",
     "F16X2_SOURCE",
     "F32_SOURCE",
-    "F8X2_SOURCE",
     "GOLDENS",
     "SOURCE_BY_SECTION",
 ]

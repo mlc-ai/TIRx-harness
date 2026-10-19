@@ -2,13 +2,13 @@
 
 import numpy as np
 import pytest
+from tvm_ffi import structural_map
+
+from tests.numsim.microtests.cases.tcgen05_lifecycle_ldst import tcgen05_cp_warpx4
+from tirx_harness import numsim, racecheck, synccheck
 from tvm import tirx
 from tvm.ir import Call
 from tvm.script import tirx as T
-from tvm_ffi import structural_map
-
-from tirx_harness import numsim, racecheck, synccheck
-from tests.numsim.microtests.cases.tcgen05_lifecycle_ldst import tcgen05_cp_warpx4
 
 
 @T.prim_func
@@ -29,11 +29,17 @@ def descriptor_choice_case(form):
         if form == "select":
             value = tirx.Select(condition, descriptor, tirx.bitwise_or(descriptor, reserved))
         else:
-            low_word = tirx.Select(condition, tirx.const(0, "uint32"), tirx.const(1 << 14, "uint32"))
+            low_word = tirx.Select(
+                condition, tirx.const(0, "uint32"), tirx.const(1 << 14, "uint32")
+            )
             value = tirx.bitwise_or(descriptor, tirx.Cast("uint64", low_word))
         return Call(
-            call.op, [call.args[0], value, *call.args[2:]],
-            attrs=call.attrs, ty_args=call.ty_args, span=call.span, ret_ty=call.ty,
+            call.op,
+            [call.args[0], value, *call.args[2:]],
+            attrs=call.attrs,
+            ty_args=call.ty_args,
+            span=call.span,
+            ret_ty=call.ty,
         )
 
     def publish(stmt):

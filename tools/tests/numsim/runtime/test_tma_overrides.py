@@ -2,13 +2,13 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
+from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tests.numsim.support.manifest import call_op_names
+from tvm.script import tirx as T
 
 ROUTES = ("g2cta", "g2cluster", "s2g", "reduce", "prefetch", "evict_last", "priority")
 FORMS = ("address", "dim_b8", "dim_b16", "stride_b8", "stride_b16")

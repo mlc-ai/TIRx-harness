@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import tvm
-from tirx_harness.numsim.transpiler.frontend import analyze
-
 import ml_dtypes
 import numpy as np
 import pytest
 
+import tvm
+from tests.numsim.support.manifest import emitted_calls, parse_kernel
 from tirx_harness import numsim, racecheck
 from tirx_harness.numsim.bindings import prepare_bindings
-from tests.numsim.support.manifest import emitted_calls, parse_kernel
+from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm import tirx
 from tvm.script import tirx as T
-
 
 _OBSOLETE_CP_ASYNC_BULK_SOURCE = """
 @T.prim_func
@@ -996,9 +994,7 @@ def test_ptx_predicated_red_f32_skips_inactive_lanes(tmp_path):
         {"output": np.zeros((32,), dtype=np.float32)},
     )
 
-    expected = np.concatenate(
-        (np.ones((16,), dtype=np.float32), np.zeros((16,), dtype=np.float32))
-    )
+    expected = np.concatenate((np.ones((16,), dtype=np.float32), np.zeros((16,), dtype=np.float32)))
     np.testing.assert_array_equal(result.outputs["output"], expected)
 
 

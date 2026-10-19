@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from tirx_harness.numsim.transpiler.frontend import analyze
-
 import numpy as np
 
 from tirx_harness import numsim
+from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.script import tirx as T
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 

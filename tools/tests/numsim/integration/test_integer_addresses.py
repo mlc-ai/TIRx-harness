@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as T
 
@@ -367,9 +367,7 @@ def test_integer_handle_reinterpret_round_trips_bits_without_resolution(tmp_path
         numsim.transpile(forged_integer_pointer, cache_dir=tmp_path),
         {"output": np.zeros(1, dtype=np.uint64)},
     )
-    np.testing.assert_array_equal(
-        result.outputs["output"], np.array([0x1000], dtype=np.uint64)
-    )
+    np.testing.assert_array_equal(result.outputs["output"], np.array([0x1000], dtype=np.uint64))
 
 
 def test_loops_and_multiple_stores_do_not_create_pointer_sidecars():

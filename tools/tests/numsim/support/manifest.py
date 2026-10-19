@@ -14,16 +14,16 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
+from tvm_ffi import structural_map
+
 import tvm
+from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import PrimFuncSpec, analyze, verify
+from tirx_harness.numsim.transpiler.host_prelude import normalize_host_tensor_map_prelude
 from tvm import tirx
 from tvm.ir import Expr
 from tvm.script import tirx as T
 from tvm.tirx import Stmt
-from tvm_ffi import structural_map
-
-from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
-from tirx_harness.numsim.transpiler.frontend import PrimFuncSpec, analyze, verify
-from tirx_harness.numsim.transpiler.host_prelude import normalize_host_tensor_map_prelude
 
 DEVICE_ENTRY_ATTR = "tirx.device_entry"
 
@@ -166,8 +166,8 @@ __all__ = [
     "EmittedCall",
     "call_op_names",
     "device_kernel",
-    "emitted_module",
     "emitted_calls",
+    "emitted_module",
     "evaluated_kernel",
     "kernel_manifest",
     "parse_kernel",

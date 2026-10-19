@@ -2,11 +2,10 @@
 
 import numpy as np
 import pytest
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import numsim, racecheck, synccheck
-
+from tvm.script import tirx as T
 
 ATOMIC_CASES = [
     (kind, width, space)
@@ -159,7 +158,9 @@ def test_bulk_f32_noftz(tmp_path):
     assert_float_bits(result.outputs["observed"], expected[:1])
     report = racecheck(bulk_kernel(early_read=True), inputs)
     assert report.verdict == "error", report.format()
-    assert any(finding.details["access_pair"] == "write_read" for finding in report.findings), report.format()
+    assert any(finding.details["access_pair"] == "write_read" for finding in report.findings), (
+        report.format()
+    )
 
 
 @pytest.mark.parametrize("mutation", ["alignment", "race"])

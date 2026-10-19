@@ -22,9 +22,7 @@ def same_cluster_message_passing(
         T.ptx.st.release.cluster.global_.s32(flag.ptr_to([0]), T.int32(1))
     elif (cta == 1) and (lane == 0):
         observed = T.int32(0)
-        T.cuda.wait_until(
-            observed, flag.ptr_to([0]), observed != T.int32(0), "cluster", "global"
-        )
+        T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.int32(0), "cluster", "global")
         output[0] = data[0]
 
 
@@ -150,9 +148,7 @@ def rmw_release_sequence_matrix(
         T.ptx.st.relaxed.gpu.global_.u32(turn.ptr_to([0]), T.uint32(1))
     elif (cta == 1) and (lane == 0):
         observed = T.uint32(0)
-        T.cuda.wait_until(
-            observed, turn.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-        )
+        T.cuda.wait_until(observed, turn.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         if mode == 3:
             T.ptx.red.relaxed.gpu.global_.add.u32(flag.ptr_to([0]), T.uint32(1))
             output[0] = data[0]
@@ -161,13 +157,9 @@ def rmw_release_sequence_matrix(
             T.ptx.st.relaxed.gpu.global_.u32(ready.ptr_to([0]), T.uint32(1))
     elif (cta == 2) and (lane == 0) and (mode <= 1):
         observed = T.uint32(0)
-        T.cuda.wait_until(
-            observed, ready.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-        )
+        T.cuda.wait_until(observed, ready.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         if mode == 0:
-            T.cuda.wait_until(
-                observed, flag.ptr_to([0]), observed >= T.uint32(1), "gpu", "global"
-            )
+            T.cuda.wait_until(observed, flag.ptr_to([0]), observed >= T.uint32(1), "gpu", "global")
         else:
             T.ptx.ld.relaxed.gpu.global_.u32(observed, flag.ptr_to([0]))
         output[0] = data[0]
@@ -234,9 +226,7 @@ def async_store_global_publication(
         T.ptx.st.release.gpu.global_.u32(flag.ptr_to([0]), T.uint32(1))
     elif (cta == 1) and (lane == 0):
         observed = T.uint32(0)
-        T.cuda.wait_until(
-            observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-        )
+        T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         output[0] = destination[0]
 
 
@@ -265,9 +255,7 @@ def tcgen_commit_global_publication(
     elif (warp == 1) and (lane == 0):
         observed = T.uint32(0)
         if use_acquire != 0:
-            T.cuda.wait_until(
-                observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-            )
+            T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         else:
             # The contrast is a reader that takes no edge. A declared wait
             # always acquires, so the only way to spell one is the loop a
@@ -299,15 +287,11 @@ def million_failed_polls_then_release_acquire(
         for _step in T.serial(1_000_000):
             T.ptx.ld.relaxed.gpu.global_.u32(observed, flag.ptr_to([0]))
         T.ptx.st.release.gpu.global_.u32(ready.ptr_to([0]), T.uint32(1))
-        T.cuda.wait_until(
-            observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-        )
+        T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         output[0] = data[0]
     elif (cta == 1) and (lane == 0):
         observed = T.uint32(0)
-        T.cuda.wait_until(
-            observed, ready.ptr_to([0]), observed != T.uint32(0), "gpu", "global"
-        )
+        T.cuda.wait_until(observed, ready.ptr_to([0]), observed != T.uint32(0), "gpu", "global")
         data[0] = T.int32(89)
         T.ptx.st.release.gpu.global_.u32(flag.ptr_to([0]), T.uint32(1))
 

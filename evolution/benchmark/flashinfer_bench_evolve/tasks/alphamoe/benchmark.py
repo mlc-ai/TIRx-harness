@@ -12,8 +12,8 @@ from ...benchmark_common import (
     compare_tensors,
     config_from_env,
     load_candidate_override,
-    load_task_workloads,
     load_task_reference,
+    load_task_workloads,
     run_benchmark,
 )
 
@@ -129,14 +129,12 @@ def make_routing(
     scores[:, 0] += (1.0 - balancedness) * 6.0
     topk_ids = torch.topk(scores, routed_top_k, dim=-1).indices.to(torch.int32)
     if num_shared_experts:
-        shared = torch.arange(
-            routed_experts, num_experts, dtype=torch.int32, device=device
-        ).expand(num_tokens, num_shared_experts)
+        shared = torch.arange(routed_experts, num_experts, dtype=torch.int32, device=device).expand(
+            num_tokens, num_shared_experts
+        )
         topk_ids = torch.cat((topk_ids, shared), dim=-1)
     topk_weights = torch.softmax(
-        torch.randn(
-            (num_tokens, top_k), dtype=torch.float32, device=device, generator=generator
-        ),
+        torch.randn((num_tokens, top_k), dtype=torch.float32, device=device, generator=generator),
         dim=-1,
     )
     return topk_ids, topk_weights
@@ -283,11 +281,16 @@ def run_suite(
         candidate = baseline_module.run_prepared
         candidate_prepare_fn = baseline_module.prepare
     reference = partial(
-        load_task_reference(TASK_NAME, "reference_for_check"), atol=ATOL, rtol=RTOL,
+        load_task_reference(TASK_NAME, "reference_for_check"),
+        atol=ATOL,
+        rtol=RTOL,
     )
     rows = run_benchmark(
-        name=("alphamoe_trtllm_baseline_sanity" if baseline_sanity
-              else "alphamoe_fp8_block_scale_moe_bf16"),
+        name=(
+            "alphamoe_trtllm_baseline_sanity"
+            if baseline_sanity
+            else "alphamoe_fp8_block_scale_moe_bf16"
+        ),
         workloads=make_workloads(cfg) if workloads is None else workloads,
         make_inputs=make_inputs,
         candidate_fn=candidate,

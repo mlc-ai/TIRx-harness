@@ -544,8 +544,9 @@ def _build_identity_mismatches(
 
 def _compiler_identity() -> dict[str, Any]:
     try:
-        import tvm
         import tvm_ffi
+
+        import tvm
         from tvm.base import _LOADED_LIBS
     except ImportError:
         return {"tvm": None}

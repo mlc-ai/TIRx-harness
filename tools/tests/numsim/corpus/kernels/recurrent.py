@@ -223,11 +223,7 @@ def _agent_kda_tensor_map(
         )
 
     with patch.object(native_kda_forward, "_TMAP_ENCODE", encode):
-        encoder = (
-            native_kda_forward._encode_beta_map
-            if beta
-            else native_kda_forward._encode_map
-        )
+        encoder = native_kda_forward._encode_beta_map if beta else native_kda_forward._encode_map
         if beta:
             encoder(torch.from_numpy(base), seq_len, num_heads)
         else:
@@ -364,9 +360,12 @@ def prepare_native_kda_fixed_case() -> NumSimCase:
     def descriptor(backing, encoder, *encoder_args):
         def encode(tensor, dims, strides_bytes, box, swizzle_code):
             return TensorMap(
-                base=tensor.numpy(), dtype="bfloat16",
-                global_shape=tuple(dims), global_strides=tuple(strides_bytes),
-                box_shape=tuple(box), element_strides=(1, 1, 1),
+                base=tensor.numpy(),
+                dtype="bfloat16",
+                global_shape=tuple(dims),
+                global_strides=tuple(strides_bytes),
+                box_shape=tuple(box),
+                element_strides=(1, 1, 1),
                 swizzle={2: "64B", 3: "128B"}[swizzle_code],
             ).numpy()
 
@@ -377,18 +376,38 @@ def prepare_native_kda_fixed_case() -> NumSimCase:
     fixed = module.get_kernel(num_heads=heads, seq_lens=(length,))
     front = _specialize_runtime_scalars(fixed["kda_front"], {"num_ctas": heads})
     front_args = {
-        "q": qkvg, "k": qkvg, "g": qkvg, "beta": beta,
-        "a_log": a_log, "dt_bias": dt_bias, "vec": vec,
-        "kbar_g": kbar, "qt_g": qt, "t1_g": t1, "aqk_g": aqk,
-        "w1_g": w1, "flags": flags,
-        "q_map": input_map, "k_map": input_map, "g_map": input_map,
-        "item_base": np.int32(0), "num_items": np.int32(items),
-        "items_per_cta": np.int32(items // heads), "do_signal": np.int32(0),
+        "q": qkvg,
+        "k": qkvg,
+        "g": qkvg,
+        "beta": beta,
+        "a_log": a_log,
+        "dt_bias": dt_bias,
+        "vec": vec,
+        "kbar_g": kbar,
+        "qt_g": qt,
+        "t1_g": t1,
+        "aqk_g": aqk,
+        "w1_g": w1,
+        "flags": flags,
+        "q_map": input_map,
+        "k_map": input_map,
+        "g_map": input_map,
+        "item_base": np.int32(0),
+        "num_items": np.int32(items),
+        "items_per_cta": np.int32(items // heads),
+        "do_signal": np.int32(0),
     }
     chain_args = {
-        "v": qkvg, "state_in": initial_state, "state_out": final_state,
-        "out": output, "vec": vec, "kbar_g": kbar, "qt_g": qt,
-        "t1_g": t1, "aqk_g": aqk, "w1_g": w1,
+        "v": qkvg,
+        "state_in": initial_state,
+        "state_out": final_state,
+        "out": output,
+        "vec": vec,
+        "kbar_g": kbar,
+        "qt_g": qt,
+        "t1_g": t1,
+        "aqk_g": aqk,
+        "w1_g": w1,
         "v_map": input_map,
         "kbar_map": descriptor(kbar, module._encode_tile, chunk, dim, items),
         "qt_map": descriptor(qt, module._encode_tile, chunk, dim, items),
@@ -396,9 +415,11 @@ def prepare_native_kda_fixed_case() -> NumSimCase:
         "aqk_map": descriptor(aqk, module._encode_tile, chunk, chunk, items),
         "w1_map": descriptor(w1, module._encode_tile, dim, chunk, items),
         "o_map": descriptor(output, module._encode_thd, length, heads),
-        "flags": flags, "scale": np.float32(1.0 / math.sqrt(dim)),
+        "flags": flags,
+        "scale": np.float32(1.0 / math.sqrt(dim)),
         "num_chunks": np.int32(length // chunk),
-        "flag_from": np.int32(items), "flag_target": np.int32(1),
+        "flag_from": np.int32(items),
+        "flag_target": np.int32(1),
     }
     args = {f"k0:{name}": value for name, value in front_args.items()}
     args.update({f"k1:{name}": value for name, value in chain_args.items()})
@@ -416,7 +437,8 @@ def prepare_native_kda_fixed_case() -> NumSimCase:
         expected_output[token, 0, 0] = state * normalized * np.float32(1.0 / math.sqrt(dim))
     expected_final_state[0, 0, 0] = state
     return NumSimCase(
-        kernel=(front, fixed["kda_chain"]), args=args,
+        kernel=(front, fixed["kda_chain"]),
+        args=args,
         outputs=("k1:out", "k1:state_out"),
         reference=lambda: {
             "k1:out": expected_output.reshape(-1).copy(),
@@ -1158,14 +1180,14 @@ __all__ = [
     "gdn_decode_bf16_numpy_reference",
     "gdn_numpy_reference",
     "kda_decode_numpy_reference",
-    "prepare_native_kda_fixed_case",
-    "prepare_native_kda_forward_case",
+    "prepare_gdn_cp_prefill_case",
+    "prepare_gdn_decode_fp32_mtp_warp_case",
     "prepare_gdn_decode_ilp4_case",
     "prepare_gdn_decode_mtp_case",
-    "prepare_gdn_decode_fp32_mtp_warp_case",
     "prepare_gdn_decode_t1_case",
-    "prepare_gdn_cp_prefill_case",
     "prepare_gdn_prefill_case",
+    "prepare_native_kda_fixed_case",
+    "prepare_native_kda_forward_case",
     "prepare_recurrent_kda_grouped_case",
     "prepare_recurrent_kda_one_warp_case",
 ]

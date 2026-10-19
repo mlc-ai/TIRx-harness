@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
-from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
+from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
+from tvm.script import tirx as T
 
 
 @T.prim_func

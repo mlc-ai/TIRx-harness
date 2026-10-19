@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import ml_dtypes
 import numpy as np
 import pytest
-import ml_dtypes
 
 from tirx_harness import numsim
 from tvm.script import tirx as T

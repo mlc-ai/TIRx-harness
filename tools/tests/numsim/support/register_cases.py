@@ -1,6 +1,7 @@
 """Shared launch shape for ordinary and predicated register arithmetic."""
 
 import numpy as np
+
 import tvm
 from tvm.script import tirx as T
 

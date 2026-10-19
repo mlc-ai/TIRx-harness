@@ -109,7 +109,12 @@ def test_native_synccheck_validates_flashmla_small_topk_task_steal(
     assert result.findings == [], payload
     assert result.advisories == [], payload
     assert payload["incomplete"] == [
-        {"kind": "analysis_incomplete", "reason": "subset_execution", "selected_warp_count": 32, "total_warp_count": 64}
+        {
+            "kind": "analysis_incomplete",
+            "reason": "subset_execution",
+            "selected_warp_count": 32,
+            "total_warp_count": 64,
+        }
     ], payload
     assert payload["execution_error"] is None, payload
     assert payload["stats"]["completed_task_count"] == payload["stats"]["task_count"], payload

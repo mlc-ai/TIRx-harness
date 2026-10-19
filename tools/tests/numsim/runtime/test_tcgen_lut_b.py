@@ -105,6 +105,7 @@ def test_dense_lut_b_segments_and_cta_partition(group, tmem, segment, half, tmp_
         outputs = run_checked(kernel, args, cache_dir=tmp_path).outputs
         np.testing.assert_array_equal(outputs["out"], args["seed"] if disabled else expected)
 
+
 @pytest.mark.parametrize("resource", ["b", "lookup"])
 def test_lut_b_async_read_lifetimes(resource):
     for block in (False, True):

@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
-import tirx_kernels.tirx_lite as txl
-from tvm.script import tirx as T
 
+import tirx_kernels.tirx_lite as txl
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import NumSimExecutionError
+from tvm.script import tirx as T
 
 
 @txl.kernel(warps=1, arch="sm_100a", grid=1, check_ir=False)

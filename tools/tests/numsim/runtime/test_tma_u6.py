@@ -1,18 +1,21 @@
 """SM100 U6 TMA: packed loads and byte-per-value stores are not inverses."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim
-
+from tvm.script import tirx as T
 
 U6_CASES = (
     # Each direction covers plain/swizzled and tile/im2col, without their product.
-    (False, False, False, 16), (False, True, True, 16),
-    (True, True, False, 16), (True, False, True, 16),
-    (False, True, False, 32), (True, True, True, 32), (True, True, False, 64),
+    (False, False, False, 16),
+    (False, True, True, 16),
+    (True, True, False, 16),
+    (True, False, True, 16),
+    (False, True, False, 32),
+    (True, True, True, 32),
+    (True, True, False, 64),
 )
 
 

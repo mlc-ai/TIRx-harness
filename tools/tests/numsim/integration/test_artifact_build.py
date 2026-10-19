@@ -4,12 +4,8 @@ import json
 
 import numpy as np
 import pytest
-from tvm.ir import load_json, save_json
+from tvm_ffi import structural_equal, structural_hash
 
-from tirx_harness import numsim, racecheck
-from tirx_harness.numsim.api import ExecutionSubset
-from tirx_harness.numsim.abi import abi_metadata
-from tirx_harness.numsim.bindings import prepare_bindings
 from tests.numsim.support.kernels import (
     bar_sync_after_full_warp_continue,
     bound_dynamic_cta_extent,
@@ -55,11 +51,15 @@ from tests.numsim.support.remote_mbarrier import (
     mapped_remote_mbarrier_cluster_view,
     mapped_remote_mbarrier_pointer_expect_tx,
 )
+from tirx_harness import numsim, racecheck
+from tirx_harness.numsim.abi import abi_metadata
+from tirx_harness.numsim.api import ExecutionSubset
+from tirx_harness.numsim.bindings import prepare_bindings
+from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.source_map import flatten_source_span
-from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tvm import tirx
-from tvm_ffi import structural_equal, structural_hash
+from tvm.ir import load_json, save_json
 from tvm.script import tirx as T
 from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
@@ -384,7 +384,9 @@ def test_artifact_cache_identity_ignores_spans_and_rebinds_current_location(tmp_
 
     assert first.cache_key == second.cache_key
     assert first.library_path == second.library_path
-    assert first.spec.to_manifest(include_source_spans=False) == second.spec.to_manifest(include_source_spans=False)
+    assert first.spec.to_manifest(include_source_spans=False) == second.spec.to_manifest(
+        include_source_spans=False
+    )
     leaves = [
         leaf
         for entry in second.spec.kernels[0].source_map

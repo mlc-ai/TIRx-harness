@@ -15,7 +15,6 @@ from ...benchmark_common import choose_device, config_from_env, summarize
 from . import baseline
 from .shapes import Case, select
 
-
 # These sources travel with each group's benchmark to a remote worker. Model
 # weights stay on that worker; they are never part of a candidate or upload.
 HARNESS_FILES = tuple(
@@ -38,12 +37,15 @@ def _model_path():
         # Complete, provisioned weights also work on read-only offline workers.
         if not file.is_file():
             from huggingface_hub import hf_hub_download
+
             from .model import MODEL_REVISION
 
             print(f"Qwen3.8 weights: downloading {filename} to {path}", flush=True)
             hf_hub_download(
-                repo_id="Qwen/Qwen3.8-27B", filename=filename,
-                revision=MODEL_REVISION, local_dir=path,
+                repo_id="Qwen/Qwen3.8-27B",
+                filename=filename,
+                revision=MODEL_REVISION,
+                local_dir=path,
             )
         return file
 
@@ -73,9 +75,19 @@ def tirx_prepare(solution_module, model, cache, prepared):
     data = {
         name: getattr(model, name)
         for name in (
-            "config", "eps", "dtype", "device", "layer_types", "embedding",
-            "layers", "final_norm", "lm_head", "rope", "rotary_dim",
-            "page_size", "max_context",
+            "config",
+            "eps",
+            "dtype",
+            "device",
+            "layer_types",
+            "embedding",
+            "layers",
+            "final_norm",
+            "lm_head",
+            "rope",
+            "rotary_dim",
+            "page_size",
+            "max_context",
         )
     }
     data.update(cache=cache, prepared=prepared)
@@ -150,9 +162,17 @@ def _run_case(model, case, cfg, seed, candidate_fn, candidate_prepare_fn):
     baseline_ms = statistics.median(values["baseline"])
     kernel_ms = statistics.median(values["candidate"])
     return dict(
-        passed=True, verdict="PASS", note="", correctness_checks=1,
-        max_abs=max_error, matched=1.0, baseline_ms=baseline_ms, kernel_ms=kernel_ms,
-        speedup=baseline_ms / kernel_ms, timed=True, timer="cuda_event",
+        passed=True,
+        verdict="PASS",
+        note="",
+        correctness_checks=1,
+        max_abs=max_error,
+        matched=1.0,
+        baseline_ms=baseline_ms,
+        kernel_ms=kernel_ms,
+        speedup=baseline_ms / kernel_ms,
+        timed=True,
+        timer="cuda_event",
         timing_mode="stateful_blocks",
     )
 
@@ -173,7 +193,9 @@ def run_suite(group, config=None, candidate_fn=None, workloads=None, candidate_p
     print(f"Qwen3.8 {group}: {len(entries)} cases, seed={seed}", flush=True)
     results = []
     for entry in entries:
-        case = Case(entry["id"], entry["raw"]["group"], tuple(map(tuple, entry["axes"]["segments"])))
+        case = Case(
+            entry["id"], entry["raw"]["group"], tuple(map(tuple, entry["axes"]["segments"]))
+        )
         if case.group != group:
             raise ValueError(f"{case.name} is not a {group} workload")
         print(f"Preparing {case.name}: (batch, previous, new)={case.segments}", flush=True)
@@ -181,8 +203,16 @@ def run_suite(group, config=None, candidate_fn=None, workloads=None, candidate_p
         try:
             row.update(_run_case(model, case, cfg, seed, candidate_fn, candidate_prepare_fn))
         except AssertionError as exc:
-            row.update(passed=False, verdict="FAIL", note=str(exc), speedup=None,
-                       baseline_ms=None, kernel_ms=None, timed=True, timer="cuda_event")
+            row.update(
+                passed=False,
+                verdict="FAIL",
+                note=str(exc),
+                speedup=None,
+                baseline_ms=None,
+                kernel_ms=None,
+                timed=True,
+                timer="cuda_event",
+            )
         results.append(row)
         print(row, flush=True)
         gc.collect()

@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 from .test_bulk_copy_scopes import assert_complete_elements
 
@@ -15,14 +15,18 @@ def g2s_case(scope, writers="warps", cluster=False):
     active = "lane < 2" if writers == "lanes" else "lane == 0"
     semantics = f"relaxed.{scope}" if scope else "weak"
     element = ".b128" if scope else ""
-    addresses = '''
+    addresses = (
+        """
         dst = T.alloc_local((1,), "uint32")
         bar = T.alloc_local((1,), "uint32")
         T.ptx.mapa.shared__cluster.u32(dst[0], T.cuda.cvta_generic_to_shared(shared.ptr_to([actor * 4])), T.uint32(0))
         T.ptx.mapa.shared__cluster.u32(bar[0], T.cuda.cvta_generic_to_shared(barrier.ptr_to([0])), T.uint32(0))
-''' if cluster else ""
+"""
+        if cluster
+        else ""
+    )
     return tvm.script.from_source(
-        f'''
+        f"""
 @T.prim_func
 def kernel(source: T.Buffer((16,), "uint32"), destination: T.Buffer((8,), "uint32"), enabled: T.int32):
     T.device_entry()
@@ -44,15 +48,17 @@ def kernel(source: T.Buffer((16,), "uint32"), destination: T.Buffer((8,), "uint3
     T.cuda.cluster_sync()
     if {active}:
 {addresses}
-        T.ptx["cp.async.bulk.{semantics}.shared::{'cluster' if cluster else 'cta'}.global.mbarrier::complete_tx::bytes{element}"](
-            {'dst[0]' if cluster else 'shared.ptr_to([actor * 4])'}, source.ptr_to([actor * 8]),
-            T.Cast("uint32", 32 - actor * 16), {'bar[0]' if cluster else 'barrier.ptr_to([0])'}, pred=enabled != 0)
+        T.ptx["cp.async.bulk.{semantics}.shared::{"cluster" if cluster else "cta"}.global.mbarrier::complete_tx::bytes{element}"](
+            {"dst[0]" if cluster else "shared.ptr_to([actor * 4])"}, source.ptr_to([actor * 8]),
+            T.Cast("uint32", 32 - actor * 16), {"bar[0]" if cluster else "barrier.ptr_to([0])"}, pred=enabled != 0)
     if (cta == 0) & (warp == 0) & (lane == 0):
         T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
     T.cuda.cluster_sync()
     if (cta == 0) & (warp == 0) & (lane < 8):
         destination[lane] = shared[lane]
-''', {"T": T})
+""",
+        {"T": T},
+    )
 
 
 def inputs(enabled=1):
@@ -74,7 +80,9 @@ def test_strong_g2s_scope_elements_and_predication(scope, tmp_path):
             report = racecheck(kernel, args)
             if enabled and writers == "ctas" and scope == "cta":
                 assert report.verdict == "error", report.format()
-                assert any(f.details["access_pair"] == "write_write" for f in report.findings), report.format()
+                assert any(f.details["access_pair"] == "write_write" for f in report.findings), (
+                    report.format()
+                )
             else:
                 report.require_clean()
                 result = numsim.Engine().run(module, args)

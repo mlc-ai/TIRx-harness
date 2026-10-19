@@ -5,12 +5,12 @@ import subprocess
 
 import numpy as np
 import pytest
-from tvm import tirx
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import fixed_width_integer_expression_mix
 from tests.numsim.support.manifest import device_kernel, emitted_module, parse_kernel
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.cache import rust_tool
+from tvm import tirx
 from tvm.script import tirx as T
 
 
@@ -349,7 +349,9 @@ def test_unsigned_floor_operations_keep_uint32_semantics(kind: str, method: str)
     assert "as i64" not in operations[0]
 
 
-@pytest.mark.parametrize(("kind", "method"), [("truncdiv", "checked_div"), ("truncmod", "checked_rem")])
+@pytest.mark.parametrize(
+    ("kind", "method"), [("truncdiv", "checked_div"), ("truncmod", "checked_rem")]
+)
 def test_truncating_integer_operations_keep_checked_overflow_semantics(kind: str, method: str):
     body = _body(
         f"    output[lane] = T.{kind}(value, T.int32(-1))",

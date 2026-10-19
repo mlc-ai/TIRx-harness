@@ -3,13 +3,12 @@ from __future__ import annotations
 import ml_dtypes
 import numpy as np
 import pytest
-import tvm
 from tvm_ffi import structural_walk
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PtxCallDecodeError, decode_ptx_call
-
+from tvm.script import tirx as T
 
 _FLOAT_COMPARISONS = (
     "eq",

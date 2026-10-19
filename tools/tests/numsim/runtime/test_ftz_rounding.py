@@ -5,12 +5,11 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.runtime.test_ptx_float_register_ops import _round_fraction
 from tests.numsim.support.execution import run_checked
-
+from tvm.script import tirx as T
 
 FORMS = tuple(
     (op, mode, ftz)

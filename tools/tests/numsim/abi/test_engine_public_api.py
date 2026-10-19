@@ -1,7 +1,6 @@
-from tirx_harness.numsim.transpiler.frontend import analyze
-from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
-
 from tests.numsim.support.kernels import lane_add
+from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze
 
 
 def test_generated_rust_uses_only_the_declared_engine_boundaries():

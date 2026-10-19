@@ -2,15 +2,17 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.microtests.harness import (
-    NUMSIM_GPU_MARK, require_numsim_gpu, run_gpu_primfunc,
+    NUMSIM_GPU_MARK,
+    require_numsim_gpu,
+    run_gpu_primfunc,
 )
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.three_way import run_three_way_case
 from tests.numsim.support.wait_until import handoff_case, initial_case
+from tvm.script import tirx as T
 
 
 @NUMSIM_GPU_MARK
@@ -42,7 +44,7 @@ def test_bitwise_wait_predicate_rechecks_loaded_value(pytestconfig, tmp_path, op
     require_numsim_gpu(pytestconfig)
     extra = "" if operation == "bitwise_not" else ", T.int32(3)"
     kernel = tvm.script.from_source(
-        f'''
+        f"""
 @T.prim_func
 def wait(state: T.Buffer((32,), "int32"), out: T.Buffer((32,), "int32")):
     T.device_entry()
@@ -52,7 +54,7 @@ def wait(state: T.Buffer((32,), "int32"), out: T.Buffer((32,), "int32")):
     T.cuda.wait_until(seen[0], state.ptr_to([lane]),
         lambda current: T.{operation}(current{extra}) == T.{operation}(T.int32(22){extra}))
     out[lane] = seen[0]
-''',
+""",
         {"T": T},
     )
     # Every predicate is false for 999 and true after loading the state word.

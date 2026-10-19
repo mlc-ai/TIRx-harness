@@ -11,12 +11,11 @@ import statistics
 import subprocess
 import sys
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-
 
 BENCH_ROOT = Path(__file__).resolve().parent
 TASKS_ROOT = BENCH_ROOT / "tasks"
@@ -73,14 +72,10 @@ def config_from_env(**task_defaults) -> BenchConfig:
         iters=env_int("BENCH_ITERS", base.iters),
         trials=env_int("BENCH_TRIALS", base.trials),
         max_official=env_int("BENCH_MAX_OFFICIAL", base.max_official),
-        include_official=bool(
-            env_int("BENCH_INCLUDE_OFFICIAL", int(base.include_official))
-        ),
+        include_official=bool(env_int("BENCH_INCLUDE_OFFICIAL", int(base.include_official))),
         shape_mode=env_str("BENCH_OFFICIAL_SHAPE_MODE", base.shape_mode),
         correctness_runs=env_int("BENCH_CORRECTNESS_RUNS", base.correctness_runs),
-        check_after_timing=bool(
-            env_int("BENCH_CHECK_AFTER_TIMING", int(base.check_after_timing))
-        ),
+        check_after_timing=bool(env_int("BENCH_CHECK_AFTER_TIMING", int(base.check_after_timing))),
         require_repeatable_outputs=bool(
             env_int(
                 "BENCH_REQUIRE_REPEATABLE_OUTPUTS",
@@ -99,14 +94,18 @@ def choose_device(device_setting: str) -> torch.device:
         torch.cuda.set_device(device)
         return device
 
-    rows = subprocess.check_output(
-        [
-            "nvidia-smi",
-            "--query-gpu=index,memory.used,utilization.gpu",
-            "--format=csv,noheader,nounits",
-        ],
-        text=True,
-    ).strip().splitlines()
+    rows = (
+        subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.used,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+        )
+        .strip()
+        .splitlines()
+    )
     candidates = []
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     visible_ids = None
@@ -217,7 +216,7 @@ def _task_file(task_name: str, filename: str) -> Path:
     return TASKS_ROOT / task_name / filename
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_task_reference(task_name: str, entrypoint: str = "run"):
     """Load the task's independent oracle without importing a GPU baseline."""
 
@@ -328,9 +327,7 @@ def compare_outputs(
             0.0,
             "wrong number of outputs",
         )
-    if required_rms_error_ratios is not None and len(required_rms_error_ratios) != len(
-        base
-    ):
+    if required_rms_error_ratios is not None and len(required_rms_error_ratios) != len(base):
         return (
             False,
             float("inf"),
@@ -346,9 +343,7 @@ def compare_outputs(
     total = 0
     bad = 0
     rms_failures = []
-    for output_idx, (got, ref) in enumerate(
-        zip(cand[: len(base)], base, strict=True)
-    ):
+    for output_idx, (got, ref) in enumerate(zip(cand[: len(base)], base, strict=True)):
         if tuple(got.shape) != tuple(ref.shape):
             return (
                 False,
@@ -421,9 +416,7 @@ def compare_outputs(
                 float(torch.mean(torch.square(y)).sqrt().item()) if y.numel() else 0.0
             )
         exceeds = (abs_error > output_atol) & (rel_error > rtol)
-        output_max_abs = (
-            float(abs_error.max().item()) if abs_error.numel() else 0.0
-        )
+        output_max_abs = float(abs_error.max().item()) if abs_error.numel() else 0.0
         max_abs = max(max_abs, output_max_abs)
         max_rel = max(max_rel, float(rel_error.max().item()) if rel_error.numel() else 0.0)
         total += abs_error.numel()
@@ -441,17 +434,14 @@ def compare_outputs(
             # otherwise the normalized RMS error ratio must be strictly lower.
             if output_max_abs > 1e-6 and rms_ratio >= rms_limit:
                 rms_failures.append(
-                    f"output {output_idx} normalized RMS ratio "
-                    f"{rms_ratio:.6g} >= {rms_limit:.6g}"
+                    f"output {output_idx} normalized RMS ratio {rms_ratio:.6g} >= {rms_limit:.6g}"
                 )
 
     matched_ratio = 1.0 - bad / total if total else 1.0
     required = 1.0 if required_matched_ratio is None else required_matched_ratio
     failures = []
     if matched_ratio < required:
-        failures.append(
-            f"elementwise matched ratio {matched_ratio:.6g} < {required:.6g}"
-        )
+        failures.append(f"elementwise matched ratio {matched_ratio:.6g} < {required:.6g}")
     failures.extend(rms_failures)
     ok = not failures
     return (
@@ -527,11 +517,7 @@ def compare_tensors(
         error = (x - y).abs()
         if absolute_bounds is not None:
             bound = absolute_bounds[index]
-            if (
-                bound.shape != ref.shape
-                or not torch.isfinite(bound).all()
-                or (bound < 0).any()
-            ):
+            if bound.shape != ref.shape or not torch.isfinite(bound).all() or (bound < 0).any():
                 raise ValueError("invalid elementwise absolute bound")
             close = error <= bound
         else:
@@ -561,8 +547,7 @@ def compare_tensors(
                 # immediately, so an exact output never trips the ratio.
                 if float(error.max().item()) > 1e-6 and rms_ratio >= limit:
                     failures.append(
-                        f"output {index}: normalized RMS ratio "
-                        f"{rms_ratio:.6g} >= {limit:.6g}"
+                        f"output {index}: normalized RMS ratio {rms_ratio:.6g} >= {limit:.6g}"
                     )
         if min_cosine is not None:
             cosine = float(F.cosine_similarity(x.flatten(), y.flatten(), dim=0).item())
@@ -590,9 +575,7 @@ def outputs_equal_exact_values(candidate, expected):
     if len(cand) != len(base):
         return False
     return all(
-        got.dtype == ref.dtype
-        and tuple(got.shape) == tuple(ref.shape)
-        and torch.equal(got, ref)
+        got.dtype == ref.dtype and tuple(got.shape) == tuple(ref.shape) and torch.equal(got, ref)
         for got, ref in zip(cand, base, strict=True)
     )
 
@@ -601,9 +584,7 @@ def poison_outputs(result):
     """Poison reusable floating-point outputs before an explicit correctness call."""
 
     for output in normalize_outputs(result):
-        if isinstance(output, torch.Tensor) and (
-            output.is_floating_point() or output.is_complex()
-        ):
+        if isinstance(output, torch.Tensor) and (output.is_floating_point() or output.is_complex()):
             output.fill_(float("nan"))
 
 
@@ -1005,9 +986,7 @@ def run_benchmark(
         # never enter a geomean.
         entry_atol = float(entry.get("atol", atol))
         entry_rtol = float(entry.get("rtol", rtol))
-        entry_rms_ratios = entry.get(
-            "required_rms_error_ratios", required_rms_error_ratios
-        )
+        entry_rms_ratios = entry.get("required_rms_error_ratios", required_rms_error_ratios)
         entry_reference_fn = entry.get("reference_fn")
         entry_timed = bool(entry.get("timed", True))
 
@@ -1016,7 +995,9 @@ def run_benchmark(
                 args = tuple(make_inputs(entry, device))
                 candidate = KernelRun(candidate_fn, prepare_args(args, candidate_prepare_fn))
                 correctness_fn = baseline_fn if reference_fn is None else reference_fn
-                correctness_prepare = baseline_prepare_fn if reference_fn is None else reference_prepare_fn
+                correctness_prepare = (
+                    baseline_prepare_fn if reference_fn is None else reference_prepare_fn
+                )
                 if entry_reference_fn is not None:
                     correctness_fn = entry_reference_fn
                     correctness_prepare = reference_prepare_fn
@@ -1080,7 +1061,8 @@ def run_benchmark(
                     # Oracle input clones are temporary; keep only the output snapshot.
                     timing_reference = reference_outputs(
                         correctness_fn,
-                        timing_baseline_args if reference_fn is None
+                        timing_baseline_args
+                        if reference_fn is None
                         else prepare_args(timing_args, reference_prepare_fn),
                         device,
                     )
@@ -1116,9 +1098,7 @@ def run_benchmark(
                 )
                 max_abs = max(max_abs, observed_check.max_abs)
                 max_rel = max(max_rel, observed_check.max_rel)
-                max_rms_ratio = max(
-                    max_rms_ratio, observed_check.max_rms_ratio
-                )
+                max_rms_ratio = max(max_rms_ratio, observed_check.max_rms_ratio)
                 matched = min(matched, observed_check.matched)
                 if not observed_check.ok:
                     passed = False

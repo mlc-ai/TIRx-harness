@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
+from tvm.script import tirx as T
 
 # Byte widths and carrier classes are independent for a store. Signed arithmetic
 # remains covered separately by the 32/64-bit reduction cases below.

@@ -21,7 +21,7 @@ import math
 import sys
 import types
 from dataclasses import replace
-from functools import lru_cache
+from functools import cache
 
 SOURCES: dict[str, str] = {}  # package-relative path -> source or JSON, appended by the adapter
 _STATE: dict = {}
@@ -35,13 +35,19 @@ class _BundleImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
                 continue
             parts = path[: -len(".py")].split("/")
             is_package = parts[-1] == "__init__"
-            self._modules[".".join(parts[:-1] if is_package else parts)] = (path, source, is_package)
+            self._modules[".".join(parts[:-1] if is_package else parts)] = (
+                path,
+                source,
+                is_package,
+            )
 
     def find_spec(self, fullname, path=None, target=None):
         if fullname not in self._modules:
             return None
         path, _, is_package = self._modules[fullname]
-        return importlib.machinery.ModuleSpec(fullname, self, origin=f"<bundle:{path}>", is_package=is_package)
+        return importlib.machinery.ModuleSpec(
+            fullname, self, origin=f"<bundle:{path}>", is_package=is_package
+        )
 
     def create_module(self, spec):
         return None
@@ -76,10 +82,14 @@ def _init(task, overrides, workloads, blob_keys, solution_source, *blob_tensors)
         del sys.modules[name]  # a reused worker must not keep an earlier bundle's modules
     sys.meta_path.insert(0, _BundleImporter(SOURCES))
     common = importlib.import_module("flashinfer_bench_evolve.benchmark_common")
-    blobs = {(key["path"], key["tensor_key"]): tensor for key, tensor in zip(blob_keys, blob_tensors)}
-    common.load_safetensor = lambda spec, device: blobs[(spec["path"], spec["tensor_key"])].to(device).clone()
+    blobs = {
+        (key["path"], key["tensor_key"]): tensor for key, tensor in zip(blob_keys, blob_tensors)
+    }
+    common.load_safetensor = (
+        lambda spec, device: blobs[(spec["path"], spec["tensor_key"])].to(device).clone()
+    )
 
-    @lru_cache(maxsize=None)
+    @cache
     def load_task_reference(task_name, entrypoint="run"):
         # Keep the pinned oracle in memory, just like the uploaded workload blobs.
         path = f"flashinfer_bench_evolve/tasks/{task_name}/definition.json"
@@ -88,13 +98,18 @@ def _init(task, overrides, workloads, blob_keys, solution_source, *blob_tensors)
         return namespace[entrypoint]
 
     common.load_task_reference = load_task_reference
-    module = importlib.import_module(f"flashinfer_bench_evolve.tasks.{task}.benchmark")  # binds the patched name
+    module = importlib.import_module(
+        f"flashinfer_bench_evolve.tasks.{task}.benchmark"
+    )  # binds the patched name
     solution = None
     if solution_source is not None:
         solution = sys.modules["solution"] = types.ModuleType("solution")
         _exec(solution_source.decode(), "<solution.py>", solution.__dict__)
     _STATE.update(
-        module=module, config=replace(module.default_config(), **overrides), solution=solution, workloads=workloads
+        module=module,
+        config=replace(module.default_config(), **overrides),
+        solution=solution,
+        workloads=workloads,
     )
     kernels = importlib.util.find_spec("tirx_kernels")
     return {

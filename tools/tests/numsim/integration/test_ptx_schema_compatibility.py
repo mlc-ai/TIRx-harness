@@ -9,8 +9,7 @@ from tests.numsim.microtests.cases.tcgen05_mma_forms import (
     raw_f16_ss_m64_layout_f_valid_descriptor,
 )
 from tirx_harness import racecheck, synccheck
-from tirx_harness.numsim.transpiler import build
-from tirx_harness.numsim.transpiler import ptx_dialect
+from tirx_harness.numsim.transpiler import build, ptx_dialect
 
 
 @pytest.mark.parametrize("checker", (synccheck, racecheck), ids=("synccheck", "racecheck"))

@@ -167,9 +167,7 @@ def test_incomplete_reasons_keep_distinct_identities_and_common_kind(checker):
     report = report_cls(payload)
     assert len(report.findings) == len(reasons)
     assert len({f.id for f in report.findings}) == len(reasons)
-    assert {(f.status, f.kind) for f in report.findings} == {
-        ("incomplete", "analysis_incomplete")
-    }
+    assert {(f.status, f.kind) for f in report.findings} == {("incomplete", "analysis_incomplete")}
     assert {f.details["reason"] for f in report.findings} == set(reasons)
     assert report.to_dict()["schema_version"] == 4
     with pytest.raises(RuntimeError):
@@ -180,10 +178,14 @@ def test_access_pairs_keep_distinct_identities_under_data_race():
     from tirx_harness.numsim.checker_report import RaceReport
 
     pairs = ["write_read", "read_write", "write_write"]
-    report = RaceReport({"verdict": "error", "findings": [
-        {"kind": "data_race", "status": "error", "access_pair": pair}
-        for pair in pairs
-    ]})
+    report = RaceReport(
+        {
+            "verdict": "error",
+            "findings": [
+                {"kind": "data_race", "status": "error", "access_pair": pair} for pair in pairs
+            ],
+        }
+    )
     assert len({f.id for f in report.findings}) == 3
     assert {f.kind for f in report.findings} == {"data_race"}
     assert {f.details["access_pair"] for f in report.findings} == set(pairs)

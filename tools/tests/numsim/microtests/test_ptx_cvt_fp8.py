@@ -5,8 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-
 from tests.numsim.microtests.cases.ptx_cvt_fp8 import (
     FORM_SLOTS,
     KERNELS,
@@ -20,6 +18,7 @@ from tests.numsim.microtests.harness import (
     require_numsim_gpu,
     run_paired_primfunc,
 )
+from tirx_harness import numsim
 
 
 @pytest.mark.parametrize("name", KERNELS)

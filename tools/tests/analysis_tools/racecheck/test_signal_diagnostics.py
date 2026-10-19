@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import racecheck, synccheck
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
+from tvm.script import tirx as T
 
 
 def _raw_spin(*, ordered):
@@ -42,8 +42,9 @@ def test_raw_spin_missing_hb_reports_race_with_conditional_wait_hint():
     assert report.verdict == "error", report.format()
     assert {f.kind for f in report.findings} == {"data_race"}
     assert {f.details["access_pair"] for f in report.findings} <= {"write_read", "read_write"}
-    assert all(f["kind"] == "data_race" and "category" not in f
-               for f in report.native_payload["findings"])
+    assert all(
+        f["kind"] == "data_race" and "category" not in f for f in report.native_payload["findings"]
+    )
     assert "[ERROR] data_race:" in report.format()
     assert "Access pair:" in report.format()
     assert "[ERROR] write_read:" not in report.format()

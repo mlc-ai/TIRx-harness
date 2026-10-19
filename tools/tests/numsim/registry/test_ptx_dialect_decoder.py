@@ -3,13 +3,9 @@ from __future__ import annotations
 import pickle
 
 import pytest
-import tvm
-from tvm import ir
-from tvm.ir import Expr
-from tvm.script import tirx as T
-from tvm.tirx import Stmt
 from tvm_ffi import structural_walk
 
+import tvm
 from tests.numsim.support.manifest import call_op_names, resolved_kernel
 from tirx_harness.numsim.transpiler.ptx_dialect import (
     PTX_SINK,
@@ -17,6 +13,10 @@ from tirx_harness.numsim.transpiler.ptx_dialect import (
     PtxCallDecodeError,
     decode_ptx_call,
 )
+from tvm import ir
+from tvm.ir import Expr
+from tvm.script import tirx as T
+from tvm.tirx import Stmt
 
 
 def _parse(source: str):

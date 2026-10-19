@@ -4,21 +4,23 @@ import re
 
 import numpy as np
 import pytest
+from tvm_ffi import structural_map
 
-from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tests.numsim.support.kernels import (
     block_scaled_fp8_gemm_packed_scales,
     block_scaled_nvfp4_gemm,
     block_scaled_nvfp4_gemm_cta_group2_scale_rows,
     fp8_scale_permute_tmem_roundtrip,
 )
+from tirx_harness import numsim
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm import tirx
+from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
+from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm_ffi import structural_map
 from tvm.tirx.layout import (
     ComposeLayout,
     R,
@@ -28,8 +30,6 @@ from tvm.tirx.layout import (
     TLane,
     tmem_datapath_layout,
 )
-from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 
 _INVALID_SCALE_ROW_STRIDE = TileLayout(
     S[(4, 32, 2, 4) : (1 @ TCol, 1 @ TLane, 1 @ TCol, 0 @ TCol)] + R[4 : 32 @ TLane]

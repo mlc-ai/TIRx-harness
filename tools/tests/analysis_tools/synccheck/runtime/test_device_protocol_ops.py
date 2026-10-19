@@ -596,7 +596,9 @@ def native_protocol_artifact(tmp_path_factory) -> NativeProtocolArtifact:
     cache_dir: Path = tmp_path_factory.mktemp("native-synccheck-device-protocol")
     spec = analyze(_KERNELS)
     module = numsim.transpile(_KERNELS, cache_dir=cache_dir, _analysis_capable=True)
-    assert module.spec.to_manifest(include_source_spans=False) == spec.to_manifest(include_source_spans=False)
+    assert module.spec.to_manifest(include_source_spans=False) == spec.to_manifest(
+        include_source_spans=False
+    )
     return NativeProtocolArtifact(
         module=module,
         phase_by_name={kernel.name: index for index, kernel in enumerate(module.spec.kernels)},

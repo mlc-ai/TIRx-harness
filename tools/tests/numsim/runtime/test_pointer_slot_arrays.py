@@ -2,13 +2,12 @@
 
 import numpy as np
 import pytest
+
 import tvm
-from tvm.script import tirx as T
-
-from tirx_harness import numsim, synccheck, racecheck
-from tirx_harness.numsim.errors import NumSimExecutionError
-
 from tests.numsim.support.execution import run_checked
+from tirx_harness import numsim, racecheck, synccheck
+from tirx_harness.numsim.errors import NumSimExecutionError
+from tvm.script import tirx as T
 
 
 def partial_array_case(mode):

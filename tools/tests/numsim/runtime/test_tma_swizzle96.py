@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
-from tests.numsim.support.execution import run_checked
+import tvm
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
+from tests.numsim.support.execution import run_checked
+from tvm.script import tirx as T
 
 
 def swizzle96_kernel(offset=0, replace=False):

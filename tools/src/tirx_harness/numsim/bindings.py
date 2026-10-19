@@ -6,24 +6,24 @@ import ctypes
 import hashlib
 import math
 import struct
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
+from .abi import NUMSIM_ABI_VERSION
 from .cases import (
-    Im2col,
-    _buffer_dtype_itemsize,
     _TENSOR_MAP_DESCRIPTOR_BYTES,
     _TENSOR_MAP_DTYPE_CODES,
-    _tensor_map_element_bits,
     _TENSOR_MAP_FLAG_MAGIC,
     _TENSOR_MAP_FORMAT_TAGS,
     _TENSOR_MAP_SWIZZLES,
+    Im2col,
+    _buffer_dtype_itemsize,
+    _tensor_map_element_bits,
     _tensor_map_payload_bytes,
 )
-from .abi import NUMSIM_ABI_VERSION
 from .errors import NumSimExecutionError
 
 _PACKED_FLOAT4_DTYPE = "float4_e2m1fn"
@@ -160,8 +160,7 @@ class PreparedBindings:
         return replace(
             self,
             allocations=tuple(
-                replace(allocation, data=allocation.snapshot())
-                for allocation in self.allocations
+                replace(allocation, data=allocation.snapshot()) for allocation in self.allocations
             ),
         )
 
@@ -567,9 +566,7 @@ class PreparedBindings:
         copied: list[bytes | memoryview | None] = []
         for index, (actual, expected) in enumerate(zip(allocation_bytes, self.allocations)):
             if actual is None:
-                copied.append(
-                    expected.data if index in write_through_allocations else None
-                )
+                copied.append(expected.data if index in write_through_allocations else None)
                 continue
             value = bytes(actual)
             if len(value) != expected.byte_len:
@@ -579,9 +576,7 @@ class PreparedBindings:
                 )
             copied.append(value)
 
-        for index, (physical, host) in enumerate(
-            zip(copied, self._host_allocations, strict=True)
-        ):
+        for index, (physical, host) in enumerate(zip(copied, self._host_allocations, strict=True)):
             if physical is None or not host.implicit:
                 continue
             if index in write_through_allocations:
@@ -1139,7 +1134,8 @@ def _decode_tensor_maps(array: np.ndarray) -> tuple[_DecodedTensorMap, ...]:
         if swizzle_code:
             try:
                 swizzle = next(
-                    name for name, code in _TENSOR_MAP_SWIZZLES.items()
+                    name
+                    for name, code in _TENSOR_MAP_SWIZZLES.items()
                     if code == (swizzle_code, atomicity)
                 )
             except StopIteration:

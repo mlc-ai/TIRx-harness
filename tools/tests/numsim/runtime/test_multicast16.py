@@ -2,12 +2,8 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
-from tvm.ir import Call
 from tvm_ffi import structural_map
 
-from tirx_harness import numsim, racecheck, synccheck
-from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
 from tests.numsim.runtime.test_non_tensor_bulk_forms import lane_varying_bulk_multicast_cta_mask
 from tests.numsim.runtime.test_raw_tma_codegen import (
     _tensor_map,
@@ -19,6 +15,10 @@ from tests.numsim.runtime.test_tcgen_codegen import (
 )
 from tests.numsim.support.kernels import tcgen_commit_runtime_multicast
 from tests.numsim.support.manifest import call_op_names
+from tirx_harness import numsim, racecheck, synccheck
+from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
+from tvm.ir import Call
+from tvm.script import tirx as T
 
 
 def explicit_multicast(kernel, width=16, *, mask=None, semantics=""):

@@ -1,17 +1,19 @@
 """TensorMap predicates gate updates, publication, and pointer resolution."""
 
 import numpy as np
+
 import tvm
-from tvm.script import tirx as T
-
-from tirx_harness import numsim, racecheck, synccheck
 from tests.numsim.support.execution import run_checked
-
+from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 # Address-space dispatch and integer/float bit carriers are independent.
 TENSOR_MAP_PREDICATE_CASES = (
-    ("shared::cta", "uint"), ("global", "uint"), ("", "uint"),
-    ("global", "int"), ("shared::cta", "float"),
+    ("shared::cta", "uint"),
+    ("global", "uint"),
+    ("", "uint"),
+    ("global", "int"),
+    ("shared::cta", "float"),
 )
 
 

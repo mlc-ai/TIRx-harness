@@ -3,10 +3,10 @@
 import math
 
 import numpy as np
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, variants
 
 from tests.numsim.support.cvt_cases import append_cvt_mode, scalar_cvt_kernel
 from tests.numsim.support.execution import run_checked
+from tvm.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, variants
 
 
 def _grid(destination):

@@ -3,10 +3,10 @@ from __future__ import annotations
 import ml_dtypes
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 @T.prim_func

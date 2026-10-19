@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from tvm_ffi import structural_map, structural_walk
+
+from tests.numsim.support.execution import run_checked
+from tests.numsim.support.manifest import call_op_names
+from tirx_harness import numsim, racecheck, synccheck
 from tvm import tirx
 from tvm.ir import Call
 from tvm.script import tirx as T
-from tvm_ffi import structural_map, structural_walk
-
-from tirx_harness import numsim, racecheck, synccheck
-from tests.numsim.support.execution import run_checked
-from tests.numsim.support.manifest import call_op_names
 
 
 @T.prim_func
@@ -849,6 +849,7 @@ def two_lane_bulk_g2s_cta_plain(source: T.Buffer((48,), "uint8"), output: T.Buff
         T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
         for element in T.serial(32):
             output[element] = shared[element]
+
 
 @T.prim_func
 def two_lane_bulk_g2s_cta_ignore_oob(

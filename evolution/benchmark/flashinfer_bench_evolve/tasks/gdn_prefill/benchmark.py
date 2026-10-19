@@ -17,6 +17,7 @@ from ...benchmark_common import (
     load_task_workloads,
     run_benchmark,
 )
+
 TASK_NAME = "gdn_prefill"
 
 ATOL = 1e-2
@@ -95,12 +96,20 @@ def make_inputs(entry, device):
 
     torch.manual_seed(_entry_seed(entry))
     return [
-        (torch.randn((total_seq_len, 4, 128), dtype=torch.float32, device=device) * 0.1).to(torch.bfloat16),
-        (torch.randn((total_seq_len, 4, 128), dtype=torch.float32, device=device) * 0.1).to(torch.bfloat16),
-        (torch.randn((total_seq_len, 8, 128), dtype=torch.float32, device=device) * 0.15).to(torch.bfloat16),
+        (torch.randn((total_seq_len, 4, 128), dtype=torch.float32, device=device) * 0.1).to(
+            torch.bfloat16
+        ),
+        (torch.randn((total_seq_len, 4, 128), dtype=torch.float32, device=device) * 0.1).to(
+            torch.bfloat16
+        ),
+        (torch.randn((total_seq_len, 8, 128), dtype=torch.float32, device=device) * 0.15).to(
+            torch.bfloat16
+        ),
         torch.randn((num_seqs, 8, 128, 128), dtype=torch.float32, device=device) * 0.01,
         torch.rand((8,), dtype=torch.float32, device=device) * 2.0 - 1.0,
-        (torch.randn((total_seq_len, 8), dtype=torch.float32, device=device) * 1.5).to(torch.bfloat16),
+        (torch.randn((total_seq_len, 8), dtype=torch.float32, device=device) * 1.5).to(
+            torch.bfloat16
+        ),
         torch.rand((8,), dtype=torch.float32, device=device) * 6.0 - 4.0,
         torch.randn((total_seq_len, 8), dtype=torch.float32, device=device).to(torch.bfloat16),
         cu_seqlens,

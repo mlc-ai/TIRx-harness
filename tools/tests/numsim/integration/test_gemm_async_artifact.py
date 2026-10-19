@@ -3,17 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import (
     dense_fp8_gemm_async_cta1,
-    dense_gemm_async_dynamic_right_index,
     dense_gemm_async_cta1,
     dense_gemm_async_cta_group2,
+    dense_gemm_async_dynamic_right_index,
     dense_gemm_async_tmem_a_cta_group2,
     dense_gemm_async_tmem_a_transposed_b,
     dense_gemm_async_two_clusters,
     inactive_gemm_async_is_noop,
 )
+from tirx_harness import numsim
+from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import (
@@ -24,7 +25,6 @@ from tvm.tirx.layout import (
     TLane,
     tmem_datapath_layout,
 )
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 _MMA_TF32_32B = ComposeLayout(2, 1, 3, TileLayout(S[(64,)]))

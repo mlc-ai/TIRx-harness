@@ -24,12 +24,13 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 
-import tvm
 import tvm_ffi
 
-from . import suspend_scaffold
+import tvm
+
 from ..abi import NUMSIM_ABI_VERSION
 from ..errors import NumSimBuildError
+from . import suspend_scaffold
 from .artifact_template import compile_native_module, render_native_module
 from .build import artifact_kind, generated_source_identity
 from .cache import default_cache_root

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import mbarrier_phase_reuse
+from tirx_harness import numsim
 
 
 def test_repeated_full_launch_keeps_outputs_stats_and_poll_order_deterministic(tmp_path):

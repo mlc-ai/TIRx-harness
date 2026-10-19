@@ -4,7 +4,6 @@ from pathlib import Path
 
 import tirx_harness.numsim as numsim_package
 
-
 NUMSIM_TEST_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_ROOT = NUMSIM_TEST_ROOT.parents[1]
 REPO_ROOT = TOOLS_ROOT.parent

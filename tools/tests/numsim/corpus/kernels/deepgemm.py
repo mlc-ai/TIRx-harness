@@ -10,11 +10,11 @@ from typing import Any
 from unittest.mock import patch
 
 import numpy as np
-from tvm import tirx
-from tvm.ir import Call
 from tvm_ffi import structural_map
 
 from tests.numsim.support._tirx_kernels import config_params, load_tirx_kernel
+from tvm import tirx
+from tvm.ir import Call
 
 _E2M1_POSITIVE_VALUES = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0], dtype=np.float32)
 _E2M1_SAMPLE_CODES = np.array(
@@ -1000,9 +1000,8 @@ def prepare_mega_moe_case(config_entry: Mapping[str, Any] | None = None):
     weights. Exact-zero inputs keep their independent output oracle cheap even
     for the maximum public shape; the default numerical case remains nonzero.
     """
-    from tirx_kernels.ported.deepgemm._sm100_fp8_fp4_mega_moe import spec as mega_moe_spec
-
     from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase, TensorMap
+    from tirx_kernels.ported.deepgemm._sm100_fp8_fp4_mega_moe import spec as mega_moe_spec
 
     module = load_tirx_kernel("sm100_fp8_fp4_mega_moe")
     kwargs = (

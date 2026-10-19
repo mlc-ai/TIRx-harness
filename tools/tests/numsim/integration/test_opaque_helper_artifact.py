@@ -8,7 +8,6 @@ from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
 
-
 _SMEM_DESC_ADD_16B_OFFSET_SOURCE = r"""
 __forceinline__ __device__ uint64_t tvm_builtin_smem_desc_add_16B_offset(
     uint64_t desc_base, int32_t offset) {

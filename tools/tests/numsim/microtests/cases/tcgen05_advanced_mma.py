@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import R, S, TLane, TCol, TileLayout
-
+from tvm.tirx.layout import R, S, TCol, TileLayout, TLane
 
 # Spell out the PTX scale-factor placement instead of importing TIRx's
 # production layout helpers.  For 128 rows and four scale bytes per row, SMEM

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from tests.numsim.support.paths import ENGINE_ROOT
 from tirx_harness.numsim.abi import NUMSIM_ABI_VERSION
 from tirx_harness.numsim.transpiler.support_matrix import (
     render_engine_support_matrix,
     write_engine_support_matrix,
 )
-from tests.numsim.support.paths import ENGINE_ROOT
 
 _SUPPORT_MATRIX = ENGINE_ROOT / "SUPPORTED_OPS.md"
 _ENGINE_LIB = ENGINE_ROOT / "src" / "lib.rs"

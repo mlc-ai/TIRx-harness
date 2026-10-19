@@ -11,12 +11,13 @@ from dataclasses import asdict, dataclass, replace
 from functools import cached_property
 from typing import Any
 
-from tvm.tirx import PrimFunc
 from tvm_ffi import structural_hash
 
+from tvm.tirx import PrimFunc
+
 from ..errors import NumSimBuildError, UnsupportedTIRxError
-from .host_prelude import normalize_host_tensor_map_prelude
 from . import native_frontend
+from .host_prelude import normalize_host_tensor_map_prelude
 from .native_frontend import post_order_nodes
 from .shared_helpers import plain_text as _plain_text
 from .source_map import (
@@ -197,8 +198,7 @@ def _primfunc_spec_from_manifest(kernel: dict[str, Any]) -> PrimFuncSpec:
         script="",
         topology=LaunchTopology(**kernel["topology"]),
         buffers=tuple(
-            BufferSpec(**{**item, "shape": tuple(item["shape"])})
-            for item in kernel["buffers"]
+            BufferSpec(**{**item, "shape": tuple(item["shape"])}) for item in kernel["buffers"]
         ),
         scalars=tuple(ScalarSpec(**item) for item in kernel["scalars"]),
         pointers=tuple(PointerSpec(**item) for item in kernel["pointers"]),

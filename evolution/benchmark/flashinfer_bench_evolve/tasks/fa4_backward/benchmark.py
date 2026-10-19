@@ -15,6 +15,7 @@ from ...benchmark_common import (
     load_task_workloads,
     run_benchmark,
 )
+
 TASK_NAME = "fa4_backward"
 
 ATOL = 1e-1

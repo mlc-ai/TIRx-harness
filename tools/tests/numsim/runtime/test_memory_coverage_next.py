@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -195,7 +195,9 @@ def test_tensor_map_ftz_types_preserve_copy_values(elemtype, tmp_path):
     result = numsim.Engine().run(
         numsim.transpile(kernel, cache_dir=tmp_path), inputs, outputs=("out",)
     )
-    np.testing.assert_array_equal(result.outputs["out"], descriptor_expected(7 if elemtype == 8 else 11))
+    np.testing.assert_array_equal(
+        result.outputs["out"], descriptor_expected(7 if elemtype == 8 else 11)
+    )
 
 
 def test_tensor_map_update_requires_release(tmp_path):

@@ -429,9 +429,9 @@ def register_native_ptx_decoder(payload_schema: Any) -> None:
 
 
 __all__ = [
-    "DecodedPtxCall",
     "PTX_SCHEMA_BY_OP_NAME",
     "PTX_SINK",
+    "DecodedPtxCall",
     "PtxCallDecodeError",
     "decode_ptx_call",
     "register_native_ptx_decoder",

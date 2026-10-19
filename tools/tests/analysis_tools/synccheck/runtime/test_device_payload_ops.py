@@ -313,7 +313,9 @@ def native_payload_artifact(tmp_path_factory):
     module = numsim.transpile(
         _KERNELS, cache_dir=tmp_path_factory.mktemp("synccheck-payload"), _analysis_capable=True
     )
-    assert module.spec.to_manifest(include_source_spans=False) == spec.to_manifest(include_source_spans=False)
+    assert module.spec.to_manifest(include_source_spans=False) == spec.to_manifest(
+        include_source_spans=False
+    )
     return module, spec
 
 

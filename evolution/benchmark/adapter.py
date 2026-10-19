@@ -59,7 +59,10 @@ PACKAGED = {
     "kda/backward_b1_t8192_h96": ("kda_backward", 2, 20, "max"),
     "mla_dsv4": ("mla_dsv4", 3, 50, "all"),
     "mla_dsv4_prefill_b2_qsum386_qmax257_h128_d512_swa16384_c16384_topk1152_bf16_hnd_varlen": (
-        "mla_dsv4", 3, 50, "pinned"
+        "mla_dsv4",
+        3,
+        50,
+        "pinned",
     ),
     "moe": ("moe", 10, 50, "all"),
     "msa/prefill": ("msa_prefill", 3, 50, "all"),
@@ -98,7 +101,11 @@ def workload_key(arg: str) -> str:
     """Normalize a CLI workload argument (dir name or path) to a candidates/ subdir."""
 
     resolved = Path(arg).resolve()
-    if resolved.is_dir() and resolved != CANDIDATES_ROOT and resolved.is_relative_to(CANDIDATES_ROOT):
+    if (
+        resolved.is_dir()
+        and resolved != CANDIDATES_ROOT
+        and resolved.is_relative_to(CANDIDATES_ROOT)
+    ):
         key = resolved.relative_to(CANDIDATES_ROOT).as_posix()
     else:
         key = arg.strip("/").removeprefix("candidates/")
@@ -138,8 +145,7 @@ def select_workloads(bench, config):
         replace(config, shape_mode="all", include_official=True, max_official=0)
     )
     selected = [
-        row for row in rows
-        if row["suite"] == "official" and row["raw"]["uuid"] == selected_uuid
+        row for row in rows if row["suite"] == "official" and row["raw"]["uuid"] == selected_uuid
     ]
     if len(selected) != 1:
         raise ValueError(
@@ -153,9 +159,7 @@ def select_workloads(bench, config):
     make_stress = getattr(bench, "make_stress_workloads", None)
     if make_stress is not None:
         axes = selected[0]["axes"]
-        selected = selected + make_stress(
-            (axes["num_heads"], axes["total_tokens"])
-        )
+        selected = selected + make_stress((axes["num_heads"], axes["total_tokens"]))
     return selected
 
 
@@ -225,8 +229,13 @@ def harness_sources(task_name: str) -> dict[str, str]:
     """
 
     package = BENCH_REPO_ROOT / "flashinfer_bench_evolve"
-    files = ["__init__.py", "benchmark_common.py", "tasks/__init__.py",
-             f"tasks/{task_name}/__init__.py", f"tasks/{task_name}/benchmark.py"]
+    files = [
+        "__init__.py",
+        "benchmark_common.py",
+        "tasks/__init__.py",
+        f"tasks/{task_name}/__init__.py",
+        f"tasks/{task_name}/benchmark.py",
+    ]
     shared_files = getattr(import_benchmark(task_name), "HARNESS_FILES", None)
     if shared_files is None:
         files += [f"tasks/{task_name}/{name}" for name in ("baseline.py", "definition.json")]
@@ -283,7 +292,12 @@ def blobs(workloads: list) -> tuple[list[dict], list]:
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("workload", help=f"registered workload: {', '.join(PACKAGED)}")
-    parser.add_argument("version", nargs="?", default=None, help="Version directory (e.g. v0) or 'baseline' (default).")
+    parser.add_argument(
+        "version",
+        nargs="?",
+        default=None,
+        help="Version directory (e.g. v0) or 'baseline' (default).",
+    )
     parser.add_argument("--warmup", type=int, default=None, help="default: per-workload value")
     parser.add_argument("--repeat", type=int, default=None, help="default: per-workload value")
     args = parser.parse_args(argv)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-import tvm
 
+import tvm
 from tvm.script import tirx as T
 
 

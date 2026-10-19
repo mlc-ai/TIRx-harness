@@ -4,11 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-import tvm
 
+import tvm
 from tirx_harness import numsim
 from tvm.script import tirx as T
-
 
 _INTEGER_TYPES = ("u16", "u32", "u64", "s16", "s32", "s64")
 _WIDE_TYPES = ("u16", "s16", "u32", "s32")

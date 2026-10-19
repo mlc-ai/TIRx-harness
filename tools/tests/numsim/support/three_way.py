@@ -63,8 +63,11 @@ def _clone_array(value: np.ndarray) -> np.ndarray:
     if cloned.ctypes.data % 32 != value.ctypes.data % 32:
         owner = np.empty(cloned.nbytes + 31, dtype=np.uint8)
         aligned = np.ndarray(
-            cloned.shape, dtype=cloned.dtype, buffer=owner,
-            offset=(value.ctypes.data - owner.ctypes.data) % 32, strides=cloned.strides,
+            cloned.shape,
+            dtype=cloned.dtype,
+            buffer=owner,
+            offset=(value.ctypes.data - owner.ctypes.data) % 32,
+            strides=cloned.strides,
         )
         aligned[...] = cloned
         cloned = aligned
@@ -141,14 +144,18 @@ def _paired_argument(value: Any) -> Any:
             global_strides=descriptor.global_strides,
             box_shape=descriptor.box_shape,
             element_strides=descriptor.element_strides,
-            logical_dtype=base.dtype.name if tma_dtype or descriptor.fp4_shared_layout else descriptor.dtype,
+            logical_dtype=base.dtype.name
+            if tma_dtype or descriptor.fp4_shared_layout
+            else descriptor.dtype,
             tma_dtype=tma_dtype,
             fp4_shared_layout=descriptor.fp4_shared_layout,
             swizzle=descriptor.swizzle,
             inactive_swizzle_atomicity=descriptor.inactive_swizzle_atomicity,
             fill_mode=descriptor.fill_mode,
             interleave=(
-                f"{descriptor.interleave_bytes}B" if descriptor.interleave_bytes is not None else None
+                f"{descriptor.interleave_bytes}B"
+                if descriptor.interleave_bytes is not None
+                else None
             ),
             im2col=descriptor.im2col,
         )

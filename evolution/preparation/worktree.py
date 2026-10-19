@@ -21,9 +21,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from .guards import CANONICAL_KERNELS_SOURCE_DIR
-
 from . import guards
+from .guards import CANONICAL_KERNELS_SOURCE_DIR
 
 
 def create_worktree(worktree_path: Path, repo_root: Path, pinned_commit: str) -> None:
@@ -201,6 +200,8 @@ def prefetch_submodules(
     if banned_paths:
         guards._sanitize_banned_paths(worktree, banned_paths)
     return needed
+
+
 def scrub_worktree_git(worktree: Path) -> None:
     """Rebuild the worktree's git so no banned blob survives in any object/tree.
 
@@ -242,16 +243,19 @@ def scrub_worktree_git(worktree: Path) -> None:
     if (worktree / CANONICAL_KERNELS_SOURCE_DIR).is_dir():
         subprocess.run(
             ["git", "-C", str(worktree), "add", "-f", "--", str(CANONICAL_KERNELS_SOURCE_DIR)],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
     # Runtime skills are installed payloads, ignored by the development repo.
     for relative in (".claude/skills", ".agents/skills"):
         if (worktree / relative).is_dir():
             subprocess.run(
                 ["git", "-C", str(worktree), "add", "-f", "--", relative],
-                check=True, capture_output=True,
+                check=True,
+                capture_output=True,
             )
     subprocess.run(
         ["git", "-C", str(worktree), *ident, "commit", "-q", "-m", "clean-room"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )

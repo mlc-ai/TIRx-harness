@@ -6,9 +6,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
 
+from tests.analysis_tools.synccheck.runtime.test_device_payload_ops import _assert_payload_runtime
 from tests.numsim.integration.test_direct_memory_artifact import (
     pass_emitted_cp_async_raw,
     raw_cp_async_zero_fill,
@@ -66,8 +65,9 @@ from tests.numsim.runtime.test_sparse_mma_forms import (
     sparse_tf32_m16n8k8,
 )
 from tests.numsim.support.kernels import tcgen_commit_runtime_multicast
-from tests.analysis_tools.synccheck.runtime.test_device_payload_ops import _assert_payload_runtime
 from tirx_harness import numsim
+from tvm.script import tirx as T
+from tvm.tirx.layout import S, TCol, TileLayout, TLane
 
 _TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ TLane, 1 @ TCol)])
 

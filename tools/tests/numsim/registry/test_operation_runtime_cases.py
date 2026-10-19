@@ -6,7 +6,6 @@ from pathlib import Path
 from tests.numsim.support.runtime_cases import RUNTIME_CASES
 from tirx_harness.numsim.transpiler import native_frontend
 
-
 _TEST_ROOT = Path(__file__).parents[1]
 
 

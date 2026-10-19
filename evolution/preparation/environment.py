@@ -31,8 +31,16 @@ class Environment:
         env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
         subprocess.run(
             [
-                "uv", "sync", "--locked", "--group", "benchmark", "--no-editable",
-                "--link-mode", "copy", "--python", sys.executable,
+                "uv",
+                "sync",
+                "--locked",
+                "--group",
+                "benchmark",
+                "--no-editable",
+                "--link-mode",
+                "copy",
+                "--python",
+                sys.executable,
             ],
             cwd=worktree,
             env={**env, "UV_PROJECT_ENVIRONMENT": str(prefix)},

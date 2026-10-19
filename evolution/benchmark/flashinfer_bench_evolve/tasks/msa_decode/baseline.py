@@ -60,7 +60,9 @@ def _cu_seqlens_k(cu_seqlens_k, seqused_k):
     return cu
 
 
-def _minimax_args(q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale):
+def _minimax_args(
+    q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale
+):
     """Build the CSR reverse index and the forward schedule, as the PR's bench does outside timing."""
 
     import fmha_sm100
@@ -84,15 +86,38 @@ def _minimax_args(q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seq
         return_schedule=True,
     )
     return (
-        q, k, v, k2q_row_ptr, k2q_q_indices, int(q2k_indices.shape[-1]),
-        cu_seqlens_q, cu_seqlens_k, seqlen_q, max_seqlen_k,
-        page_table, seqused_k, schedule, float(softmax_scale),
+        q,
+        k,
+        v,
+        k2q_row_ptr,
+        k2q_q_indices,
+        int(q2k_indices.shape[-1]),
+        cu_seqlens_q,
+        cu_seqlens_k,
+        seqlen_q,
+        max_seqlen_k,
+        page_table,
+        seqused_k,
+        schedule,
+        float(softmax_scale),
     )
 
 
 def _minimax_launch(
-    q, k, v, k2q_row_ptr, k2q_q_indices, topk, cu_seqlens_q, cu_seqlens_k,
-    max_seqlen_q, max_seqlen_k, page_table, seqused_k, schedule, softmax_scale,
+    q,
+    k,
+    v,
+    k2q_row_ptr,
+    k2q_q_indices,
+    topk,
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+    page_table,
+    seqused_k,
+    schedule,
+    softmax_scale,
 ):
     """The kernel call alone, as ``bench_blackwell_msa_sm100.py`` makes it."""
 
@@ -155,7 +180,9 @@ def _paged_kv(k, v, cu_seqlens_k, page_table, seqused_k):
     v_pages[page, :, slot] = v
     seq_of_page = torch.repeat_interleave(seqs, pages_per_seq, output_size=total_pages)
     pages = torch.arange(total_pages, device=device)
-    page_table = torch.zeros((kv_lens.numel(), int(pages_per_seq.max())), dtype=torch.int64, device=device)
+    page_table = torch.zeros(
+        (kv_lens.numel(), int(pages_per_seq.max())), dtype=torch.int64, device=device
+    )
     page_table[seq_of_page, pages - page_base[seq_of_page]] = pages
     return k_pages, v_pages, page_table, kv_lens
 
@@ -183,7 +210,9 @@ def _sparse_tables(q2k_indices, seqlen_q, page_table, kv_lens):
     return block_tables, seq_lens
 
 
-def _bridge_args(q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale):
+def _bridge_args(
+    q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale
+):
     """Turn MSA's inputs into trtllm-gen block-sparse decode arguments.
 
     trtllm-gen's block-sparse decode takes per-(kv head, request) page lists in
@@ -268,5 +297,7 @@ def run(q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, sof
 
     make_args, launch = _arm(q, k, q2k_indices)
     return launch(
-        *make_args(q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale)
+        *make_args(
+            q, k, v, q2k_indices, cu_seqlens_k, page_table, seqused_k, seqlen_q, softmax_scale
+        )
     )

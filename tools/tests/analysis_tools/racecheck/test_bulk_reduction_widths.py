@@ -1,10 +1,10 @@
 """Bulk reductions are atomic per PTX element, not per four-byte word."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def reduction_and_peer(ptx_type, peer):

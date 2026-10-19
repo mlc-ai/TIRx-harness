@@ -22,9 +22,7 @@ def compile_native_module(
     *,
     analysis_capable: bool,
     analysis_checker: str | None,
-) -> tuple[
-    dict[str, Any], list[list[Any]], str, dict[str, Any], str | None, dict[str, Any] | None
-]:
+) -> tuple[dict[str, Any], list[list[Any]], str, dict[str, Any], str | None, dict[str, Any] | None]:
     """Analyze and emit normalized kernels in one native call."""
 
     return native_frontend.compile_module(

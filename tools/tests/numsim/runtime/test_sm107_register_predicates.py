@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def sm107_register_predicate_kernel(preserve):

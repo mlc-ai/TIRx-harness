@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import direct_cuda_ldg, direct_tvm_access_ptr_shared
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as T

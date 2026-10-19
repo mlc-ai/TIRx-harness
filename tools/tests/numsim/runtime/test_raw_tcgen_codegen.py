@@ -4,15 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TCol, TileLayout, TLane, tmem_datapath_layout
 
-from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tirx_harness.numsim.transpiler import analyze
 from tests.numsim.support.manifest import emitted_calls, resolved_kernel
 from tests.numsim.support.tcgen_descriptor import (
     INSTR_DESC,
@@ -22,7 +14,15 @@ from tests.numsim.support.tcgen_descriptor import (
     encode_dense_instr_descriptor_fields,
     validate_tcgen05_instruction_shape,
 )
+from tirx_harness import numsim
+from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tirx_harness.numsim.transpiler import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
+from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
+from tvm.tirx.layout import S, TCol, TileLayout, TLane, tmem_datapath_layout
 
 TCGEN_DESCRIPTOR_LAYOUT = "<artifact-tcgen-descriptor-layout>"
 
@@ -3879,8 +3879,15 @@ def test_raw_tcgen_mma_evaluates_collective_predicate_once():
         shared = T.alloc_buffer((32,), "uint32", scope="shared")
         shared[lane] = T.uint32(0)
         T.ptx["tcgen05.mma.cta_group::1.kind::f16"](
-            T.uint32(0), T.uint64(0), T.uint64(0), T.uint32((4 << 24) | (1 << 17) | 16),
-            T.uint32(0), T.uint32(0), T.uint32(0), T.uint32(0), T.ptx.pred(T.uint32(0)),
+            T.uint32(0),
+            T.uint64(0),
+            T.uint64(0),
+            T.uint32((4 << 24) | (1 << 17) | 16),
+            T.uint32(0),
+            T.uint32(0),
+            T.uint32(0),
+            T.uint32(0),
+            T.ptx.pred(T.uint32(0)),
             pred=T.cuda.elect_sync(),
         )
 

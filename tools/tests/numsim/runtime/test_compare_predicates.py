@@ -2,11 +2,10 @@
 
 import numpy as np
 import pytest
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import numsim, racecheck, synccheck
-
+from tvm.script import tirx as T
 
 # Spelling, number of destinations, source expressions. Existing numerical
 # tests own comparison/GF(2) oracles; this case adds masking and GPU bit parity.

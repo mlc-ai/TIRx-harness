@@ -1,6 +1,7 @@
 """I8 shares integer accumulation and packed layouts, not floating-point rounding."""
 
 import numpy as np
+
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 
 

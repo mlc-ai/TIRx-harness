@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-from tvm import tirx
 from tvm_ffi import structural_map
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
+from tvm import tirx
 
 
 def _specialize(kernel, values: dict[str, int | float]):
@@ -63,7 +63,9 @@ def _name_buffer_parameters(kernel, names: tuple[str, ...]):
         return kernel
     return tirx.PrimFunc(
         params,
-        structural_map(kernel.body, (tirx.Var, lambda var: replacements.get(var, var)), order="post"),
+        structural_map(
+            kernel.body, (tirx.Var, lambda var: replacements.get(var, var)), order="post"
+        ),
         kernel.ret_type,
         kernel.attrs,
         kernel.span,

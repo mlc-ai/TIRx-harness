@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import (
     global_decl_buffer_alias_reinterpret,
     global_dynamic_subview_by_warp,
 )
+from tirx_harness import numsim
 
 
 def test_global_decl_buffer_alias_reuses_parameter_allocation_bytes(tmp_path):

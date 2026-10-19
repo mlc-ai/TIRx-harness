@@ -7,12 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-
+from tvm.script import tirx as T
 
 _SCALAR_BITS = {
     "bool": 8,

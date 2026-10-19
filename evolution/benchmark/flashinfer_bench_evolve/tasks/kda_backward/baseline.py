@@ -19,8 +19,7 @@ def _kernel_args(
     """Autograd leaves plus the host copy of ``cu_seqlens`` FLA wants outside timing."""
 
     leaves = tuple(
-        t.detach().requires_grad_(True)
-        for t in (q, k, v, g, beta, A_log, dt_bias, initial_state)
+        t.detach().requires_grad_(True) for t in (q, k, v, g, beta, A_log, dt_bias, initial_state)
     )
     cu_seqlens_cpu = None if cu_seqlens is None else cu_seqlens.detach().cpu()
     return leaves, float(scale), cu_seqlens, cu_seqlens_cpu, do, dfinal_state
@@ -56,9 +55,7 @@ def _launch(leaves, scale, cu_seqlens, cu_seqlens_cpu, do, dfinal_state):
             dt_bias=dt_bias,
             chunk_size=CHUNK_SIZE,
         )
-        grads = torch.autograd.grad(
-            (output, final_state), leaves, grad_outputs=(do, dfinal_state)
-        )
+        grads = torch.autograd.grad((output, final_state), leaves, grad_outputs=(do, dfinal_state))
     return (output.detach(), final_state.detach(), *grads)
 
 

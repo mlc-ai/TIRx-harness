@@ -3,14 +3,14 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-from tests.numsim.support.manifest import call_op_names, emitted_module, emitted_calls
 from tests.numsim.support.kernels import (
     tcgen_commit_mbarrier,
     tcgen_commit_runtime_multicast,
     tcgen_lifecycle_single_cta,
     tcgen_lifecycle_two_cta,
 )
+from tests.numsim.support.manifest import call_op_names, emitted_calls, emitted_module
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import DecodedPtxCall, decode_ptx_call
 from tvm.script import tirx as T

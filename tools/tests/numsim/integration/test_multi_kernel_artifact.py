@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tests.numsim.support.kernels import raw_tma_roundtrip
 from tests.numsim.support.multi_kernels import (
@@ -17,8 +16,9 @@ from tests.numsim.support.multi_kernels import (
 )
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
-from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm.script import tirx as T
 
 
 @T.prim_func

@@ -9,7 +9,6 @@ from tvm.backend.cuda.ptx.table import TABLE
 from tvm.script import tirx as T
 from tvm.tirx.op import _canonical_device_intrin_name
 
-
 TIRX_BUILDER_MODULE = type(T.cuda).__module__
 CUDA_PRIVATE_SURFACES = frozenset(
     {"__activemask", "__shfl_sync", "__shfl_up_sync", "__shfl_down_sync", "__shfl_xor_sync"}
@@ -25,9 +24,7 @@ SURFACE_OVERRIDES = {
     "cuda.cta_sum": ("tirx.cuda.cta_reduce",),
     "cuda.cta_max": ("tirx.cuda.cta_reduce",),
     "cuda.cta_min": ("tirx.cuda.cta_reduce",),
-    "cuda.sm100_2sm_leader_smem_addr": (
-        "tirx.cuda.cvta_generic_to_shared",
-    ),
+    "cuda.sm100_2sm_leader_smem_addr": ("tirx.cuda.cvta_generic_to_shared",),
     "ptx.mbarrier.arrive.cluster_count": ("tirx.ptx.mbarrier_arrive",),
     "ptx.cp_async.legacy": ("tirx.ptx.cp_async",),
     "ptx.cp_async.mbarrier.arrive.noinc": ("tirx.ptx.cp_async_mbarrier_arrive",),

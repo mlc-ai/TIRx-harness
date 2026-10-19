@@ -329,6 +329,7 @@ class CompiledModule:
     def load(self):
         return self.artifact.load()
 
+
 @dataclass(frozen=True)
 class _PreparedExecution:
     bindings: PreparedBindings
@@ -785,7 +786,9 @@ class Engine:
                 assumptions=assumptions,
             )
         contract = _host_abi(module)
-        canonical_inputs, _aliases, _ambiguous_aliases = _canonicalize_buffer_names(contract, inputs)
+        canonical_inputs, _aliases, _ambiguous_aliases = _canonicalize_buffer_names(
+            contract, inputs
+        )
         prepared_names = prepared_bindings.buffers.keys() | prepared_bindings.scalars.keys()
         if prepared_names != canonical_inputs.keys():
             raise NumSimExecutionError(

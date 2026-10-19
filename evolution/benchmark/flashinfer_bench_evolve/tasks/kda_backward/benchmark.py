@@ -81,7 +81,20 @@ def build_inputs(seq_lens, num_qk_heads, num_v_heads, seed, device, *, scale=128
     )
     do = randn(value_shape, 0.1, torch.bfloat16)
     dfinal_state = randn(state_shape, 0.1)
-    return [q, k, v, g, beta, A_log, dt_bias, float(scale), initial_state, cu_seqlens, do, dfinal_state]
+    return [
+        q,
+        k,
+        v,
+        g,
+        beta,
+        A_log,
+        dt_bias,
+        float(scale),
+        initial_state,
+        cu_seqlens,
+        do,
+        dfinal_state,
+    ]
 
 
 def make_inputs(entry, device):
@@ -97,7 +110,19 @@ def make_inputs(entry, device):
 
 
 def tirx_prepare(
-    solution_module, q, k, v, g, beta, A_log, dt_bias, scale, initial_state, cu_seqlens, do, dfinal_state
+    solution_module,
+    q,
+    k,
+    v,
+    g,
+    beta,
+    A_log,
+    dt_bias,
+    scale,
+    initial_state,
+    cu_seqlens,
+    do,
+    dfinal_state,
 ):
     """Bind fresh gate inputs to a TIRx KDA training-step candidate outside timing."""
 
@@ -131,7 +156,16 @@ def tirx_prepare(
 
 
 OUTPUT_NAMES = (
-    "output", "final_state", "dq", "dk", "dv", "dg", "dbeta", "dA_log", "ddt_bias", "dinitial_state"
+    "output",
+    "final_state",
+    "dq",
+    "dk",
+    "dv",
+    "dg",
+    "dbeta",
+    "dA_log",
+    "ddt_bias",
+    "dinitial_state",
 )
 
 

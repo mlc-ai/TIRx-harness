@@ -1,16 +1,22 @@
 """Host-encoded atomicity: exact shared permutation and untouched boundaries."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.runtime.test_tma_u6 import u6_case
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 def atomicity_case(
-    atom, *, flip=False, store=False, im2col=False, shared_base=128, restore_swizzle=False,
+    atom,
+    *,
+    flip=False,
+    store=False,
+    im2col=False,
+    shared_base=128,
+    restore_swizzle=False,
 ):
     if flip and (atom != 32 or store):
         raise ValueError("8B flip is a 32B-atomicity load-only mode")
@@ -69,16 +75,19 @@ def atomicity_case(
             if flip and (i // 32 + shared_base // 128) % 2:
                 physical ^= 8
             expected[physical // 4] = value
-    descriptor_type = 'T.TensorMap()'
+    descriptor_type = "T.TensorMap()"
     if restore_swizzle:
         descriptor_type = 'T.Buffer((128,), "uint8")'
         body = body.replace("T.address_of(descriptor)", "descriptor.ptr_to([0])")
-        body = '''
+        body = (
+            """
     if lane == 0:
         T.ptx["tensormap_replace.tile.swizzle_mode.global.b1024.b32"](descriptor.ptr_to([0]), 3)
         T.ptx.fence.proxy.tensormap__generic.release.gpu()
         T.ptx.fence.proxy.tensormap__generic.acquire.gpu(descriptor.ptr_to([0]))
-''' + body
+"""
+            + body
+        )
     kernel = tvm.script.from_source(
         f"""@T.prim_func
 def kernel(descriptor: {descriptor_type}, {parameters}):
@@ -135,17 +144,37 @@ def test_tma_atomicity_layout_and_checkers(tmp_path):
 
 def test_tma_atomicity_direction_restrictions(tmp_path):
     for store, swizzle, dtype, verdict, message in (
-        (True, "128B_ATOM_32B_FLIP_8B", None, "error", "8B flip is only valid for global-to-shared"),
+        (
+            True,
+            "128B_ATOM_32B_FLIP_8B",
+            None,
+            "error",
+            "8B flip is only valid for global-to-shared",
+        ),
         (False, "128B_ATOM_64B", None, "incomplete", "tma_64b_atomicity_load_unmodeled"),
-        (False, "128B_ATOM_64B", "uint6", "error", "64B atomicity loads are invalid for U6 and padded FP4"),
-        (False, "128B_ATOM_64B", "fp4", "error", "64B atomicity loads are invalid for U6 and padded FP4"),
+        (
+            False,
+            "128B_ATOM_64B",
+            "uint6",
+            "error",
+            "64B atomicity loads are invalid for U6 and padded FP4",
+        ),
+        (
+            False,
+            "128B_ATOM_64B",
+            "fp4",
+            "error",
+            "64B atomicity loads are invalid for U6 and padded FP4",
+        ),
     ):
         if dtype is None:
             kernel, inputs, base, metadata, _ = atomicity_case(32, store=store)
         else:
             kernel, inputs, base, metadata, _ = u6_case(swizzle=True, atomicity=32)
             if dtype == "fp4":
-                metadata.update(tma_dtype=None, fp4_shared_layout="align16_padded", global_strides=(64,))
+                metadata.update(
+                    tma_dtype=None, fp4_shared_layout="align16_padded", global_strides=(64,)
+                )
         inputs["descriptor"] = numsim.TensorMap(base, **{**metadata, "swizzle": swizzle}).numpy()
         for report in assert_rejected(kernel, inputs, message, verdict=verdict, cache_dir=tmp_path):
             assert len(report.findings) == 1, report.format()

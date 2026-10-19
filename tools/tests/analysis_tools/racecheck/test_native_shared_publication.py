@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def _check_race_report(report, expected, space="shared"):
@@ -13,7 +13,10 @@ def _check_race_report(report, expected, space="shared"):
     if expected == "error":
         assert report.findings, report.format()
         for finding in report.findings:
-            assert finding.status == "error" and finding.details["access_pair"] in {"write_read", "read_write"}, report.format()
+            assert finding.status == "error" and finding.details["access_pair"] in {
+                "write_read",
+                "read_write",
+            }, report.format()
             for side in ("prior", "current"):
                 witness = finding.details[side]
                 assert witness["space"] == space, report.format()

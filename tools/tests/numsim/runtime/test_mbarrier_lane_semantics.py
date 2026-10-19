@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
 from tvm.script import tirx as T
 
@@ -368,5 +368,9 @@ def kernel(data: T.Buffer((1,), "uint32"), output: T.Buffer((2,), "uint32")):
     args = {"data": np.zeros(1, dtype=np.uint32), "output": np.zeros(2, dtype=np.uint32)}
     synccheck(kernel, args).require_clean()
     report = racecheck(kernel, args)
-    races = [f for f in report.findings if f.status == "error" and f.details["access_pair"] == "write_read"]
+    races = [
+        f
+        for f in report.findings
+        if f.status == "error" and f.details["access_pair"] == "write_read"
+    ]
     assert len(races) == 2, report.format()

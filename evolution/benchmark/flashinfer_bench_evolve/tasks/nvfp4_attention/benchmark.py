@@ -12,8 +12,8 @@ from ...benchmark_common import (
     compare_tensors,
     config_from_env,
     load_candidate_override,
-    load_task_workloads,
     load_task_reference,
+    load_task_workloads,
     run_benchmark,
 )
 
@@ -26,9 +26,7 @@ REQUIRED_MATCHED_RATIO = None
 REQUIRED_RMS_ERROR_RATIOS = None
 MIN_COSINE = 0.995
 MAX_MAE = 0.025
-compare = partial(
-    compare_tensors, cast_to_float32=False, min_cosine=MIN_COSINE, max_mae=MAX_MAE
-)
+compare = partial(compare_tensors, cast_to_float32=False, min_cosine=MIN_COSINE, max_mae=MAX_MAE)
 
 
 # The PR's tests and benchmarks seed their generator with 4254.

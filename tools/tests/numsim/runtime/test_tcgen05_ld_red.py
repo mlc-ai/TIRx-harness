@@ -52,4 +52,6 @@ def test_tcgen_load_reduction_preserves_the_store_wait_contract(monkeypatch, tmp
         checker(ld_red_kernel(), args).require_clean()
     report = racecheck(ld_red_kernel(wait_st=False), args)
     assert report.verdict == "error"
-    assert any(f.status == "error" and f.details["access_pair"] == "write_read" for f in report.findings)
+    assert any(
+        f.status == "error" and f.details["access_pair"] == "write_read" for f in report.findings
+    )

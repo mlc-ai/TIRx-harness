@@ -14,7 +14,6 @@ from tests.numsim.corpus.kernels.gemm import (
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
 
-
 _E2M1_EXACT = np.array(
     [
         -6.0,

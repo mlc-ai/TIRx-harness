@@ -33,10 +33,10 @@ report.
 
 import numpy as np
 import pytest
-from tvm.ir import PointerType, PrimType
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
+from tvm.ir import PointerType, PrimType
+from tvm.script import tirx as T
 
 GEN = 1
 WORD = (GEN << 32) | 0xDEADBEEF
@@ -64,8 +64,12 @@ def poll_until_generation(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "
             observed = T.alloc_local((1,), "uint64")
             observed[0] = T.uint64(0)
             T.cuda.wait_until(
-                observed[0], slot.ptr_to([0]),
-                T.Cast("uint32", T.shift_right(observed[0], 32)) == T.uint32(GEN), "cluster", "global")
+                observed[0],
+                slot.ptr_to([0]),
+                T.Cast("uint32", T.shift_right(observed[0], 32)) == T.uint32(GEN),
+                "cluster",
+                "global",
+            )
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
@@ -79,9 +83,9 @@ def publish_via_shared_cluster(sink: T.Buffer((1,), "uint64")):
     slot = T.alloc_buffer((1,), "uint64", scope="shared")
     mapped = T.alloc_local((1,), "uint64")
     T.ptx.mapa.u64(mapped[0], slot.ptr_to([0]), T.uint32(0))
-    remote_ptr: T.let[
-        T.Var(name="dsm_slot", ty=PointerType(PrimType("uint64"), "shared"))
-    ] = T.reinterpret(PointerType(PrimType("uint64"), "shared"), mapped[0])
+    remote_ptr: T.let[T.Var(name="dsm_slot", ty=PointerType(PrimType("uint64"), "shared"))] = (
+        T.reinterpret(PointerType(PrimType("uint64"), "shared"), mapped[0])
+    )
     remote = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)
     if lane == 0:
         if cta == 0:
@@ -140,8 +144,12 @@ def poll_with_non_unique_exit(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,
             observed = T.alloc_local((1,), "uint64")
             observed[0] = T.uint64(0)
             T.cuda.wait_until(
-                observed[0], slot.ptr_to([0]),
-                T.Cast("uint32", T.shift_right(observed[0], 32)) >= T.uint32(1), "cluster", "global")
+                observed[0],
+                slot.ptr_to([0]),
+                T.Cast("uint32", T.shift_right(observed[0], 32)) >= T.uint32(1),
+                "cluster",
+                "global",
+            )
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
@@ -245,9 +253,14 @@ def poll_then_read_separate_payload(
             observed = T.alloc_local((1,), "uint64")
             observed[0] = T.uint64(0)
             T.cuda.wait_until(
-                observed[0], slot.ptr_to([0]),
-                T.Cast("uint32", T.shift_right(observed[0], 32)) == T.uint32(GEN), "cluster", "global")
+                observed[0],
+                slot.ptr_to([0]),
+                T.Cast("uint32", T.shift_right(observed[0], 32)) == T.uint32(GEN),
+                "cluster",
+                "global",
+            )
             sink[0] = data[0]
+
 
 def _u64(n=1):
     return np.zeros(n, np.uint64)
@@ -258,38 +271,72 @@ CASES = [
     # --- the protocol working -------------------------------------------
     # Polls until the generation matches and consumes the payload riding in
     # the same word, so the edge comes from the write that satisfied the wait.
-    ("payload_in_the_polled_word", poll_until_generation,
-     {"slot": (_u64, ()), "sink": (_u64, ())}, "clean", ()),
-    ("atomic_add_modification_order", integer_atomic_add_order,
-     {"acc": (np.zeros, (1, np.uint32)), "sink": (np.zeros, (1, np.uint32))}, "clean", ()),
-
+    (
+        "payload_in_the_polled_word",
+        poll_until_generation,
+        {"slot": (_u64, ()), "sink": (_u64, ())},
+        "clean",
+        (),
+    ),
+    (
+        "atomic_add_modification_order",
+        integer_atomic_add_order,
+        {"acc": (np.zeros, (1, np.uint32)), "sink": (np.zeros, (1, np.uint32))},
+        "clean",
+        (),
+    ),
     # --- the protocol broken, and caught ---------------------------------
     # Reads once and uses whatever it got: a single declared load names no
     # write it is entitled to, and the declaration does not launder that.
-    ("read_once_no_retry", read_once,
-     {"slot": (_u64, ()), "sink": (_u64, ())}, "error", ("write_read",)),
+    (
+        "read_once_no_retry",
+        read_once,
+        {"slot": (_u64, ()), "sink": (_u64, ())},
+        "error",
+        ("write_read",),
+    ),
     # A relaxed wait orders nothing but its own word, so the separate payload
     # is unordered however the poll went.
-    ("payload_in_a_separate_buffer", poll_then_read_separate_payload,
-     {"slot": (_u64, ()), "data": (_u64, ()), "sink": (_u64, ())}, "error", ("write_read",)),
-
+    (
+        "payload_in_a_separate_buffer",
+        poll_then_read_separate_payload,
+        {"slot": (_u64, ()), "data": (_u64, ()), "sink": (_u64, ())},
+        "error",
+        ("write_read",),
+    ),
     # --- outside what a declared wait answers for ------------------------
     # See the module docstring: the condition, not the checker, decides these.
-    ("non_unique_exit_value", poll_with_non_unique_exit,
-     {"slot": (_u64, ()), "sink": (_u64, ())}, "clean", ()),
-    ("concurrent_writes_then_read", concurrent_writes_then_read,
-     {"slot": (_u64, ()), "sink": (_u64, ())}, "clean", ()),
-    ("atomic_ticket_order", integer_atomic_ticket,
-     {"acc": (np.zeros, (1, np.uint32)), "sink": (np.zeros, (2, np.uint32))}, "clean", ()),
-
+    (
+        "non_unique_exit_value",
+        poll_with_non_unique_exit,
+        {"slot": (_u64, ()), "sink": (_u64, ())},
+        "clean",
+        (),
+    ),
+    (
+        "concurrent_writes_then_read",
+        concurrent_writes_then_read,
+        {"slot": (_u64, ()), "sink": (_u64, ())},
+        "clean",
+        (),
+    ),
+    (
+        "atomic_ticket_order",
+        integer_atomic_ticket,
+        {"acc": (np.zeros, (1, np.uint32)), "sink": (np.zeros, (2, np.uint32))},
+        "clean",
+        (),
+    ),
     # --- shapes a declared word does not cover ---------------------------
-    ("raw_shared_cluster_poll", publish_via_shared_cluster,
-     {"sink": (_u64, ())}, "clean", ()),
-    ("raw_float_accumulator", float_atomic_add_order,
-     {"acc": (np.full, (1, 1e8, np.float32)), "sink": (np.zeros, (1, np.float32))}, "clean", ()),
+    ("raw_shared_cluster_poll", publish_via_shared_cluster, {"sink": (_u64, ())}, "clean", ()),
+    (
+        "raw_float_accumulator",
+        float_atomic_add_order,
+        {"acc": (np.full, (1, 1e8, np.float32)), "sink": (np.zeros, (1, np.float32))},
+        "clean",
+        (),
+    ),
 ]
-
-
 
 
 @pytest.mark.parametrize(
@@ -297,7 +344,9 @@ CASES = [
     CASES,
     ids=[case[0] for case in CASES],
 )
-def test_declared_word_shape_gets_the_verdict_it_earns(tmp_path, label, func, buffers, verdict, kinds):
+def test_declared_word_shape_gets_the_verdict_it_earns(
+    tmp_path, label, func, buffers, verdict, kinds
+):
     module = numsim.transpile(
         func,
         cache_dir=tmp_path,

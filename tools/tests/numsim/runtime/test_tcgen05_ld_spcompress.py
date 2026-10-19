@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
-from tirx_harness import racecheck
+import tvm
 from tests.numsim.support.execution import run_checked
+from tirx_harness import racecheck
+from tvm.script import tirx as T
 
 
 def compression_kernel(num=4, *, reduce=False, maximum=True, absolute=False, nan=False, wait=True):
@@ -94,4 +94,6 @@ def test_tcgen_load_compression(num, reduce, maximum, absolute, nan, tmp_path):
 def test_tcgen_compression_preserves_store_wait():
     args = {"source": np.ones((32, 4), np.float32), "output": np.zeros((32, 3), np.uint32)}
     report = racecheck(compression_kernel(wait=False), args)
-    assert any(f.status == "error" and f.details["access_pair"] == "write_read" for f in report.findings)
+    assert any(
+        f.status == "error" and f.details["access_pair"] == "write_read" for f in report.findings
+    )

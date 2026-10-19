@@ -13,7 +13,6 @@ from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 
-
 # Keep the full persistent grid fixed across hosts, including CPU-only runs.
 _MEGA_MOE_RACECHECK_NUM_SMS = 148
 _MEGA_MOE_RACECHECK_WORKERS = 16
@@ -200,8 +199,7 @@ def test_real_mega_moe_racecheck_completes_within_performance_budget(
         {"allocation_id": 0, "byte_offset": 0, "byte_len": alias_bytes, "byte_end": alias_bytes}
     ], payload
     assert elapsed < limit_seconds, (
-        f"{config_label} Racecheck took {elapsed:.3f}s; "
-        f"budget is {limit_seconds:.3f}s"
+        f"{config_label} Racecheck took {elapsed:.3f}s; budget is {limit_seconds:.3f}s"
     )
 
 
@@ -233,7 +231,12 @@ def test_native_racecheck_validates_flashmla_small_topk_task_steal(
         entry.racecheck_review_counts
     ), payload
     assert payload["incomplete"] == [
-        {"kind": "analysis_incomplete", "reason": "subset_execution", "selected_warp_count": 32, "total_warp_count": 64}
+        {
+            "kind": "analysis_incomplete",
+            "reason": "subset_execution",
+            "selected_warp_count": 32,
+            "total_warp_count": 64,
+        }
     ], payload
     assert payload["execution_error"] is None, payload
     assert payload["stats"]["completed_task_count"] == payload["stats"]["task_count"], payload

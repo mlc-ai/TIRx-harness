@@ -7,8 +7,8 @@ import sys
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.support.manifest import emitted_calls
+from tirx_harness import numsim
 from tvm.script import tirx as T
 
 
@@ -189,9 +189,7 @@ def test_f16x2_tanh_approx_representative_executes(tmp_path):
         dtype=np.float16,
     )
 
-    np.testing.assert_array_equal(
-        result.outputs["output"], expected.view(np.uint32).reshape(32)
-    )
+    np.testing.assert_array_equal(result.outputs["output"], expected.view(np.uint32).reshape(32))
 
 
 def test_rsqrt_approx_ftz_representative_executes(flashkda_ptx_unary_result):

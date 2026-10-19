@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import ml_dtypes
 import numpy as np
 
@@ -31,6 +30,7 @@ def prepare_native_alphamoe_case() -> NumSimCase:
     w2 = np.full((experts, hidden, inter), 0.015625, dtype=fp8)
     w2s = np.full((experts, hidden // block, inter // block), 0.125, dtype=np.float32)
     w2s[:, 1::2, :] = 0.25
+
     def tensor_map(base, global_shape, global_strides, box_shape):
         return TensorMap(
             base=base,
@@ -56,11 +56,16 @@ def prepare_native_alphamoe_case() -> NumSimCase:
         "xs_g": np.zeros(tokens * (hidden // block), dtype=np.float32),
         "xflag_g": np.zeros(tokens, dtype=np.uint32),
         "tm_w1h": tensor_map(
-            w1, (hidden, inter, 2 * experts), (hidden, inter * hidden),
+            w1,
+            (hidden, inter, 2 * experts),
+            (hidden, inter * hidden),
             (module.BK, module.CH, 2),
         ),
         "tm_w2": tensor_map(
-            w2, (inter, experts * hidden), (inter,), (module.BK, module.BM),
+            w2,
+            (inter, experts * hidden),
+            (inter,),
+            (module.BK, module.BM),
         ),
         "rsf": rsf,
         "epoch": np.uint32(1),
@@ -71,9 +76,7 @@ def prepare_native_alphamoe_case() -> NumSimCase:
     expected = np.zeros((tokens, hidden), dtype=bf16)
     for token in range(tokens):
         for rank, expert in enumerate(routes[token]):
-            gate, up = (
-                hidden * float(x[token, 0]) * 0.0625 * w1s[expert, :, 0].astype(np.float64)
-            )
+            gate, up = hidden * float(x[token, 0]) * 0.0625 * w1s[expert, :, 0].astype(np.float64)
             activation = gate * up / (1 + np.exp(-gate))
             scales = np.repeat(w2s[expert, :, 0].astype(np.float64), block)
             contribution = (

@@ -6,7 +6,6 @@ from __future__ import annotations
 import torch
 from flashinfer.decode import trtllm_batch_decode_with_kv_cache_mla
 
-
 _WORKSPACE = {}
 
 

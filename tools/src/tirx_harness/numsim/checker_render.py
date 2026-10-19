@@ -8,7 +8,6 @@ from typing import Any
 
 from tirx_harness._report import Finding
 
-
 _DYNAMIC_SEQUENCE_TEXT = re.compile(r"(?<=/seq:)\d+")
 _NATIVE_PRESENTATION_FIELDS = frozenset(
     {"source_anchor", "source_location", "source_span", "source_excerpt"}

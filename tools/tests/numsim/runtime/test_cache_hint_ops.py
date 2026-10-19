@@ -3,11 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
-from tests.numsim.support.manifest import call_op_names
 from tvm.script import tirx as T
-
 
 CACHE_HINT_OPS = frozenset(
     (

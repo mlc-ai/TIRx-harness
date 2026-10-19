@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm.script import tirx as T
 
 DTYPES = [f"{sign}int{bits}" for sign in ("", "u") for bits in (8, 16, 32, 64)]
 
@@ -92,7 +92,9 @@ def bitwise_launch_extent(output: T.Buffer((32,), "int32")):
 
 def test_bitwise_node_in_static_launch_extent(tmp_path):
     result = run_checked(
-        bitwise_launch_extent, {"output": np.zeros(32, dtype="int32")},
-        outputs=("output",), cache_dir=tmp_path,
+        bitwise_launch_extent,
+        {"output": np.zeros(32, dtype="int32")},
+        outputs=("output",),
+        cache_dir=tmp_path,
     )
     np.testing.assert_array_equal(result.outputs["output"], np.arange(32))

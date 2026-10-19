@@ -25,9 +25,7 @@ def test_tensor_map_predicates_gpu_oracle(pytestconfig):
     for space, carrier in TENSOR_MAP_PREDICATE_CASES:
         kernel, inputs, source, metadata = tensor_map_predicate_case(space, carrier=carrier)
         encoded = _torch_tensor_map(PairedTensorMap(source, **metadata))
-        descriptor = np.frombuffer(
-            ctypes.string_at(encoded.descriptor.value, 128), np.uint8
-        ).copy()
+        descriptor = np.frombuffer(ctypes.string_at(encoded.descriptor.value, 128), np.uint8).copy()
         for enabled in (1, 0):
             inputs["enabled"] = enabled
             expected = check_tensor_map_predicates(kernel, inputs)

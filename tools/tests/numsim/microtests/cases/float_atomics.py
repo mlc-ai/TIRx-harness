@@ -6,10 +6,10 @@ from typing import Any
 
 import ml_dtypes
 import numpy as np
+from tests.numsim.microtests.harness import PairedBuffer
+
 import tvm
 from tvm.script import tirx as T
-
-from tests.numsim.microtests.harness import PairedBuffer
 
 
 @T.prim_func

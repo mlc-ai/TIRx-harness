@@ -4,9 +4,9 @@ import numpy as np
 
 from tests.numsim.corpus.kernels.recurrent import (
     gdn_numpy_reference,
+    prepare_gdn_prefill_case,
     prepare_native_kda_fixed_case,
     prepare_native_kda_forward_case,
-    prepare_gdn_prefill_case,
 )
 from tirx_harness.numsim import run_case
 from tirx_harness.numsim.bindings import _decode_tensor_maps, _tensor_map_base_array

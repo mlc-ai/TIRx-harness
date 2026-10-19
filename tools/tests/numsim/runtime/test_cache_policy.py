@@ -1,9 +1,9 @@
 """Policy encodings are opaque: test their use, not hardware-specific bits."""
 
 import numpy as np
-from tvm.script import tirx as T
 
 from tests.numsim.support.execution import run_checked
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -28,9 +28,7 @@ def policy_kernel(
     )
     if lane % 2 == 0:
         inherited[0] = policy[0]
-    T.ptx["createpolicy.cvt.L2.b64"](
-        policy[0], inherited[0], pred=lane % 2 == 0, preserve_dst=True
-    )
+    T.ptx["createpolicy.cvt.L2.b64"](policy[0], inherited[0], pred=lane % 2 == 0, preserve_dst=True)
     T.ptx["ld.global.L2::cache_hint.u32"](value[0], source.ptr_to([lane]), policy[0])
     out[lane] = value[0]
 

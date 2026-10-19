@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
 from tests.numsim.integration.test_stmatrix_artifact import (
     raw_stmatrix_layout,
     raw_stmatrix_x2_forms,
@@ -13,8 +12,8 @@ from tests.numsim.integration.test_stmatrix_artifact import (
 from tests.numsim.runtime.test_matrix_memory_domain_oracle import (
     legacy_ldmatrix_x1_domain,
     ptx_ldmatrix_x1_x2_domain,
-    stmatrix_b16_x1_domain,
     stmatrix_b8_x4_domain,
+    stmatrix_b16_x1_domain,
 )
 from tests.numsim.support.kernels import raw_ldmatrix_x4_b16_fragments
 

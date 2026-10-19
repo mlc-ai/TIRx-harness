@@ -6,11 +6,11 @@ lane barriers may complete at different times.
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck
+from tvm.script import tirx as T
 
 
 def im2col_multiissuer_case(rank, sparse=False, *, wait=True):
@@ -23,8 +23,7 @@ def im2col_multiissuer_case(rank, sparse=False, *, wait=True):
     extra = ", T.uint16(T.Select(lane % 3 == 0, 3, 1 << (lane % 2)))" if multicast else ""
     instruction = (
         f"cp.async.bulk.tensor.{rank}d.shared::{'cta' if rank == 3 else 'cluster'}"
-        ".global.im2col.mbarrier::complete_tx::bytes"
-        + (".multicast::cluster" if multicast else "")
+        ".global.im2col.mbarrier::complete_tx::bytes" + (".multicast::cluster" if multicast else "")
     )
     kernel = tvm.script.from_source(
         f"""
@@ -92,18 +91,28 @@ def kernel(tmap: T.TensorMap(), output: T.Buffer(({ctas}, 32, 32), "uint32")):
 def test_im2col_per_thread_coordinates_and_offsets(rank, tmp_path):
     for sparse in (False, True):
         kernel, source, metadata, expected = im2col_multiissuer_case(rank, sparse)
-        args = {"tmap": numsim.TensorMap(source, **metadata).numpy(), "output": np.zeros_like(expected)}
+        args = {
+            "tmap": numsim.TensorMap(source, **metadata).numpy(),
+            "output": np.zeros_like(expected),
+        }
         result = run_checked(kernel, args, cache_dir=tmp_path)
         np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
 def test_im2col_multiissuer_requires_completion_wait():
     kernel, source, metadata, expected = im2col_multiissuer_case(3, wait=False)
-    report = racecheck(kernel, {
-        "tmap": numsim.TensorMap(source, **metadata).numpy(), "output": np.zeros_like(expected),
-    })
+    report = racecheck(
+        kernel,
+        {
+            "tmap": numsim.TensorMap(source, **metadata).numpy(),
+            "output": np.zeros_like(expected),
+        },
+    )
     assert report.verdict == "error", report.format()
-    assert any(f.status == "error" and f.details["access_pair"] in {"write_read", "read_write"} for f in report.findings), report.format()
+    assert any(
+        f.status == "error" and f.details["access_pair"] in {"write_read", "read_write"}
+        for f in report.findings
+    ), report.format()
 
 
 def wide_im2col_multiissuer_case(w128, sparse=False):
@@ -148,8 +157,11 @@ def kernel(tmap: T.TensorMap(), output: T.Buffer((4, {max_rows}, 16), "uint32"))
     )
     source = np.arange(16 * 4 * 2 * 160, dtype=np.uint32) + 100
     metadata = dict(
-        global_shape=(16, 4, 2, 160), global_strides=(64, 256, 512),
-        box_shape=(16, pixels), element_strides=(1, 1, 1, 1), swizzle="64B",
+        global_shape=(16, 4, 2, 160),
+        global_strides=(64, 256, 512),
+        box_shape=(16, pixels),
+        element_strides=(1, 1, 1, 1),
+        swizzle="64B",
         im2col=numsim.Im2col((0,), (0,), wide=True),
     )
     expected = np.full((4, max_rows, 16), 7, np.uint32)
@@ -161,7 +173,8 @@ def kernel(tmap: T.TensorMap(), output: T.Buffer((4, {max_rows}, 16), "uint32"))
         # ordinary wide appends the halo after its requested pixel walk.
         positions = (
             list(range(128)) + [32 * (group + 1) + h for h in range(halo) for group in range(4)]
-            if w128 else list(range(pixels + halo))
+            if w128
+            else list(range(pixels + halo))
         )
         for row, position in enumerate(positions):
             w, n = position % 4 + lane % 2, position // 4 + lane * 40
@@ -174,7 +187,10 @@ def kernel(tmap: T.TensorMap(), output: T.Buffer((4, {max_rows}, 16), "uint32"))
 def test_wide_im2col_per_thread_halo_offset_and_completion(w128, tmp_path):
     for sparse in (False, True):
         kernel, source, metadata, expected = wide_im2col_multiissuer_case(w128, sparse)
-        args = {"tmap": numsim.TensorMap(source, **metadata).numpy(), "output": np.zeros_like(expected)}
+        args = {
+            "tmap": numsim.TensorMap(source, **metadata).numpy(),
+            "output": np.zeros_like(expected),
+        }
         result = run_checked(kernel, args, cache_dir=tmp_path)
         np.testing.assert_array_equal(result.outputs["output"], expected)
         if not sparse:
@@ -183,11 +199,12 @@ def test_wide_im2col_per_thread_halo_offset_and_completion(w128, tmp_path):
             first = (
                 [100 + (i // 4) * 128 + (i % 4) * 16 for i in range(128)]
                 + [1124, 2148, 3172, 4196, 1140, 2164, 3188, 4212]
-                if w128 else [116, 132, 148, 0, 244, 260]
+                if w128
+                else [116, 132, 148, 0, 244, 260]
             )
             lane, base = (2, 10240) if w128 else (1, 5184)
             rows = np.array(
                 [[value + base + c if value else 0 for c in range(16)] for value in first],
                 np.uint32,
             )
-            np.testing.assert_array_equal(result.outputs["output"][lane, :len(first)], rows)
+            np.testing.assert_array_equal(result.outputs["output"][lane, : len(first)], rows)

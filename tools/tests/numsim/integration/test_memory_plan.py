@@ -5,10 +5,10 @@ import re
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tests.numsim.support.kernels import tmem_d_alias_per_cta
 from tests.numsim.support.manifest import emitted_module
+from tirx_harness import numsim
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as T
 from tvm.tirx.layout import ComposeLayout, S, TileLayout

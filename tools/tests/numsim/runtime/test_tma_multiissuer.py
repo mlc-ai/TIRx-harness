@@ -6,11 +6,11 @@ helper emits bra.uni and must not poll independently completing lane barriers.
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck
+from tvm.script import tirx as T
 
 TMA_MULTIISSUER_CASES = [
     (False, "cta"),
@@ -132,6 +132,6 @@ def test_tma_multiissuer_requires_wait_and_disjoint_destinations():
         report = racecheck(kernel, args)
         assert report.verdict == "error", report.format()
         kinds = {"write_write"} if overlap else {"read_write", "write_read"}
-        assert any(f.kind == "data_race" and f.details["access_pair"] in kinds for f in report.findings), (
-            report.format()
-        )
+        assert any(
+            f.kind == "data_race" and f.details["access_pair"] in kinds for f in report.findings
+        ), report.format()

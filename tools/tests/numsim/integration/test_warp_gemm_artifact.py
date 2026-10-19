@@ -3,8 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tests.numsim.support.kernels import (
     _TEST_WARP_GEMM_A_FRAG,
     _TEST_WARP_GEMM_A_FRAG_K8,
@@ -13,6 +11,8 @@ from tests.numsim.support.kernels import (
     _TEST_WARP_GEMM_D_FRAG,
     warp_gemm_bf16_m16n8k16,
 )
+from tirx_harness import numsim
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TileLayout, laneid

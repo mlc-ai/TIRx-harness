@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
 
-from tirx_harness import numsim, racecheck, synccheck
-from tests.numsim.support.execution import run_checked
+import tvm
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
+from tests.numsim.support.execution import run_checked
+from tirx_harness import numsim, racecheck, synccheck
 
 
 def high_bit_multicast_kernel(form, *, ctas=20, mask=None):

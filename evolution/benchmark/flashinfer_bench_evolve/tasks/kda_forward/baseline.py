@@ -15,12 +15,11 @@ import os
 
 import torch
 
-
 # Use FlashKDA's fused CUTLASS inference backend through the public FLA wrapper.
 os.environ["FLA_FLASH_KDA"] = "1"
 os.environ["FLA_TILELANG"] = "0"
 
-from fla.ops.kda import chunk_kda  # noqa: E402
+from fla.ops.kda import chunk_kda
 
 
 @torch.no_grad()

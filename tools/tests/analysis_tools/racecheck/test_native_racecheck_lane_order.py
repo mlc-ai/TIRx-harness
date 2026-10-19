@@ -113,7 +113,11 @@ def native_atomic_poll_does_not_publish_shared_write(
             # race it is. An acquiring wait here would order `shared` and
             # leave the test with nothing to catch.
             T.cuda.wait_until(
-                observed, counter.ptr_to([0]), observed >= T.int32(1), "gpu", "global",
+                observed,
+                counter.ptr_to([0]),
+                observed >= T.int32(1),
+                "gpu",
+                "global",
             )
             output[0] = shared[0]
     elif lane == 0:
@@ -134,7 +138,9 @@ def _atomic_inputs() -> dict[str, np.ndarray]:
 
 
 @pytest.mark.parametrize("atomic", [False, True])
-def test_public_racecheck_requires_sync_between_different_lanes_in_one_warp(native_cache_dir, atomic):
+def test_public_racecheck_requires_sync_between_different_lanes_in_one_warp(
+    native_cache_dir, atomic
+):
     mode = 3 if atomic else 0
     unsynchronized = racecheck(
         native_same_warp_lane_handoff,

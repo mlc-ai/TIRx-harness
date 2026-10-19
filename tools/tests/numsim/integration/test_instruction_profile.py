@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -53,9 +53,7 @@ def assert_executed_branch(kernel_spec, records, choose_add):
         entry.op_id for entry in kernel_spec.source_map if entry.op_name == "tirx.cuda.wait_until"
     ]
     assert len(wait_sites) == 1
-    wait_variants = [
-        name for site, name in pairs if site == wait_sites[0] and "::Acquire<" in name
-    ]
+    wait_variants = [name for site, name in pairs if site == wait_sites[0] and "::Acquire<" in name]
     assert bool(wait_variants) == bool(choose_add)
     assert all("::U32" in name and "::Global" in name and "::Gpu" in name for name in wait_variants)
 

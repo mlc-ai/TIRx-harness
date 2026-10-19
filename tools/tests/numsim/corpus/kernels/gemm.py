@@ -6,14 +6,13 @@ from typing import Any
 
 import numpy as np
 
+from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import (
     ComparisonRegion,
     ComparisonSpec,
     NumSimCase,
     TensorMap,
 )
-from tests.numsim.support._tirx_kernels import load_tirx_kernel
-
 
 FP8_1D1D_NUM_SMS = 2
 bmm_fp8_rubin = load_tirx_kernel("bmm_fp8_rubin")
@@ -1033,16 +1032,16 @@ def prepare_cudnn_dense_blockscaled_amax_case() -> NumSimCase:
 
 __all__ = [
     "FP8_1D1D_NUM_SMS",
-    "GROUPED_FP8_CONFIGS",
     "FP8_BLOCKWISE_CONFIGS",
     "FP16_BF16_CONFIGS",
+    "GROUPED_FP8_CONFIGS",
     "NVFP4_CONFIGS",
     "prepare_bmm_fp8_rubin_case",
     "prepare_cudnn_dense_blockscaled_amax_case",
-    "prepare_grouped_fp8_case",
-    "prepare_fp8_bmm_case",
     "prepare_fp8_blockwise_case",
+    "prepare_fp8_bmm_case",
     "prepare_fp16_bf16_case",
+    "prepare_grouped_fp8_case",
     "prepare_k_grouped_fp8_case",
     "prepare_m_grouped_masked_fp8_case",
     "prepare_nvfp4_case",

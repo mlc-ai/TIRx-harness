@@ -17,8 +17,8 @@ from .cases import (
     ComparisonRegion,
     ComparisonSpec,
     ExecutionAssumptions,
-    NumSimCase,
     Im2col,
+    NumSimCase,
     TensorMap,
 )
 from .errors import (
@@ -36,6 +36,7 @@ __all__ = [
     "CoverageBounds",
     "Engine",
     "ExecutionAssumptions",
+    "Im2col",
     "NativeAnalysisResult",
     "NumSimBuildError",
     "NumSimCase",
@@ -44,7 +45,6 @@ __all__ = [
     "NumSimResult",
     "ResourceLimits",
     "TensorMap",
-    "Im2col",
     "UnmodeledTIRxFormError",
     "UnsupportedTIRxError",
     "compare",

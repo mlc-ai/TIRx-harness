@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.ir.type import PointerType, PrimType
-from tvm.script import tirx as T
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
+from tvm.ir.type import PointerType, PrimType
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -174,7 +174,9 @@ def test_dynamic_raw_write_requires_bound_address(address_kind, tmp_path):
             report.require_clean()
         else:
             assert report.verdict == ("error" if address_kind == "null" else "incomplete")
-            message = "null pointer" if address_kind == "null" else "integer_address_without_binding"
+            message = (
+                "null pointer" if address_kind == "null" else "integer_address_without_binding"
+            )
             assert message in report.format()
     module = numsim.transpile(unresolved_raw_store, cache_dir=tmp_path)
     if address_kind == "bound":

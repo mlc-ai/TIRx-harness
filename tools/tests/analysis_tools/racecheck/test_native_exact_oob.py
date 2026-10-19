@@ -420,7 +420,8 @@ def test_public_native_racecheck_missing_required_binding_is_typed_incomplete(na
     [incomplete] = missing_native["incomplete"]
     source_anchor = incomplete["source_anchor"]
     assert {key: value for key, value in incomplete.items() if key != "source_anchor"} == {
-        "kind": "analysis_incomplete", "reason": "missing_input_bindings",
+        "kind": "analysis_incomplete",
+        "reason": "missing_input_bindings",
         "message": "native analysis requires complete concrete bindings before execution",
         "bindings": ["data_bound"],
     }

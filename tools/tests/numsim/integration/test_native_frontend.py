@@ -1,12 +1,12 @@
 """Production native services validate their build and preserve layout coordinates."""
 
 import pytest
-import tvm
 import tvm_ffi
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
+import tvm
 from tirx_harness.numsim.errors import NumSimBuildError
 from tirx_harness.numsim.transpiler import native_frontend
+from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
 
 def test_native_frontend_rejects_a_mismatched_build(monkeypatch):
@@ -66,10 +66,10 @@ def test_native_frontend_requires_the_tile_callback_dependency_at_load(monkeypat
 @pytest.mark.parametrize(
     "layout, atom_offsets, repeat_stride",
     [
-        (TileLayout(S[(2, 4):(8, 1)]), [0, 1, 2, 3, 8, 9, 10, 11], 16),
-        (TileLayout(S[(2, 4):(8, 1)] + 4), [4, 5, 6, 7, 12, 13, 14, 15], 16),
+        (TileLayout(S[(2, 4) : (8, 1)]), [0, 1, 2, 3, 8, 9, 10, 11], 16),
+        (TileLayout(S[(2, 4) : (8, 1)] + 4), [4, 5, 6, 7, 12, 13, 14, 15], 16),
         (
-            ComposeLayout(0, 1, 2, TileLayout(S[(2, 4):(8, 1)] + 4)),
+            ComposeLayout(0, 1, 2, TileLayout(S[(2, 4) : (8, 1)] + 4)),
             [5, 4, 7, 6, 13, 12, 15, 14],
             16,
         ),
@@ -83,12 +83,13 @@ def test_native_frontend_requires_the_tile_callback_dependency_at_load(monkeypat
             [0, 1, 10, 11, 4, 5, 14, 15, 8, 9, 2, 3, 12, 13, 6, 7],
             16,
         ),
-        (ComposeLayout(0, 0, 2, TileLayout(S[(2, 4):(8, 1)])),
-         [0, 1, 2, 3, 8, 9, 10, 11], 16),
+        (ComposeLayout(0, 0, 2, TileLayout(S[(2, 4) : (8, 1)])), [0, 1, 2, 3, 8, 9, 10, 11], 16),
     ],
 )
 def test_linear_mapping_and_full_domain_span_preserve_physical_coordinates(
-    layout, atom_offsets, repeat_stride,
+    layout,
+    atom_offsets,
+    repeat_stride,
 ):
     expected = [offset + repeat * repeat_stride for repeat in range(3) for offset in atom_offsets]
     before = tvm.ir.save_json(layout)

@@ -5,7 +5,12 @@ from dataclasses import dataclass
 import ml_dtypes
 import numpy as np
 import pytest
+
 import tvm
+from tests.numsim.support.execution import run_checked
+from tirx_harness import numsim, racecheck, synccheck
+from tirx_harness.numsim.errors import NumSimExecutionError
+from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
 from tvm.backend.cuda.ptx.table import (
     canonical_dtypes,
     mods,
@@ -13,11 +18,6 @@ from tvm.backend.cuda.ptx.table import (
     variants,
 )
 from tvm.script import tirx as T
-
-from tests.numsim.support.execution import run_checked
-from tirx_harness import numsim, racecheck, synccheck
-from tirx_harness.numsim.errors import NumSimExecutionError
-from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
 
 PTX_BIT_OP_CALLS = (
     "tirx.ptx.abs",

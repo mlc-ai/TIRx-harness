@@ -48,9 +48,7 @@ def global_scoped_message_passing(
     elif (cta == 1) and (lane == 0):
         observed = T.int32(0)
         if (mode == 0) or (mode == 2):
-            T.cuda.wait_until(
-                observed, flag.ptr_to([0]), observed != T.int32(0), "gpu", "global"
-            )
+            T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.int32(0), "gpu", "global")
         elif mode == 1:
             T.cuda.wait_until(
                 observed, flag.ptr_to([0]), observed != T.int32(0), "cluster", "global"
@@ -73,7 +71,11 @@ def global_scoped_message_passing(
                 T.ptx.ld.volatile.global_.s32(observed, flag.ptr_to([0]))
         else:
             T.cuda.wait_until(
-                observed, flag.ptr_to([0]), observed != T.int32(0), "sys", "global",
+                observed,
+                flag.ptr_to([0]),
+                observed != T.int32(0),
+                "sys",
+                "global",
             )
             T.ptx.fence.acq_rel.gpu()
         output[0] = data[1] if mode == 8 else data[0]
@@ -96,7 +98,11 @@ def typed_cluster_fence_message_passing(
     elif (warp == 1) and (lane == 0):
         observed = T.int32(0)
         T.cuda.wait_until(
-            observed, flag.ptr_to([0]), observed != T.int32(0), "sys", "global",
+            observed,
+            flag.ptr_to([0]),
+            observed != T.int32(0),
+            "sys",
+            "global",
         )
         T.ptx.fence.acq_rel.cluster()
         output[0] = data[0]

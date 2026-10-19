@@ -6,7 +6,6 @@ import pytest
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.register_cases import masked_arithmetic_case
 
-
 # One case per signedness/extension boundary, not every table spelling crossed
 # with the same four predicate modes. Values are raw uint64 register carriers.
 SAT_CASES = (

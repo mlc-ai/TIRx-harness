@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
 
-from tirx_harness import numsim, racecheck, synccheck
+import tvm
 from tests.numsim.support.kernels import (
     raw_tma_dynamic_wait_group_loop,
     raw_tma_fp4_align8_roundtrip,
@@ -12,11 +11,12 @@ from tests.numsim.support.kernels import (
     raw_tma_roundtrip,
     raw_tma_sm100_barrier_address,
     raw_tma_split_swizzle_atoms,
-    raw_tma_swizzle_to_matching_layout,
     raw_tma_swizzle_to_dense,
+    raw_tma_swizzle_to_matching_layout,
     raw_tma_transaction_mismatch,
     raw_tma_zero_fill,
 )
+from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.script import tirx as T
 
@@ -543,9 +543,7 @@ def raw_tma_predicated_g2s(
 
 
 @T.prim_func
-def raw_tma_per_lane_coordinates(
-    input_map: T.TensorMap(), output: T.Buffer((32, 4), "float32")
-):
+def raw_tma_per_lane_coordinates(input_map: T.TensorMap(), output: T.Buffer((32, 4), "float32")):
     T.device_entry()
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
@@ -1128,11 +1126,14 @@ def test_raw_tma_dynamic_single_bit_mask_retains_multicast_semantics(tmp_path):
     np.testing.assert_array_equal(result.outputs["output"], source)
 
 
-@pytest.mark.parametrize("kernel", [
-    raw_tma_select_descriptor,
-    raw_tma_if_then_else_descriptor,
-    raw_tma_materialized_tensor_map_address,
-])
+@pytest.mark.parametrize(
+    "kernel",
+    [
+        raw_tma_select_descriptor,
+        raw_tma_if_then_else_descriptor,
+        raw_tma_materialized_tensor_map_address,
+    ],
+)
 def test_raw_tma_tensor_map_selector_branches_at_runtime(kernel, tmp_path):
     first = np.arange(4, dtype=np.float32) + np.float32(11)
     second = np.arange(4, dtype=np.float32) - np.float32(7)

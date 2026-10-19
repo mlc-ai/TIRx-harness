@@ -3,11 +3,11 @@
 import ml_dtypes
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tests.numsim.microtests.harness import PairedBuffer
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tests.numsim.support.register_cases import masked_arithmetic_case
+from tvm.script import tirx as T
 
 
 def logic_carrier_case(width, operand=None):

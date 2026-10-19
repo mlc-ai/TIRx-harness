@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 

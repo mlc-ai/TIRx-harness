@@ -50,16 +50,23 @@ def _prepare_weights(contract_args):
         for index in range(3, 7):
             tensor = args[index]
             extra = tensor.new_full(
-                (padding, *tensor.shape[1:]), 1 if index in (4, 6) else 0,
+                (padding, *tensor.shape[1:]),
+                1 if index in (4, 6) else 0,
             )
             args[index] = torch.cat((tensor, extra), dim=0)
     return tuple(args)
 
 
 def _launch(
-    hidden_states, topk_ids, topk_weights,
-    gemm1_weights, gemm1_weights_scale, gemm2_weights, gemm2_weights_scale,
-    top_k, routed_scaling_factor,
+    hidden_states,
+    topk_ids,
+    topk_weights,
+    gemm1_weights,
+    gemm1_weights_scale,
+    gemm2_weights,
+    gemm2_weights_scale,
+    top_k,
+    routed_scaling_factor,
 ):
     from flashinfer.fused_moe import trtllm_fp8_block_scale_routed_moe
 
@@ -95,16 +102,32 @@ def _launch(
 
 @torch.no_grad()
 def run(
-    hidden_states, topk_ids, topk_weights,
-    gemm1_weights, gemm1_weights_scale, gemm2_weights, gemm2_weights_scale,
-    top_k, routed_scaling_factor,
+    hidden_states,
+    topk_ids,
+    topk_weights,
+    gemm1_weights,
+    gemm1_weights_scale,
+    gemm2_weights,
+    gemm2_weights_scale,
+    top_k,
+    routed_scaling_factor,
 ):
     """Run the public TRT-LLM operator, preserving all caller inputs."""
-    return _launch(*_prepare_weights((
-        hidden_states, topk_ids, topk_weights,
-        gemm1_weights, gemm1_weights_scale, gemm2_weights, gemm2_weights_scale,
-        top_k, routed_scaling_factor,
-    )))
+    return _launch(
+        *_prepare_weights(
+            (
+                hidden_states,
+                topk_ids,
+                topk_weights,
+                gemm1_weights,
+                gemm1_weights_scale,
+                gemm2_weights,
+                gemm2_weights_scale,
+                top_k,
+                routed_scaling_factor,
+            )
+        )
+    )
 
 
 @torch.no_grad()

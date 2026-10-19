@@ -4,11 +4,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import numsim
-
+from tvm.script import tirx as T
 
 INTEGER_DTYPES = (
     "int8",

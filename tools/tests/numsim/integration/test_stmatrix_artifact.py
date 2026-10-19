@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-import tvm
 from tvm import tirx
 from tvm.script import tirx as T
 

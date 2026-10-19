@@ -6,8 +6,8 @@ non-clean entries lives in ``canonical_verdict_rationale.md``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from tests.numsim.corpus.kernels.activation import (
     prepare_act_and_mul_case,
@@ -18,24 +18,31 @@ from tests.numsim.corpus.kernels.attention import (
     prepare_flash_attention4_fp4_case,
     prepare_flash_attention_backward_case,
 )
+from tests.numsim.corpus.kernels.blockscaled_gemm import (
+    prepare_dense_blockscaled_rubin_case,
+    prepare_fastcu_nvfp4_gemm_case,
+    prepare_gather_swiglu_rubin_case,
+    prepare_grouped_masked_rubin_case,
+)
+from tests.numsim.corpus.kernels.cascade import prepare_merge_state_case
 from tests.numsim.corpus.kernels.cudnn import (
-    prepare_cudnn_bsa_backward_blk128_case,
     prepare_cudnn_bsa_backward_blk64_case,
-    prepare_cudnn_bsa_forward_combine_blk64_case,
-    prepare_cudnn_bsa_forward_blk128_case,
+    prepare_cudnn_bsa_backward_blk128_case,
     prepare_cudnn_bsa_forward_blk64_case,
+    prepare_cudnn_bsa_forward_blk128_case,
+    prepare_cudnn_bsa_forward_combine_blk64_case,
     prepare_cudnn_csa_compressor_fwd_case,
     prepare_cudnn_dense_blockscaled_dsrelu_quant_case,
     prepare_cudnn_dense_blockscaled_srelu_quant_case,
     prepare_cudnn_dense_blockscaled_swiglu_quant_case,
     prepare_cudnn_dense_gemm_persistent_swiglu_case,
     prepare_cudnn_dsa_sparse_attention_backward_case,
-    prepare_cudnn_gdn_bprop_case,
-    prepare_cudnn_gdn_prefill_case,
-    prepare_cudnn_gdn_recompute_case,
     prepare_cudnn_gdn2_bprop_case,
     prepare_cudnn_gdn2_prefill_case,
     prepare_cudnn_gdn2_recompute_case,
+    prepare_cudnn_gdn_bprop_case,
+    prepare_cudnn_gdn_prefill_case,
+    prepare_cudnn_gdn_recompute_case,
     prepare_cudnn_gemm_proj_rope_mxfp8_bf16in_case,
     prepare_cudnn_gemm_proj_rope_mxfp8_mxfp8in_case,
     prepare_cudnn_kda_bprop_case,
@@ -61,21 +68,30 @@ from tests.numsim.corpus.kernels.flex_attention import (
 from tests.numsim.corpus.kernels.gemm import (
     prepare_bmm_fp8_rubin_case,
     prepare_cudnn_dense_blockscaled_amax_case,
-    prepare_fp16_bf16_case,
-    prepare_fp8_bmm_case,
     prepare_fp8_blockwise_case,
+    prepare_fp8_bmm_case,
+    prepare_fp16_bf16_case,
     prepare_grouped_fp8_case,
     prepare_k_grouped_fp8_case,
     prepare_m_grouped_masked_fp8_case,
     prepare_nvfp4_case,
 )
-from tests.numsim.corpus.kernels.blockscaled_gemm import (
-    prepare_fastcu_nvfp4_gemm_case,
-    prepare_dense_blockscaled_rubin_case,
-    prepare_grouped_masked_rubin_case,
-    prepare_gather_swiglu_rubin_case,
+from tests.numsim.corpus.kernels.msa import (
+    prepare_msa_sparse_atten_fwd_case,
+    prepare_msa_sparse_atten_fwd_combine_case,
+    prepare_msa_sparse_atten_fwd_nvfp4_kv_case,
+    prepare_msa_sparse_prepare_flat_schedule_case,
+    prepare_msa_sparse_prepare_fwd_split_atomic_case,
 )
-from tests.numsim.corpus.kernels.normalization import prepare_rmsnorm_case
+from tests.numsim.corpus.kernels.native_kda_backward import prepare_native_kda_backward_case
+from tests.numsim.corpus.kernels.native_moe import prepare_native_alphamoe_case
+from tests.numsim.corpus.kernels.native_multishape import (
+    prepare_native_kda_decode_case,
+    prepare_native_mla_case,
+    prepare_native_msa_case,
+    prepare_native_msa_decode_case,
+    prepare_native_vsa_case,
+)
 from tests.numsim.corpus.kernels.normalization import (
     prepare_flashinfer_add_rmsnorm_fp4quant_case,
     prepare_flashinfer_fused_add_rmsnorm_case,
@@ -83,23 +99,10 @@ from tests.numsim.corpus.kernels.normalization import (
     prepare_flashinfer_fused_dit_layernorm_case,
     prepare_flashinfer_layernorm_case,
     prepare_flashinfer_qk_rmsnorm_case,
-    prepare_flashinfer_rmsnorm_fp4quant_case,
     prepare_flashinfer_rmsnorm_case,
+    prepare_flashinfer_rmsnorm_fp4quant_case,
     prepare_flashinfer_rmsnorm_quant_case,
-)
-from tests.numsim.corpus.kernels.msa import (
-    prepare_msa_sparse_atten_fwd_combine_case,
-    prepare_msa_sparse_atten_fwd_case,
-    prepare_msa_sparse_atten_fwd_nvfp4_kv_case,
-    prepare_msa_sparse_prepare_flat_schedule_case,
-    prepare_msa_sparse_prepare_fwd_split_atomic_case,
-)
-from tests.numsim.corpus.kernels.topk import (
-    prepare_fast_topk_clusters_case,
-    prepare_filtered_topk_case,
-    prepare_radix_topk_multi_cta_case,
-    prepare_radix_topk_single_cta_case,
-    prepare_stable_sort_topk_by_value_case,
+    prepare_rmsnorm_case,
 )
 from tests.numsim.corpus.kernels.quantization import (
     prepare_mxfp4_quantize_case,
@@ -108,13 +111,13 @@ from tests.numsim.corpus.kernels.quantization import (
     prepare_nvfp4_quantize_per_token_case,
 )
 from tests.numsim.corpus.kernels.recurrent import (
-    prepare_native_kda_forward_case,
     prepare_gdn_cp_prefill_case,
-    prepare_gdn_decode_ilp4_case,
     prepare_gdn_decode_fp32_mtp_warp_case,
+    prepare_gdn_decode_ilp4_case,
     prepare_gdn_decode_mtp_case,
     prepare_gdn_decode_t1_case,
     prepare_gdn_prefill_case,
+    prepare_native_kda_forward_case,
     prepare_recurrent_kda_grouped_case,
     prepare_recurrent_kda_one_warp_case,
 )
@@ -126,13 +129,13 @@ from tests.numsim.corpus.kernels.state_update import (
     prepare_selective_state_update_stp_simple_case,
     prepare_selective_state_update_stp_vertical_case,
 )
-from tests.numsim.corpus.kernels.native_moe import prepare_native_alphamoe_case
-from tests.numsim.corpus.kernels.native_multishape import (
-    prepare_native_msa_case, prepare_native_vsa_case, prepare_native_kda_decode_case,
-    prepare_native_msa_decode_case, prepare_native_mla_case,
+from tests.numsim.corpus.kernels.topk import (
+    prepare_fast_topk_clusters_case,
+    prepare_filtered_topk_case,
+    prepare_radix_topk_multi_cta_case,
+    prepare_radix_topk_single_cta_case,
+    prepare_stable_sort_topk_by_value_case,
 )
-from tests.numsim.corpus.kernels.native_kda_backward import prepare_native_kda_backward_case
-from tests.numsim.corpus.kernels.cascade import prepare_merge_state_case
 from tirx_harness.numsim.cases import NumSimCase
 
 
@@ -257,17 +260,20 @@ def _nvfp4() -> NumSimCase:
 
 CANONICAL_KERNEL_CASES = (
     CanonicalKernelCase(
-        "alphamoe_fp8_blockscale_qwen3next", prepare_native_alphamoe_case,
+        "alphamoe_fp8_blockscale_qwen3next",
+        prepare_native_alphamoe_case,
     ),
     CanonicalKernelCase("kda_backward_packed", prepare_native_kda_backward_case),
     CanonicalKernelCase("kda_decode_multishape", prepare_native_kda_decode_case),
     CanonicalKernelCase("msa_decode_multishape", prepare_native_msa_decode_case),
     CanonicalKernelCase("mla_dsv4_multishape", prepare_native_mla_case),
     CanonicalKernelCase(
-        "msa_prefill_multishape", prepare_native_msa_case,
+        "msa_prefill_multishape",
+        prepare_native_msa_case,
     ),
     CanonicalKernelCase(
-        "vsa_multishape", prepare_native_vsa_case,
+        "vsa_multishape",
+        prepare_native_vsa_case,
     ),
     CanonicalKernelCase("merge_state", prepare_merge_state_case),
     CanonicalKernelCase(

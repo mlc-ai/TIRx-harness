@@ -21,7 +21,6 @@ from tirx_harness.numsim.cases import (
     _descriptor_storage,
 )
 
-
 dense_gemm_persistent_swiglu = load_tirx_kernel("cudnn_sm100_dense_gemm_persistent_swiglu")
 dense_blockscaled_gemm_persistent_swiglu_interleaved_quant = load_tirx_kernel(
     "cudnn_sm100_dense_blockscaled_gemm_persistent_swiglu_interleaved_quant"
@@ -2407,23 +2406,23 @@ def prepare_cudnn_csa_compressor_fwd_case() -> NumSimCase:
 
 
 __all__ = [
-    "prepare_cudnn_bsa_backward_blk128_case",
     "prepare_cudnn_bsa_backward_blk64_case",
-    "prepare_cudnn_bsa_forward_combine_blk64_case",
-    "prepare_cudnn_bsa_forward_blk128_case",
+    "prepare_cudnn_bsa_backward_blk128_case",
     "prepare_cudnn_bsa_forward_blk64_case",
+    "prepare_cudnn_bsa_forward_blk128_case",
+    "prepare_cudnn_bsa_forward_combine_blk64_case",
     "prepare_cudnn_csa_compressor_fwd_case",
     "prepare_cudnn_dense_blockscaled_dsrelu_quant_case",
     "prepare_cudnn_dense_blockscaled_srelu_quant_case",
     "prepare_cudnn_dense_blockscaled_swiglu_quant_case",
     "prepare_cudnn_dense_gemm_persistent_swiglu_case",
     "prepare_cudnn_dsa_sparse_attention_backward_case",
-    "prepare_cudnn_gdn_prefill_case",
-    "prepare_cudnn_gdn_bprop_case",
-    "prepare_cudnn_gdn_recompute_case",
     "prepare_cudnn_gdn2_bprop_case",
     "prepare_cudnn_gdn2_prefill_case",
     "prepare_cudnn_gdn2_recompute_case",
+    "prepare_cudnn_gdn_bprop_case",
+    "prepare_cudnn_gdn_prefill_case",
+    "prepare_cudnn_gdn_recompute_case",
     "prepare_cudnn_gemm_proj_rope_mxfp8_bf16in_case",
     "prepare_cudnn_gemm_proj_rope_mxfp8_mxfp8in_case",
     "prepare_cudnn_kda_bprop_case",

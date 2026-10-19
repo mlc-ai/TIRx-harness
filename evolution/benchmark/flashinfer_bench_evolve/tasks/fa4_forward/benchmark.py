@@ -15,6 +15,7 @@ from ...benchmark_common import (
     load_task_workloads,
     run_benchmark,
 )
+
 TASK_NAME = "fa4_forward"
 
 ATOL = 5e-2
@@ -40,7 +41,9 @@ def make_workloads(config: BenchConfig | None = None):
             shape_axes=("seq_len", "batch_size", "causal"),
         ):
             wl = row["workload"]
-            official.append({"suite": "official", "id": wl["uuid"][:8], "axes": wl["axes"], "raw": wl})
+            official.append(
+                {"suite": "official", "id": wl["uuid"][:8], "axes": wl["axes"], "raw": wl}
+            )
     return official
 
 
@@ -80,28 +83,16 @@ def tirx_prepare(solution_module, q, k, v, causal, sm_scale):
         print("warning: current TIRx forward kernel ignores causal masking")
     batch, seq_len, num_heads, head_dim = q.shape
     total_heads = batch * num_heads
-    q_flat = q.permute(0, 2, 1, 3).reshape(
-        total_heads, seq_len, head_dim
-    ).contiguous()
-    k_flat = k.permute(0, 2, 1, 3).reshape(
-        total_heads, seq_len, head_dim
-    ).contiguous()
-    vt_flat = v.permute(0, 2, 3, 1).reshape(
-        total_heads, head_dim, seq_len
-    ).contiguous()
-    output = torch.empty(
-        (total_heads, seq_len, head_dim), dtype=q.dtype, device=q.device
-    )
-    lse = torch.empty(
-        (total_heads, seq_len), dtype=torch.float32, device=q.device
-    )
+    q_flat = q.permute(0, 2, 1, 3).reshape(total_heads, seq_len, head_dim).contiguous()
+    k_flat = k.permute(0, 2, 1, 3).reshape(total_heads, seq_len, head_dim).contiguous()
+    vt_flat = v.permute(0, 2, 3, 1).reshape(total_heads, head_dim, seq_len).contiguous()
+    output = torch.empty((total_heads, seq_len, head_dim), dtype=q.dtype, device=q.device)
+    lse = torch.empty((total_heads, seq_len), dtype=torch.float32, device=q.device)
 
     kernel = solution_module.tir_kernel(total_heads, seq_len, head_dim)
     target = tvm.target.Target("cuda")
     with target:
-        executable = tvm.compile(
-            tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx"
-        )
+        executable = tvm.compile(tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx")
     kernel_args = (q_flat, k_flat, vt_flat, output, lse)
 
     def kernel_fn():
@@ -113,9 +104,7 @@ def tirx_prepare(solution_module, q, k, v, causal, sm_scale):
 
 def tirx_run(kernel_fn, output, batch, num_heads, seq_len, head_dim):
     kernel_fn()
-    return output.reshape(batch, num_heads, seq_len, head_dim).permute(
-        0, 2, 1, 3
-    )
+    return output.reshape(batch, num_heads, seq_len, head_dim).permute(0, 2, 1, 3)
 
 
 def run_suite(

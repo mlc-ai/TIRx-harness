@@ -17,6 +17,7 @@ from ...benchmark_common import (
     rand_tensor,
     run_benchmark,
 )
+
 TASK_NAME = "gdn_decode"
 
 ATOL = 1e-2

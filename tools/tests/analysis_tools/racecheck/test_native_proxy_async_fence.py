@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
+from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-
-from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 
 
 def _mapa_u64(ptr, rank):

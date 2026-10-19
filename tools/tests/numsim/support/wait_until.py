@@ -1,10 +1,10 @@
 """Small wait kernels shared by native and live-GPU semantic tests."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
+from tvm.script import tirx as T
 
 
 def handoff_case(dtype="int32", scope="gpu", release=True, backoff=0):

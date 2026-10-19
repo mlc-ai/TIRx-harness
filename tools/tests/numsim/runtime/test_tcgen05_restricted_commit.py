@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from tirx_harness import numsim, racecheck, synccheck
 from tests.numsim.runtime.test_tcgen05_i8 import i8_case
+from tirx_harness import numsim, racecheck, synccheck
 
 
 @pytest.mark.parametrize(

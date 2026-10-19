@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 import numpy as np
 
+from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import (
     ComparisonSpec,
     NumSimCase,
     TensorMap,
 )
-from tests.numsim.support._tirx_kernels import load_tirx_kernel
 
 
 def _encode_bfloat16(values: np.ndarray) -> np.ndarray:

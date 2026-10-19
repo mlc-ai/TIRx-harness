@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import numsim
-
+from tvm.script import tirx as T
 
 _REGISTER_BUFFER_COUNT = 5_600
 

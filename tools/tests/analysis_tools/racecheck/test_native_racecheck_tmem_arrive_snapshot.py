@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tests.analysis_tools.racecheck._native_race_trace import full_direct_race_run
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tests.analysis_tools.racecheck._native_race_trace import full_direct_race_run
 from tvm.script import tirx as T
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 

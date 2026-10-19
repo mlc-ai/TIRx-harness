@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
+from tvm.script import tirx as T
 
 
 def pending_count_kernel(*, drop=False):

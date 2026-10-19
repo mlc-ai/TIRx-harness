@@ -7,7 +7,6 @@ from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.script import tirx as T
 
-
 _TANH_APPROX_SOURCE = r"""// tanh.approx.f32 (sigmoid via tanh; used throughout the prep role)
 __device__ __forceinline__ float flashkda_tanh_approx(float x) {
     float y;

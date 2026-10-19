@@ -3,36 +3,44 @@
 Adapted from mlc-ai/qwen38-inference at
 05e8ef0db302a2c005994b79d9a5e78b96e2d88b (Apache-2.0).
 """
-from contextlib import contextmanager
+
 import math
 import os
 import time
+from contextlib import contextmanager
 
 import torch
 
 
 def inputs(case, seed):
     generator = torch.Generator().manual_seed(seed + sum(map(ord, case.name)))
-    rows = [torch.randint(100, 20000, (p+n,), generator=generator).tolist()
-            for p,n in zip(case.previous, case.lengths)]
-    return rows, [row[p:] for row,p in zip(rows,case.previous)]
+    rows = [
+        torch.randint(100, 20000, (p + n,), generator=generator).tolist()
+        for p, n in zip(case.previous, case.lengths)
+    ]
+    return rows, [row[p:] for row, p in zip(rows, case.previous)]
 
 
 def new_cache(model, case):
-    capacities = [math.ceil((p+n)/64)*64 for p,n in zip(case.previous,case.lengths)]
+    capacities = [math.ceil((p + n) / 64) * 64 for p, n in zip(case.previous, case.lengths)]
     offsets = [0]
     for size in capacities:
-        offsets.append(offsets[-1]+size)
-    kv,conv,recurrent = {},{},{}
-    for i,kind in enumerate(model.layer_types):
+        offsets.append(offsets[-1] + size)
+    kv, conv, recurrent = {}, {}, {}
+    for i, kind in enumerate(model.layer_types):
         if kind == "full_attention":
-            kv[i] = tuple(torch.zeros((offsets[-1]+64,4,256),dtype=model.dtype,device=model.device) for _ in range(2))
+            kv[i] = tuple(
+                torch.zeros((offsets[-1] + 64, 4, 256), dtype=model.dtype, device=model.device)
+                for _ in range(2)
+            )
         else:
-            conv[i] = torch.zeros((case.batch,10240,3),dtype=model.dtype,device=model.device)
-            recurrent[i] = torch.zeros((case.batch,48,128,128),dtype=torch.float32,device=model.device)
+            conv[i] = torch.zeros((case.batch, 10240, 3), dtype=model.dtype, device=model.device)
+            recurrent[i] = torch.zeros(
+                (case.batch, 48, 128, 128), dtype=torch.float32, device=model.device
+            )
     from .model import HybridCache
 
-    cache = HybridCache(id(model),[0]*case.batch,max(capacities),131072,kv,conv,recurrent)
+    cache = HybridCache(id(model), [0] * case.batch, max(capacities), 131072, kv, conv, recurrent)
     cache.slot_offsets = offsets[:-1]
     cache.slot_capacities = capacities
     cache.verify_conv, cache.verify_conv_storage, cache.verify_recurrent = {}, {}, {}
@@ -40,27 +48,29 @@ def new_cache(model, case):
         for i in conv:
             physical = torch.zeros((case.batch, 10240, 6), dtype=model.dtype, device=model.device)
             cache.verify_conv_storage[i] = physical
-            cache.verify_conv[i] = physical.as_strided((case.batch, 4, 10240, 3),
-                                                      (physical.stride(0), 1, 6, 1))
-            cache.verify_recurrent[i] = torch.zeros((case.batch, 4, 48, 128, 128),
-                                                    dtype=torch.float32, device=model.device)
+            cache.verify_conv[i] = physical.as_strided(
+                (case.batch, 4, 10240, 3), (physical.stride(0), 1, 6, 1)
+            )
+            cache.verify_recurrent[i] = torch.zeros(
+                (case.batch, 4, 48, 128, 128), dtype=torch.float32, device=model.device
+            )
     return cache
 
 
 def prime(model, cache, case, rows):
     """Compute real prefix states in bounded chunks before any timed call."""
     while cache.lengths != case.previous:
-        slots, chunks, budget = [],[],32768
-        for slot,target in enumerate(case.previous):
+        slots, chunks, budget = [], [], 32768
+        for slot, target in enumerate(case.previous):
             start = cache.lengths[slot]
-            count = min(target-start,8192,budget)
+            count = min(target - start, 8192, budget)
             if count:
                 slots.append(slot)
-                chunks.append(rows[slot][start:start+count])
+                chunks.append(rows[slot][start : start + count])
                 budget -= count
             if not budget:
                 break
-        model.forward_step(chunks,cache,request_indices=slots)
+        model.forward_step(chunks, cache, request_indices=slots)
 
 
 def state_tensors(cache):
@@ -68,15 +78,23 @@ def state_tensors(cache):
 
 
 def all_tensors(cache):
-    return ([x for pair in cache.kv.values() for x in pair]+state_tensors(cache)
-            +list(cache.verify_conv_storage.values())+list(cache.verify_recurrent.values()))
+    return (
+        [x for pair in cache.kv.values() for x in pair]
+        + state_tensors(cache)
+        + list(cache.verify_conv_storage.values())
+        + list(cache.verify_recurrent.values())
+    )
 
 
 @contextmanager
 def _snapshot_allocator(enabled):
     """Temporarily parallelize registration of reference host buffers."""
     version = tuple(int(part) for part in torch.__version__.split(".")[:2])
-    if not enabled or version < (2, 13) or any(name in os.environ for name in ("PYTORCH_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF")):
+    if (
+        not enabled
+        or version < (2, 13)
+        or any(name in os.environ for name in ("PYTORCH_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF"))
+    ):
         yield
         return
     memory = torch.cuda.memory
@@ -84,17 +102,28 @@ def _snapshot_allocator(enabled):
         yield
         return
     settings = memory._snapshot().get("allocator_settings", {})
-    required = ("PYTORCH_CUDA_ALLOC_CONF", "pinned_use_cuda_host_register", "pinned_num_register_threads")
+    required = (
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "pinned_use_cuda_host_register",
+        "pinned_num_register_threads",
+    )
     if any(name not in settings for name in required) or settings["pinned_use_cuda_host_register"]:
         yield
         return
     original = settings["PYTORCH_CUDA_ALLOC_CONF"]
     prefix = original + "," if original else ""
-    threads = min(8, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1)
-    restore = (prefix + f"pinned_use_cuda_host_register:{settings['pinned_use_cuda_host_register']},"
-               + f"pinned_num_register_threads:{settings['pinned_num_register_threads']}")
+    threads = min(
+        8, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    )
+    restore = (
+        prefix
+        + f"pinned_use_cuda_host_register:{settings['pinned_use_cuda_host_register']},"
+        + f"pinned_num_register_threads:{settings['pinned_num_register_threads']}"
+    )
     try:
-        memory._set_allocator_settings(prefix + f"pinned_use_cuda_host_register:True,pinned_num_register_threads:{threads}")
+        memory._set_allocator_settings(
+            prefix + f"pinned_use_cuda_host_register:True,pinned_num_register_threads:{threads}"
+        )
         yield
     finally:
         memory._set_allocator_settings(restore)
@@ -123,8 +152,10 @@ def prefix_ranges(lengths):
 def save_state(cache):
     """Snapshot populated request ranges; omitted requests restore to zero."""
     tensors = state_tensors(cache)
-    return [(start, end, [snapshot(t[start:end]) for t in tensors])
-            for start, end in prefix_ranges(cache.lengths)]
+    return [
+        (start, end, [snapshot(t[start:end]) for t in tensors])
+        for start, end in prefix_ranges(cache.lengths)
+    ]
 
 
 def restore(cache, saved, prepared):
@@ -137,23 +168,25 @@ def restore(cache, saved, prepared):
         dst[cursor:].zero_()
     for pair in cache.kv.values():
         for tensor in pair:
-            tensor.index_fill_(0,prepared["locations"],0)
-    for tensor in list(cache.verify_conv_storage.values())+list(cache.verify_recurrent.values()):
+            tensor.index_fill_(0, prepared["locations"], 0)
+    for tensor in list(cache.verify_conv_storage.values()) + list(cache.verify_recurrent.values()):
         tensor.zero_()
 
 
 def check(actual, expected, label):
     if actual.shape != expected.shape or actual.dtype != expected.dtype:
         raise AssertionError(f"{label}: shape or dtype mismatch")
-    a,e = actual.reshape(-1),expected.reshape(-1)
+    a, e = actual.reshape(-1), expected.reshape(-1)
     worst = 0.0
-    for start in range(0,a.numel(),4_194_304):
-        x = a[start:start+4_194_304]
-        y = e[start:start+4_194_304].to(x.device)
-        torch.testing.assert_close(x,y,rtol=1e-3,atol=1e-3,equal_nan=False,msg=lambda msg: label+"\n"+msg)
+    for start in range(0, a.numel(), 4_194_304):
+        x = a[start : start + 4_194_304]
+        y = e[start : start + 4_194_304].to(x.device)
+        torch.testing.assert_close(
+            x, y, rtol=1e-3, atol=1e-3, equal_nan=False, msg=lambda msg: label + "\n" + msg
+        )
         if not bool(torch.isfinite(x).all()):
             raise AssertionError(f"{label}: nonfinite output")
-        worst = max(worst,float((x-y).abs().max()))
+        worst = max(worst, float((x - y).abs().max()))
     return worst
 
 
@@ -184,10 +217,13 @@ class Runner:
 
 def timed(fn):
     torch.cuda.synchronize()
-    begin,end = torch.cuda.Event(enable_timing=True),torch.cuda.Event(enable_timing=True)
+    begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
     start = time.perf_counter()
     begin.record()
     output = fn()
     end.record()
     end.synchronize()
-    return output,{"wall_ms":(time.perf_counter()-start)*1000,"gpu_ms":begin.elapsed_time(end)}
+    return output, {
+        "wall_ms": (time.perf_counter() - start) * 1000,
+        "gpu_ms": begin.elapsed_time(end),
+    }

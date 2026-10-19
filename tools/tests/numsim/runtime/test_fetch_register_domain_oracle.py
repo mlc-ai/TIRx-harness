@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
-from tirx_harness import numsim
+import tvm
 from tests.numsim.support.runtime_domains import (
     FETCH_REGISTERS_32,
     FETCH_REGISTERS_64,
 )
+from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 def _make_fetch_register_full_domain():

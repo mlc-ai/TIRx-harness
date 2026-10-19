@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def copy_case(scope, relation="cta"):
@@ -13,7 +13,7 @@ def copy_case(scope, relation="cta"):
     element = ".b128" if scope else ""
 
     return tvm.script.from_source(
-        f'''
+        f"""
 @T.prim_func
 def kernel(destination: T.Buffer((8,), "uint32"), enabled: T.int32):
     T.device_entry()
@@ -39,7 +39,7 @@ def kernel(destination: T.Buffer((8,), "uint32"), enabled: T.int32):
     T.cuda.warp_sync()
     if lane == 0:
         T.ptx.cp.async_.bulk.wait_group(0)
-''',
+""",
         {"T": T},
     )
 

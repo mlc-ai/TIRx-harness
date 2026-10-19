@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from tvm_ffi import structural_walk
+
 import tvm
+from tests.numsim.support.manifest import emitted_calls
+from tirx_harness import numsim
 from tvm.ir import Expr
 from tvm.script import tirx as T
 from tvm.tirx import Stmt
-from tvm_ffi import structural_walk
-
-from tirx_harness import numsim
-from tests.numsim.support.manifest import emitted_calls
 
 
 def _cvt_call(spelling: str, destination_dtype: str, *arguments: str):

@@ -130,9 +130,7 @@ def setup(
     )
     effective = replace(
         effective,
-        banned_paths=(
-            effective.banned_paths + kernel_reference_bans(effective.banned_paths)
-        ),
+        banned_paths=(effective.banned_paths + kernel_reference_bans(effective.banned_paths)),
     )
     run_dir.mkdir(parents=True)
     pinned = sandbox.pinned_commit(REPO_ROOT)

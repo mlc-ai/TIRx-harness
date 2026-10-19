@@ -12,12 +12,12 @@ import re
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
-from tirx_harness import numsim, racecheck, synccheck
+import tvm
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.wait_until import indexed_predicate_case, initial_case
+from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def _memory_variants(rust_source):
@@ -83,19 +83,13 @@ def _rendezvous(*, primitive):
     """
 
     if primitive:
-        publish = (
-            'T.ptx.st.release.gpu.global_.s32(slot.ptr_to([0]), T.int32(7))'
-        )
+        publish = "T.ptx.st.release.gpu.global_.s32(slot.ptr_to([0]), T.int32(7))"
         take_ticket = (
-            "T.ptx.atom.relaxed.gpu.global_.add.s32("
-            'ticket[0], tickets.ptr_to([0]), T.int32(1))'
+            "T.ptx.atom.relaxed.gpu.global_.add.s32(ticket[0], tickets.ptr_to([0]), T.int32(1))"
         )
-        signal = 'T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))'
-        wait = (
-            "T.cuda.wait_until("
-            'seen[0], state.ptr_to([0]), seen[0] >= 1, "gpu", "global")'
-        )
-        read = 'T.ptx.ld.relaxed.gpu.global_.s32(got[0], slot.ptr_to([0]))'
+        signal = "T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))"
+        wait = 'T.cuda.wait_until(seen[0], state.ptr_to([0]), seen[0] >= 1, "gpu", "global")'
+        read = "T.ptx.ld.relaxed.gpu.global_.s32(got[0], slot.ptr_to([0]))"
     else:
         publish = 'T.ptx["st.release.gpu.global.s32"](slot.ptr_to([0]), T.int32(7))'
         take_ticket = (
@@ -167,13 +161,8 @@ def _packed(*, primitive, dtype):
 
     suffix = _WORD_TYPES[dtype]
     if primitive:
-        publish = (
-            f'T.ptx.st.relaxed.gpu.global_.{suffix}(state.ptr_to([0]), T.{dtype}(7))'
-        )
-        wait = (
-            "T.cuda.wait_until("
-            'seen[0], state.ptr_to([0]), seen[0] != 0, "gpu", "global")'
-        )
+        publish = f"T.ptx.st.relaxed.gpu.global_.{suffix}(state.ptr_to([0]), T.{dtype}(7))"
+        wait = 'T.cuda.wait_until(seen[0], state.ptr_to([0]), seen[0] != 0, "gpu", "global")'
     else:
         load = f"ld.acquire.gpu.global.{suffix}"
         publish = f'T.ptx["st.relaxed.gpu.global.{suffix}"](state.ptr_to([0]), T.{dtype}(7))'
@@ -464,11 +453,8 @@ def _bit_typed(*, primitive):
     """
 
     if primitive:
-        arrive = 'T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))'
-        wait = (
-            "T.cuda.wait_until("
-            'seen[0], state.ptr_to([0]), seen[0] >= 1, "gpu", "global", "b32")'
-        )
+        arrive = "T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))"
+        wait = 'T.cuda.wait_until(seen[0], state.ptr_to([0]), seen[0] >= 1, "gpu", "global", "b32")'
     else:
         arrive = 'T.ptx["red.release.gpu.global.add.s32"](state.ptr_to([0]), T.int32(1))'
         wait = (
@@ -635,9 +621,7 @@ def _backoff_spin(*, primitive):
             "                seen[0], state.ptr_to([0]), seen[0] >= 1,\n"
             '                "gpu", "global", backoff_ns=40)'
         )
-        publish = (
-            'T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))'
-        )
+        publish = "T.ptx.red.release.gpu.global_.add.s32(state.ptr_to([0]), T.int32(1))"
     else:
         spin = (
             'T.ptx["ld.acquire.gpu.global.s32"](seen[0], state.ptr_to([0]))\n'
@@ -737,15 +721,12 @@ def _packed_payload(*, retry):
         " == T.uint32(1),\n"
         '                "gpu", "global")'
         if retry
-        else (
-            # Relaxed, not acquiring. An acquiring single read is what an
-            # acquiring spin is made of, and the checker sees accesses rather
-            # than loops, so it cannot separate the two: sparing the loop
-            # spares this. A relaxed read takes the value and no order, which
-            # is the shape the claim can name on every schedule.
-            "T.ptx.ld.relaxed.gpu.global_.u64(\n"
-            '                observed[0], slot.ptr_to([0]))'
-        )
+        # Relaxed, not acquiring. An acquiring single read is what an
+        # acquiring spin is made of, and the checker sees accesses rather
+        # than loops, so it cannot separate the two: sparing the loop
+        # spares this. A relaxed read takes the value and no order, which
+        # is the shape the claim can name on every schedule.
+        else ("T.ptx.ld.relaxed.gpu.global_.u64(\n                observed[0], slot.ptr_to([0]))")
     )
     word = (1 << 32) | 0xDEADBEEF
     return tvm.script.from_source(

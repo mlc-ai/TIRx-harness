@@ -649,8 +649,7 @@ def test_native_synccheck_rejects_native_setmaxnreg_oversubscription(native_cach
     assert report.verdict == "error"
     assert report.to_dict()["native"]["incomplete"] == []
     assert any(
-        finding.kind in {"setmaxnreg_pool_deadlock", "deadlock"}
-        for finding in report.findings
+        finding.kind in {"setmaxnreg_pool_deadlock", "deadlock"} for finding in report.findings
     )
     rendered = report.format()
     assert "T.ptx.setmaxnreg" in rendered
@@ -679,8 +678,7 @@ def test_native_synccheck_rejects_six_warpgroup_rounding_residual_as_pool(
 
     assert report.verdict == "error"
     assert any(
-        finding.kind in {"setmaxnreg_pool_deadlock", "deadlock"}
-        for finding in report.findings
+        finding.kind in {"setmaxnreg_pool_deadlock", "deadlock"} for finding in report.findings
     )
 
 

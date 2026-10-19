@@ -10,7 +10,6 @@ from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
 from tvm import tirx
 from tvm.script import tirx as T
 
-
 # Distinct instruction dispatch paths, not a Cartesian modifier matrix.
 BOUNDARY_CASES = (
     ("mixed_ss", "f16", False, False, False, 0),

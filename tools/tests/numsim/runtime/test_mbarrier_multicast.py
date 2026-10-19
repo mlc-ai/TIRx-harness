@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck, synccheck
+from tvm.script import tirx as T
 
 MULTICAST_FORMS = (
     "arrive",

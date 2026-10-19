@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import ctypes
-from dataclasses import dataclass, replace
 import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-
 
 NUMSIM_GPU_MARK = pytest.mark.numsim_gpu
 
@@ -158,9 +157,13 @@ def _tvm_vector_buffer(value: PairedBuffer):
 
 
 def _torch_tensor_map(
-    value: PairedTensorMap, *, base: Any | None = None, by_value: bool = True,
+    value: PairedTensorMap,
+    *,
+    base: Any | None = None,
+    by_value: bool = True,
 ) -> _GpuTensorMap:
     import torch
+
     import tvm
 
     logical_dtype = value.logical_dtype or value.array.dtype.name
@@ -226,18 +229,21 @@ def _torch_tensor_map(
             # CUDA's encoder has no inactive-atomicity argument. Initialize
             # that independent field through PTX, never by guessing CUDA's
             # opaque descriptor bytes or modifying the kernel under test.
-            source = f'''__device__ __forceinline__ void set_atomicity(void *p) {{
+            source = f"""__device__ __forceinline__ void set_atomicity(void *p) {{
                 asm volatile("tensormap.replace.tile.swizzle_atomicity.global.b1024.b32 [%0], {value.inactive_swizzle_atomicity};"
                              :: "l"(p) : "memory");
-            }}'''
-            initialize = tvm.script.from_source('''@T.prim_func
+            }}"""
+            initialize = tvm.script.from_source(
+                """@T.prim_func
 def initialize(image: T.Buffer((128,), "uint8")):
     T.device_entry()
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
     if lane == 0:
         T.cuda.func_call("set_atomicity", image.ptr_to([0]), source_code=source, return_type="void")
-''', {"T": T, "source": source})
+""",
+                {"T": T, "source": source},
+            )
             major, minor = torch.cuda.get_device_capability()
             _compile_gpu(initialize, arch=f"sm_{major}{minor}a")(device_image)
             torch.cuda.synchronize()
@@ -418,15 +424,17 @@ def run_gpu_primfunc(
     arch: str,
 ) -> dict[str, np.ndarray]:
     import torch
+
+    from tirx_harness.numsim.bindings import prepare_bindings
     from tvm.ir.type import PointerType
     from tvm.tirx import TensorMapType
-    from tirx_harness.numsim.bindings import prepare_bindings
 
     parameter_names = _parameter_names(prim_func)
     # GPU execution must remain available for instructions NumSim cannot model.
     # Only the parameter type determines whether a descriptor is passed by value.
     tensor_map_names = {
-        parameter.name for parameter in prim_func.params
+        parameter.name
+        for parameter in prim_func.params
         if isinstance(parameter.ty, PointerType)
         and isinstance(parameter.ty.element_type, TensorMapType)
     }
@@ -438,15 +446,19 @@ def run_gpu_primfunc(
     device_arguments: dict[str, Any] = {}
     # Reuse the host binding owner's alias groups. Exact (pointer, size, dtype)
     # keys split a TensorMap's subview from its ordinary backing argument.
-    bindings = prepare_bindings({
-        name: value if isinstance(value, np.ndarray) else value.array
-        for name, value in arguments.items()
-        if isinstance(value, (np.ndarray, PairedBuffer, PairedTensorMap))
-    }, expected_buffer_dtypes={
-        name: value.logical_dtype
-        for name, value in arguments.items()
-        if isinstance(value, (PairedBuffer, PairedTensorMap)) and value.logical_dtype is not None
-    })
+    bindings = prepare_bindings(
+        {
+            name: value if isinstance(value, np.ndarray) else value.array
+            for name, value in arguments.items()
+            if isinstance(value, (np.ndarray, PairedBuffer, PairedTensorMap))
+        },
+        expected_buffer_dtypes={
+            name: value.logical_dtype
+            for name, value in arguments.items()
+            if isinstance(value, (PairedBuffer, PairedTensorMap))
+            and value.logical_dtype is not None
+        },
+    )
     device_backings: dict[int, Any] = {}
 
     def device_array(name: str, value: PairedBuffer | PairedTensorMap | np.ndarray) -> Any:
@@ -455,7 +467,8 @@ def run_gpu_primfunc(
         # Interior TensorMaps must keep their 16/32B alignment relative to the
         # backing. Standalone arrays/maps retain CUDA allocation alignment.
         has_interior_tensor_map = any(
-            other.allocation == view.allocation and other.data_offset % 32
+            other.allocation == view.allocation
+            and other.data_offset % 32
             and isinstance(arguments[key], PairedTensorMap)
             for key, other in bindings.buffers.items()
         )
@@ -478,16 +491,23 @@ def run_gpu_primfunc(
             stride % itemsize for stride in view.byte_strides
         ):
             raise ValueError("GPU buffer offset and strides must be whole dtype elements")
-        return device_backings[view.allocation].view(carrier.dtype).as_strided(
-            array.shape, tuple(stride // itemsize for stride in view.byte_strides),
-            storage_offset=(prefix + view.data_offset) // itemsize,
+        return (
+            device_backings[view.allocation]
+            .view(carrier.dtype)
+            .as_strided(
+                array.shape,
+                tuple(stride // itemsize for stride in view.byte_strides),
+                storage_offset=(prefix + view.data_offset) // itemsize,
+            )
         )
 
     for name in parameter_names:
         value = arguments[name]
         if isinstance(value, PairedTensorMap):
             device_arguments[name] = _torch_tensor_map(
-                value, base=device_array(name, value), by_value=name in tensor_map_names,
+                value,
+                base=device_array(name, value),
+                by_value=name in tensor_map_names,
             )
         elif isinstance(value, PairedBuffer):
             if _logical_dtype_lanes(value.logical_dtype) > 1:

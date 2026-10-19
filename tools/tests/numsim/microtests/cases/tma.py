@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-
 from tests.numsim.microtests.harness import PairedTensorMap
 from tests.numsim.support.kernels import (
     raw_tma_gather4_bar_address,
@@ -18,6 +15,9 @@ from tests.numsim.support.kernels import (
     tma_copy_roundtrip,
     tma_copy_zero_fill_boundary,
 )
+
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
 
 
 @T.prim_func

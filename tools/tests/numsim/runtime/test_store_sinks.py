@@ -1,10 +1,10 @@
 """A vector store's sink components neither write bytes nor create conflicts."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def sink_release_kernel(bits, release=True, sinks=True, space="global"):
@@ -74,5 +74,6 @@ def test_store_sinks_retain_per_element_release(tmp_path):
             else:
                 assert report.verdict == "error", report.format()
                 assert any(
-                    finding.details["access_pair"] in {"read_write", "write_read"} for finding in report.findings
+                    finding.details["access_pair"] in {"read_write", "write_read"}
+                    for finding in report.findings
                 ), report.format()

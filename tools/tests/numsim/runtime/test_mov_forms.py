@@ -3,10 +3,10 @@
 from itertools import product
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import assert_rejected, run_checked
+from tvm.script import tirx as T
 
 
 @T.prim_func

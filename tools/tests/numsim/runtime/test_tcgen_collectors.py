@@ -2,17 +2,17 @@
 
 import numpy as np
 import pytest
-from tvm import tirx
 from tvm_ffi import structural_map
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.backend.cuda.tile_primitive.tma_utils import mma_shared_layout, SwizzleMode
-from tvm.tirx.layout import tmem_datapath_layout
 
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
+from tvm import tirx
+from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
+from tvm.tirx.layout import tmem_datapath_layout
 
 
 def collector_case(sequence, *, tmem_a=False, ws=False, slot="a", cta_group=1):

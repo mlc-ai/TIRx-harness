@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import racecheck, synccheck
-from tirx_harness import numsim
+from tirx_harness import numsim, racecheck, synccheck
 from tvm.script import tirx as T
 
 

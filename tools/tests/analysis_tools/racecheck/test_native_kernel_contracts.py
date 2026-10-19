@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import racecheck
 from tests.analysis_tools.racecheck.test_native_racecheck_artifact import (
     native_racecheck_write_write,
 )
@@ -13,6 +12,7 @@ from tests.analysis_tools.synccheck.test_native_kernel_contracts import (
     native_rank_conditional_tmem_pool,
     native_thread_topology_conditional_tmem_pool,
 )
+from tirx_harness import racecheck
 from tvm.script import tirx as T
 
 

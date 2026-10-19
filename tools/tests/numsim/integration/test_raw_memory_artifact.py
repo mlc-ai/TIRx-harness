@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim, racecheck, synccheck
 from tests.numsim.support.kernels import (
     get_tmem_addr_lane_values,
     get_tmem_addr_unsigned_row_values,
@@ -22,6 +21,7 @@ from tests.numsim.support.kernels import (
     shared_virtual_backing_addresses,
     shared_virtual_swizzled_backing_alignment,
 )
+from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.script import tirx as T
 
@@ -1032,6 +1032,7 @@ def test_raw_subword_vector_stores_preserve_each_element(tmp_path):
 
 def test_raw_load_rejects_an_unmapped_integer_when_the_address_is_consumed(tmp_path):
     from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+
     spec = analyze(raw_load_rejects_integer_address)
     assert spec.unsupported == ()
     source = emit_rust_module(spec, raw_load_rejects_integer_address)

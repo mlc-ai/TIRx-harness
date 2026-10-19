@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from tvm.ir import SequentialSpan, SourceName, Span
 
 from tirx_harness.numsim.transpiler.source_map import (
     SequentialSourceSpan,
@@ -13,6 +12,7 @@ from tirx_harness.numsim.transpiler.source_map import (
     flatten_source_span,
     source_span_from_tvm,
 )
+from tvm.ir import SequentialSpan, SourceName, Span
 
 
 class RepeatedNode:

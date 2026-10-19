@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from tirx_harness.numsim.transpiler.cache import PYO3_VERSION, rust_tool
 from tests.numsim.support.paths import ENGINE_ROOT
+from tirx_harness.numsim.transpiler.cache import PYO3_VERSION, rust_tool
 
 MODULE_NAME = "_numsim_numpy_backend_probe"
 

@@ -1,12 +1,12 @@
 """The production frontend rejects unknown reflected statement kinds."""
 
 import pytest
-from tvm import tirx
 from tvm_ffi import structural_map
 from tvm_ffi.dataclasses import py_class
 
 from tirx_harness.numsim.errors import NumSimBuildError
 from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm import tirx
 
 
 def test_frontend_rejects_unknown_native_nodes_in_a_known_parent():

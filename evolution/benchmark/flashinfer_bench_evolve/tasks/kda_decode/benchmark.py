@@ -17,7 +17,6 @@ from ...benchmark_common import (
     run_benchmark,
 )
 
-
 TASK_NAME = "kda_decode"
 
 # PR #4279: output and complete state pool vs CuTe-DSL, cast to FP32.
@@ -99,9 +98,7 @@ def build_inputs(axes, seed, device):
         cu_seqlens = ssm_state_indices = num_accepted_tokens = num_spec_tokens = None
         num_state_slots = num_seqs
     else:
-        cu_seqlens = torch.arange(
-            0, total_tokens + 1, num_tokens, dtype=torch.int32, device=device
-        )
+        cu_seqlens = torch.arange(0, total_tokens + 1, num_tokens, dtype=torch.int32, device=device)
         ssm_state_indices = torch.arange(
             1, total_tokens + 1, dtype=torch.int32, device=device
         ).reshape(num_seqs, num_tokens)
@@ -109,8 +106,7 @@ def build_inputs(axes, seed, device):
         num_spec_tokens = num_tokens - 1
         num_state_slots = total_tokens + 6
     initial_state = (
-        randn((num_state_slots, num_v_heads, head_dim, head_dim), torch.float32)
-        * STATE_STD
+        randn((num_state_slots, num_v_heads, head_dim, head_dim), torch.float32) * STATE_STD
     ).to(torch.bfloat16)
     return [
         q,

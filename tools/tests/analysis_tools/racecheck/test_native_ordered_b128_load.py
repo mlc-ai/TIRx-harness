@@ -32,7 +32,11 @@ def global_release_to_ordered_b128_acquire(
     elif (cta == 1) and (lane == 0):
         ready_seen = T.uint32(0)
         T.cuda.wait_until(
-            ready_seen, ready.ptr_to([0]), ready_seen != T.uint32(0), "gpu", "global",
+            ready_seen,
+            ready.ptr_to([0]),
+            ready_seen != T.uint32(0),
+            "gpu",
+            "global",
         )
         # `ready` is published with a relaxed store *after* the release store,
         # and release orders only what precedes it, so seeing `ready` does not
@@ -42,7 +46,11 @@ def global_release_to_ordered_b128_acquire(
         # takes the pair the wait already made visible.
         published = T.uint64(0)
         T.cuda.wait_until(
-            published, response.ptr_to([0]), published != T.uint64(0), "gpu", "global",
+            published,
+            response.ptr_to([0]),
+            published != T.uint64(0),
+            "gpu",
+            "global",
         )
         T.ptx.ld.relaxed.gpu.global_.b128(loaded[0], response.ptr_to([0]))
         output[0] = data[0]

@@ -361,8 +361,8 @@ def prepare_msa_sparse_atten_fwd_combine_case() -> NumSimCase:
 
 
 __all__ = [
-    "prepare_msa_sparse_atten_fwd_combine_case",
     "prepare_msa_sparse_atten_fwd_case",
+    "prepare_msa_sparse_atten_fwd_combine_case",
     "prepare_msa_sparse_atten_fwd_nvfp4_kv_case",
     "prepare_msa_sparse_prepare_flat_schedule_case",
     "prepare_msa_sparse_prepare_fwd_split_atomic_case",

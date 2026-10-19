@@ -1,10 +1,11 @@
 """Raw MXF8 M=128 CTA-pair probe: nonzero data and independent per-row scales."""
 
 import numpy as np
+from tests.numsim.microtests.harness import PairedBuffer
+
+from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
-from tests.numsim.microtests.harness import PairedBuffer
 from tvm.tirx.layout import tmem_datapath_layout
 
 _A_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (64, 32))

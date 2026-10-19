@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+from tvm_ffi import structural_walk
+
 import tvm
+from tests.numsim.support.manifest import emitted_calls, emitted_module
+from tirx_harness.numsim.transpiler import native_frontend
+from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME, decode_ptx_call
 from tvm.backend.cuda.ptx.table import mods
 from tvm.ir import Expr
 from tvm.script import tirx as T
 from tvm.tirx import Stmt
-from tvm_ffi import structural_walk
-
-from tests.numsim.support.manifest import emitted_module, emitted_calls
-from tirx_harness.numsim.transpiler import native_frontend
-from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME, decode_ptx_call
 
 _TENSOR_OVERRIDE_SUFFIXES = (
     "override_address",

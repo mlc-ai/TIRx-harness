@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def copy_arrival_case(
@@ -121,9 +121,9 @@ def test_copy_arrival_is_not_an_explicit_commit(tmp_path):
             )
         else:
             assert report.verdict == "error", report.format()
-            assert any(f.details["access_pair"] in ("write_read", "read_write") for f in report.findings), (
-                report.format()
-            )
+            assert any(
+                f.details["access_pair"] in ("write_read", "read_write") for f in report.findings
+            ), report.format()
 
 
 @pytest.mark.parametrize("history", ["waited", "committed-and-open"])
@@ -142,7 +142,9 @@ def test_copy_arrival_retains_earlier_copy_history(history, tmp_path):
             report = racecheck(kernel, inputs())
             if unrelated:
                 assert report.verdict == "error", report.format()
-                assert any(f.details["access_pair"] == "write_read" for f in report.findings), report.format()
+                assert any(f.details["access_pair"] == "write_read" for f in report.findings), (
+                    report.format()
+                )
             else:
                 report.require_clean()
                 result = numsim.Engine().run(numsim.transpile(kernel, cache_dir=tmp_path), inputs())

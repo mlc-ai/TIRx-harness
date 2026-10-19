@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-
 from functools import partial
 from itertools import groupby
 
@@ -15,8 +14,8 @@ from ...benchmark_common import (
     compare_tensors,
     config_from_env,
     load_candidate_override,
-    load_task_workloads,
     load_task_reference,
+    load_task_workloads,
     run_benchmark,
 )
 

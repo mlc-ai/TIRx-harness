@@ -1,16 +1,15 @@
 """Descriptor publication must precede acquisition along actual causal edges."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
-from tirx_harness import numsim, racecheck
+import tvm
 from tests.numsim.runtime.test_raw_tensor_map_descriptors import (
     _GDN_ACQUIRE_SOURCE,
     _GDN_RELEASE_SOURCE,
     _gdn_replace_dim_source,
 )
-
+from tirx_harness import numsim, racecheck
+from tvm.script import tirx as T
 
 PUBLICATION_CASES = ("replace", "bytes", "helper")
 
@@ -18,11 +17,11 @@ PUBLICATION_CASES = ("replace", "bytes", "helper")
 def tensor_map_publication_case(kind, ordering="before", cross_warp=False):
     acquire = "T.ptx.fence.proxy.tensormap__generic.acquire.gpu(descriptor.ptr_to([0]))"
     release = "T.ptx.fence.proxy.tensormap__generic.release.gpu()"
-    update = '''T.ptx.tensormap_replace.tile.global_dim.global_.b1024.b32(
-            descriptor.ptr_to([0]), 0, T.uint32(2))'''
+    update = """T.ptx.tensormap_replace.tile.global_dim.global_.b1024.b32(
+            descriptor.ptr_to([0]), 0, T.uint32(2))"""
     if kind == "bytes":
-        update = '''for i in T.serial(128):
-            descriptor[i] = source_map[i]'''
+        update = """for i in T.serial(128):
+            descriptor[i] = source_map[i]"""
     elif kind == "helper":
         update = (
             "T.cuda.func_call('gdn_tensormap_replace_global_dim_0', descriptor.ptr_to([0]), "
@@ -37,7 +36,8 @@ def tensor_map_publication_case(kind, ordering="before", cross_warp=False):
             "return_type='void')"
         )
     sync = "T.cuda.cta_sync()" if cross_warp else "T.cuda.warp_sync()"
-    kernel = tvm.script.from_source(f'''
+    kernel = tvm.script.from_source(
+        f"""
 @T.prim_func
 def kernel(descriptor: T.Buffer((128,), "uint8"), source_map: T.Buffer((128,), "uint8"),
            output: T.Buffer((4,), "uint32")):
@@ -69,7 +69,9 @@ def kernel(descriptor: T.Buffer((128,), "uint8"), source_map: T.Buffer((128,), "
                 ready[0], barrier.ptr_to([0]), T.uint32(0), T.uint32(1))
         for i in T.serial(4):
             output[i] = data[i]
-''', {"T": T})
+""",
+        {"T": T},
+    )
     source = np.arange(1, 5, dtype=np.uint32)
     metadata = dict(global_shape=(4,), global_strides=(), box_shape=(4,), element_strides=(1,))
     image = numsim.TensorMap(base=source, **metadata).numpy()

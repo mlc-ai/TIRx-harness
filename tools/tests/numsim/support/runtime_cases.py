@@ -226,9 +226,7 @@ RUNTIME_CASES = (
         tests=("runtime/test_im2col_cache_hints.py::test_im2col_cache_hints",),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.ptx.spcompress",
-        ),
+        target_ids=("call:tirx.ptx.spcompress",),
         tests=(
             "runtime/test_sm107_register_predicates.py::test_sm107_register_predicates",
             "microtests/test_sm107_register_predicates.py::test_sm107_register_predicates_gpu",
@@ -421,9 +419,7 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.ptx.neg",
-        ),
+        target_ids=("call:tirx.ptx.neg",),
         tests=(
             "runtime/test_register_extensions.py::test_register_extensions",
             "runtime/test_register_extensions.py::test_register_extensions_gpu",
@@ -669,9 +665,7 @@ RUNTIME_CASES = (
     ),
     RuntimeCase(
         target_ids=("call:tirx.reinterpret",),
-        tests=(
-            "runtime/test_logic_carriers.py::test_half_reinterpret_preserves_storage_payloads",
-        ),
+        tests=("runtime/test_logic_carriers.py::test_half_reinterpret_preserves_storage_payloads",),
     ),
     RuntimeCase(
         target_ids=("call:tirx.ptx.cp_async_bulk_prefetch",),
@@ -1481,18 +1475,14 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.ptx.div_f",
-        ),
+        target_ids=("call:tirx.ptx.div_f",),
         tests=(
             "runtime/test_scalar_f64_rounding.py::test_scalar_f64_rounding",
             "runtime/test_scalar_f64_rounding.py::test_scalar_f64_rounding_gpu",
         ),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.ptx.rcp",
-        ),
+        target_ids=("call:tirx.ptx.rcp",),
         tests=(
             "runtime/test_ftz_rounding.py::test_ftz_rounding_boundary",
             "runtime/test_ftz_rounding.py::test_ftz_rounding_boundary_gpu",
@@ -1539,9 +1529,7 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.ptx.ex2",
-        ),
+        target_ids=("call:tirx.ptx.ex2",),
         tests=(
             "integration/test_artifact_build.py::test_warp_local_raw_calls_execute_inside_one_warp_unit",
             "integration/test_artifact_build.py::test_typed_raw_scalar_calls_execute_with_warp_semantics",
@@ -1715,9 +1703,7 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=(
-            "call:tirx.cuda.wait_until",
-        ),
+        target_ids=("call:tirx.cuda.wait_until",),
         tests=(
             "runtime/test_wait_until.py::test_rendezvous_matches_raw_spelling",
             "runtime/test_wait_until.py::test_a_backoff_is_the_cuda_loops_business_and_not_the_engines",

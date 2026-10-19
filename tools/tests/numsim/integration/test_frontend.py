@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tests.numsim.support.kernels import (
     bound_launch_topology,
     divergent_loop_control,
@@ -17,9 +16,10 @@ from tests.numsim.support.kernels import (
     unsupported_exp,
     warpgroup_scope_coordinates,
 )
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import frontend
-from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
 
 
@@ -280,7 +280,6 @@ def test_bound_launch_extent_is_resolved_in_statement_order():
 
 
 def test_constant_if_then_else_launch_extent_only_evaluates_selected_branch():
-
     @T.prim_func
     def kernel(choose: T.bool, count: T.int32):
         T.device_entry()

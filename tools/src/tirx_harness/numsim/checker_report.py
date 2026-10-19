@@ -6,6 +6,7 @@ import json
 from typing import Any, ClassVar
 
 from tirx_harness._report import Finding, VerdictMixin, stable_finding_id
+
 from .checker_render import (
     _native_execution_label,
     _native_finding_evidence_lines,
@@ -66,7 +67,11 @@ class NativeCheckerReport(VerdictMixin):
             message_lines = str(finding.message).splitlines() or [""]
             if headline == message_lines[0]:
                 lines.extend(f"    {line}" for line in message_lines[1:])
-            for key, label in (("access_pair", "Access pair"), ("reason", "Reason"), ("cause", "Cause")):
+            for key, label in (
+                ("access_pair", "Access pair"),
+                ("reason", "Reason"),
+                ("cause", "Cause"),
+            ):
                 if key in finding.details:
                     lines.append(f"    {label}: {finding.details[key]}")
             lines.extend(_native_finding_evidence_lines(finding))

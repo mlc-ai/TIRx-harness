@@ -131,9 +131,7 @@ def _apply_stress_regime(regime, q, k, g, beta, A_log, dt_bias):
         raise ValueError(f"unknown stress regime {regime!r}")
 
 
-def recurrence_forward(
-    q, k, v, g, beta, A_log, dt_bias, scale, initial_state, cu_seqlens=None
-):
+def recurrence_forward(q, k, v, g, beta, A_log, dt_bias, scale, initial_state, cu_seqlens=None):
     """The operator definition itself, evaluated token by token in fp64.
 
     The exact reference for the ``-exact`` probes, independent of every
@@ -156,9 +154,7 @@ def recurrence_forward(
         state = initial_state[seq].double()  # [H, V, K]
         for t in range(start, end):
             state = state * decay[t, :, None, :]
-            delta = (v[0, t].double() - (state * k[t, :, None, :]).sum(-1)) * weight[
-                t, :, None
-            ]
+            delta = (v[0, t].double() - (state * k[t, :, None, :]).sum(-1)) * weight[t, :, None]
             state = state + delta[:, :, None] * k[t, :, None, :]
             output[t] = (state * q[t, :, None, :]).sum(-1) * scale
         final_state[seq] = state
@@ -235,9 +231,7 @@ def make_workloads(config: BenchConfig | None = None):
                     "id": workload["uuid"],
                     "gate_config": "standard",
                     "axes": workload["axes"],
-                    "seq_lens": tuple(
-                        workload["inputs"]["cu_seqlens"]["value"]
-                    ),
+                    "seq_lens": tuple(workload["inputs"]["cu_seqlens"]["value"]),
                     "raw": workload,
                 }
             )
@@ -412,9 +406,7 @@ def _pinned_shape(entries):
 # must be densely materialized with the reference's dtype, device and count --
 # a candidate that omits ``final_state`` fails as "wrong number of outputs"
 # rather than silently scoring on ``output`` alone.
-_compare_outputs = functools.partial(
-    compare_outputs, scale_atol_by_rms=True, strict_outputs=True
-)
+_compare_outputs = functools.partial(compare_outputs, scale_atol_by_rms=True, strict_outputs=True)
 
 
 def _passes_private_holdout(candidate, reference, device, shape=None):
@@ -456,9 +448,7 @@ def run_suite(
     cfg = config or default_config()
     device = choose_device(cfg.device)
     reference_forward = load_task_reference(TASK_NAME)
-    entries = _resolve_entry_references(
-        make_workloads(cfg) if workloads is None else workloads
-    )
+    entries = _resolve_entry_references(make_workloads(cfg) if workloads is None else workloads)
     # The task's registered shape mode determines holdout scope.
     if holdout_shape is None and cfg.shape_mode.lower() in ("max", "pinned"):
         holdout_shape = _pinned_shape(entries)

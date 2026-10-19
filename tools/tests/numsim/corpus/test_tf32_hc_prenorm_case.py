@@ -5,17 +5,21 @@ import math
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.corpus.kernels.deepgemm import (
     TF32_HC_CONFIGS as NUMSIM_CONFIGS,
+)
+from tests.numsim.corpus.kernels.deepgemm import (
     _float32_to_bfloat16_bits,
     _numpy_tf32_hc_reference,
     _round_float32_to_tf32,
+)
+from tests.numsim.corpus.kernels.deepgemm import (
     prepare_tf32_hc_case as prepare_numsim_case,
 )
 from tests.numsim.microtests.harness import NUMSIM_GPU_MARK, require_numsim_gpu
 from tests.numsim.support._tirx_kernels import config_params, load_tirx_kernel
 from tests.numsim.support.three_way import run_three_way_case
+from tirx_harness import numsim
 from tirx_harness.numsim.bindings import _decode_tensor_maps, _tensor_map_base_array
 from tirx_harness.numsim.transpiler.frontend import analyze
 

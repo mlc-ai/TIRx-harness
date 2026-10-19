@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from itertools import product
 
 import pytest
-import tvm
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_layout
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.manifest import emitted_calls, resolved_kernel
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm.backend.cuda.ptx.table import TABLE, mods, operand_layout
+from tvm.script import tirx as T
 
 
 @dataclass(frozen=True)

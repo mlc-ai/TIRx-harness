@@ -1,11 +1,10 @@
 """Maintenance predicates gate operand reads without hiding lifetime errors."""
 
 import numpy as np
+
 import tvm
-from tvm.script import tirx as T
-
 from tirx_harness import numsim, racecheck, synccheck
-
+from tvm.script import tirx as T
 
 # TVM's public .pred result ABI is a writable uint32 carrier.
 MAINTENANCE_CASES = (

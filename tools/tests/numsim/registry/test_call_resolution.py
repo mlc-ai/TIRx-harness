@@ -4,17 +4,9 @@ import itertools
 from typing import NamedTuple
 
 import pytest
-import tvm
-from tvm import ir, tirx
-from tvm.ir import Expr
-from tvm.ir.type import PointerType
-from tvm.tirx import TensorMapType
-from tvm.script import tirx as T
-from tvm.tirx import Stmt, Var
 from tvm_ffi import structural_walk
 
-from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tirx_harness.numsim.host_abi import HostAbiError, build_host_abi
+import tvm
 from tests.numsim.support.kernels import (
     no_op_kernel,
     raw_tma_roundtrip,
@@ -24,13 +16,20 @@ from tests.numsim.support.kernels import (
 from tests.numsim.support.manifest import (
     call_op_names,
     device_kernel,
-    emitted_module,
     emitted_calls,
+    emitted_module,
     evaluated_kernel,
     replace_call,
     resolved_kernel,
 )
+from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tirx_harness.numsim.host_abi import HostAbiError, build_host_abi
 from tirx_harness.numsim.transpiler.frontend import TensorMapSpec, analyze
+from tvm import ir, tirx
+from tvm.ir import Expr
+from tvm.ir.type import PointerType
+from tvm.script import tirx as T
+from tvm.tirx import Stmt, TensorMapType, Var
 
 _HANDLE = PointerType(ir.PrimType(""))
 _ARG_NAMES = itertools.count()

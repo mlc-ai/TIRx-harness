@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import ComposeLayout, S, TileLayout, tmem_datapath_layout
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
+from tvm.tirx.layout import ComposeLayout, S, TileLayout, tmem_datapath_layout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from tvm.ir import Expr
-from tvm.tirx import Stmt
 from tvm_ffi import structural_walk
 
 from tests.numsim.runtime.test_ptx_warp_collectives import (
@@ -12,6 +10,8 @@ from tests.numsim.runtime.test_ptx_warp_collectives import (
 from tests.numsim.support.manifest import call_op_names, emitted_calls, kernel_manifest
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME, decode_ptx_call
+from tvm.ir import Expr
+from tvm.tirx import Stmt
 
 ACTIVEMASK = "tirx.ptx.activemask"
 MATCH_ANY = "tirx.ptx.match_any_sync"

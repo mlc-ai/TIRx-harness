@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TLane, TileLayout
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tvm.script import tirx as T
+from tvm.tirx.layout import S, TCol, TileLayout, TLane
 
 _TMEM = TileLayout(S[(128, 32) : (1 @ TLane, 1 @ TCol)])
 

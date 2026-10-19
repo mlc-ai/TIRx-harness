@@ -15,11 +15,13 @@ def test_editable_frontend_copies_identity_and_licenses(tmp_path, monkeypatch):
     package = source / "tirx_harness" / "numsim"
     package.mkdir(parents=True)
     extension = Extension("tirx_harness.numsim._tvm_rust_ext", sources=[], py_limited_api=True)
-    distribution = Distribution({
-        "packages": ["tirx_harness.numsim"],
-        "package_dir": {"": str(source)},
-        "ext_modules": [extension],
-    })
+    distribution = Distribution(
+        {
+            "packages": ["tirx_harness.numsim"],
+            "package_dir": {"": str(source)},
+            "ext_modules": [extension],
+        }
+    )
     command = definitions["RustBuildExt"](distribution)
     command.build_lib = str(tmp_path / "build")
     command.ensure_finalized()

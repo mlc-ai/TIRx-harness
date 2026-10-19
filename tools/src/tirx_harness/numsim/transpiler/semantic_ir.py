@@ -9,7 +9,6 @@ from typing import Any
 
 from . import native_frontend
 
-
 _SERIALIZATIONS: ContextVar[dict[int, tuple[Any, str]] | None] = ContextVar(
     "numsim_semantic_ir_serializations", default=None
 )

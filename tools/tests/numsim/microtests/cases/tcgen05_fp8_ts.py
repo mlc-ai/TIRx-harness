@@ -1,11 +1,11 @@
 """Packed TMEM A probes; inputs and output layout have independent host oracles."""
 
 import numpy as np
+from tests.numsim.microtests.cases.tcgen05_mma_forms import _F8_BYTES_B16_SMEM_LAYOUT
+
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TileLayout
-
-from tests.numsim.microtests.cases.tcgen05_mma_forms import _F8_BYTES_B16_SMEM_LAYOUT
 
 
 def fp8_ts_kernel(m=64, d_f16=False, publish=True):

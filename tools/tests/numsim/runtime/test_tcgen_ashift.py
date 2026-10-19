@@ -2,13 +2,13 @@
 
 import numpy as np
 import pytest
-from tvm import tirx
 from tvm_ffi import structural_map
-from tvm.script import tirx as T
 
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
+from tvm import tirx
+from tvm.script import tirx as T
 
 
 def ashift_case(

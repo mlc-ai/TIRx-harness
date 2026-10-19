@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import tcgen_atom_layout_roundtrip, wg_local_layout_roundtrip
+from tirx_harness import numsim
 
 
 def test_wg_local_layout_uses_tid_in_wg_as_owner_and_m_as_register_index(tmp_path):

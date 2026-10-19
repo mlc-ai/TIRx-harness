@@ -36,19 +36,17 @@ and the exact upstream C++ headers are included below. The latter are compiled
 in a local cache without a source checkout. FlashInfer may download its prebuilt
 kernel binaries on first use unless they are already installed or cached.
 """
+
 from __future__ import annotations
 
-import argparse
 import dataclasses
-import functools
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
-from functools import lru_cache
 from contextlib import nullcontext
-from typing import List, Optional, Tuple, Union
+from functools import lru_cache
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -80,6 +78,7 @@ exp = tl.exp  # Upstream default FLA_USE_FAST_OPS=0.
 def calc_rows_per_block(M, device):
     # Same upstream heuristic with CUDA graphs and batch-invariant mode disabled.
     return min(next_power_of_2(cdiv(M, 2 * _get_sm_count(device))), MAX_ROWS_PER_BLOCK)
+
 
 # Extracted from python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py
 @triton.jit
@@ -151,27 +150,19 @@ def _fused_qk_rmsnorm_rope_gate_kernel(
     rot_offs = tl.arange(0, ROT_HALF_BLOCK)
     rot_mask = rot_offs < HALF_ROTARY
     xr1 = tl.load(in_base + rot_offs, mask=rot_mask, other=0.0).to(tl.float32)
-    xr2 = tl.load(in_base + HALF_ROTARY + rot_offs, mask=rot_mask, other=0.0).to(
-        tl.float32
-    )
+    xr2 = tl.load(in_base + HALF_ROTARY + rot_offs, mask=rot_mask, other=0.0).to(tl.float32)
     wr1 = tl.load(w_ptr + rot_offs, mask=rot_mask, other=0.0).to(tl.float32)
-    wr2 = tl.load(w_ptr + HALF_ROTARY + rot_offs, mask=rot_mask, other=0.0).to(
-        tl.float32
-    )
+    wr2 = tl.load(w_ptr + HALF_ROTARY + rot_offs, mask=rot_mask, other=0.0).to(tl.float32)
     xr1 = (xr1 * inv_rms * (wr1 + 1.0)).to(out_dtype).to(tl.float32)
     xr2 = (xr2 * inv_rms * (wr2 + 1.0)).to(out_dtype).to(tl.float32)
 
     if MROPE:
         axis = tl.load(mrope_axis_map_ptr + rot_offs, mask=rot_mask, other=0)
-        pos = tl.load(
-            positions_ptr + axis * stride_pos_axis + token, mask=rot_mask, other=0
-        )
+        pos = tl.load(positions_ptr + axis * stride_pos_axis + token, mask=rot_mask, other=0)
     else:
         pos = tl.load(positions_ptr + token)
     cache_off = pos.to(tl.int64) * stride_cos_t
-    cos = tl.load(
-        cos_sin_cache_ptr + cache_off + rot_offs, mask=rot_mask, other=0.0
-    ).to(tl.float32)
+    cos = tl.load(cos_sin_cache_ptr + cache_off + rot_offs, mask=rot_mask, other=0.0).to(tl.float32)
     sin = tl.load(
         cos_sin_cache_ptr + cache_off + HALF_ROTARY + rot_offs, mask=rot_mask, other=0.0
     ).to(tl.float32)
@@ -204,8 +195,8 @@ def fused_qk_gemma_rmsnorm_rope_gate(
     head_dim: int,
     rotary_dim: int,
     has_gate: bool = True,
-    mrope_axis_map: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    mrope_axis_map: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Fused QK GemmaRMSNorm + NeoX RoPE + gate deinterleave.
 
     Args:
@@ -222,8 +213,7 @@ def fused_qk_gemma_rmsnorm_rope_gate(
     assert mrope == (mrope_axis_map is not None), "mrope_axis_map needs [3, T]"
     if mrope:
         assert positions.shape[0] == 3 and positions.stride(1) == 1, (
-            f"want [3, T] contiguous over T, got {positions.shape} "
-            f"stride {positions.stride()}"
+            f"want [3, T] contiguous over T, got {positions.shape} stride {positions.stride()}"
         )
         lanes = rotary_dim // 2
         assert mrope_axis_map.shape == (lanes,), f"want one axis per lane ({lanes})"
@@ -278,7 +268,6 @@ def fused_qk_gemma_rmsnorm_rope_gate(
     )
 
     return q_out, k_out, gate_out if has_gate else None
-
 
 
 # Extracted from python/sglang/kernels/ops/attention/triton_gdn_fused_proj.py
@@ -343,17 +332,11 @@ def _fused_qkvzba_causal_conv1d_update_contiguous_kernel(
         other=0.0,
     )
 
-    state_slot = tl.load(conv_state_indices + batch_idx * stride_state_indices).to(
-        tl.int64
-    )
+    state_slot = tl.load(conv_state_indices + batch_idx * stride_state_indices).to(tl.int64)
     # Treat every out-of-range index as padding so stale replay metadata cannot
     # turn an indexed state update into an OOB access.
-    valid_slot = (
-        (state_slot != PAD_SLOT_ID) & (state_slot >= 0) & (state_slot < NUM_STATE_SLOTS)
-    )
-    state_base = (
-        conv_state + state_slot * stride_state_batch + dim_idx * stride_state_dim
-    )
+    valid_slot = (state_slot != PAD_SLOT_ID) & (state_slot >= 0) & (state_slot < NUM_STATE_SLOTS)
+    state_base = conv_state + state_slot * stride_state_batch + dim_idx * stride_state_dim
 
     acc = tl.zeros((BLOCK_SIZE,), dtype=tl.float32)
     if HAS_BIAS:
@@ -377,9 +360,7 @@ def _fused_qkvzba_causal_conv1d_update_contiguous_kernel(
         acc += state_value * weight_value
 
     last_weight = tl.load(
-        conv_weight
-        + dim_idx * stride_weight_dim
-        + (KERNEL_WIDTH - 1) * stride_weight_width,
+        conv_weight + dim_idx * stride_weight_dim + (KERNEL_WIDTH - 1) * stride_weight_width,
         mask=qkv_mask,
         other=0.0,
     )
@@ -418,9 +399,7 @@ def _fused_qkvzba_causal_conv1d_update_contiguous_kernel(
     # The first feature lanes also materialize the smaller downstream tensors.
     z_mask = dim_idx < V_DIM
     z_value = tl.load(
-        mixed_qkvz
-        + batch_idx * stride_qkvz_batch
-        + (QKV_DIM + dim_idx) * stride_qkvz_dim,
+        mixed_qkvz + batch_idx * stride_qkvz_batch + (QKV_DIM + dim_idx) * stride_qkvz_dim,
         mask=z_mask,
         other=0.0,
     )
@@ -433,9 +412,7 @@ def _fused_qkvzba_causal_conv1d_update_contiguous_kernel(
         other=0.0,
     )
     a_value = tl.load(
-        mixed_ba
-        + batch_idx * stride_ba_batch
-        + (NUM_V_HEADS + dim_idx) * stride_ba_dim,
+        mixed_ba + batch_idx * stride_ba_batch + (NUM_V_HEADS + dim_idx) * stride_ba_dim,
         mask=gate_mask,
         other=0.0,
     )
@@ -548,9 +525,7 @@ def fused_qkvzba_causal_conv1d_update_contiguous(
         )
 
     batch = mixed_qkvz.shape[0]
-    mixed_qkv = torch.empty(
-        (batch, qkv_dim), dtype=mixed_qkvz.dtype, device=mixed_qkvz.device
-    )
+    mixed_qkv = torch.empty((batch, qkv_dim), dtype=mixed_qkvz.dtype, device=mixed_qkvz.device)
     z = torch.empty(
         (batch, num_v_heads, head_v_dim),
         dtype=mixed_qkvz.dtype,
@@ -701,7 +676,6 @@ def fused_qkv_split_gdn_prefill(
     return q, k, v
 
 
-
 # Extracted from python/sglang/kernels/ops/mamba/causal_conv1d_triton.py
 @triton.jit()
 def _causal_conv1d_fwd_kernel(  # continuous batching
@@ -749,9 +723,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
     stride_conv_state_seq = stride_istate_seq
     stride_conv_state_dim = stride_istate_dim
     stride_conv_state_tok = stride_istate_token
-    state_len = (
-        KERNEL_WIDTH - 1
-    )  # can be passed via argument if it's not the same as this value
+    state_len = KERNEL_WIDTH - 1  # can be passed via argument if it's not the same as this value
 
     # one program handles one chunk in a single sequence
     # rather than mixing sequences - to make updating initial_states across sequences efficiently
@@ -779,9 +751,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
 
     # base of the sequence
     x_base = (
-        x_ptr
-        + sequence_start_index.to(tl.int64) * stride_x_token
-        + idx_feats * stride_x_dim
+        x_ptr + sequence_start_index.to(tl.int64) * stride_x_token + idx_feats * stride_x_dim
     )  # [BLOCK_N,]
 
     if IS_CONTINUOUS_BATCHING:
@@ -790,7 +760,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
     else:
         # cache_idx
         conv_state_batch_coord = idx_seq
-    if USE_PAD_SLOT:  # noqa
+    if USE_PAD_SLOT:
         if conv_state_batch_coord == pad_slot_id:
             # not processing as this is not the actual sequence
             return
@@ -858,21 +828,14 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
 
         # STEP 2:
         # here prepare data for updating conv_state
-        if (
-            state_len <= seqlen
-        ):  # SMALL_CACHE=True (only move part of 'x' into conv_state cache)
+        if state_len <= seqlen:  # SMALL_CACHE=True (only move part of 'x' into conv_state cache)
             # just read from 'x'
             # copy 'x' data to conv_state
             # load only 'x' data (and set 0 before 'x' if seqlen < state_len)
-            idx_tokens_last = (seqlen - state_len) + tl.arange(
-                0, NP2_STATELEN
-            )  # [BLOCK_M]
+            idx_tokens_last = (seqlen - state_len) + tl.arange(0, NP2_STATELEN)  # [BLOCK_M]
             x_ptrs = (
                 x_ptr
-                + (
-                    (sequence_start_index + idx_tokens_last).to(tl.int64)
-                    * stride_x_token
-                )[:, None]
+                + ((sequence_start_index + idx_tokens_last).to(tl.int64) * stride_x_token)[:, None]
                 + (idx_feats * stride_x_dim)[None, :]
             )  # [BLOCK_M,BLOCK_N,]
             mask_x = (
@@ -884,8 +847,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
             new_conv_state = tl.load(x_ptrs, mask_x, 0.0)
             idx_tokens_conv = tl.arange(0, NP2_STATELEN)  # [BLOCK_M]
             conv_states_ptrs_target = (
-                conv_states_base[None, :]
-                + (idx_tokens_conv * stride_conv_state_tok)[:, None]
+                conv_states_base[None, :] + (idx_tokens_conv * stride_conv_state_tok)[:, None]
             )
 
             mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[None, :]
@@ -913,8 +875,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
                 VAL = state_len - seqlen
 
                 x_ptrs = (
-                    x_base[None, :]
-                    + ((idx_tokens_conv - VAL) * stride_x_token)[:, None]
+                    x_base[None, :] + ((idx_tokens_conv - VAL) * stride_x_token)[:, None]
                 )  # [BLOCK_M, BLOCK_N]
 
                 mask_x = (
@@ -929,12 +890,9 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
                     mask, conv_state, loaded_x
                 )  # BUG in 'tl.where'  which requires a barrier before this
                 conv_states_ptrs_target = (
-                    conv_states_base
-                    + (idx_tokens_conv * stride_conv_state_tok)[:, None]
+                    conv_states_base + (idx_tokens_conv * stride_conv_state_tok)[:, None]
                 )  # [BLOCK_M, BLOCK_N]
-                mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[
-                    None, :
-                ]
+                mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[None, :]
                 tl.store(conv_states_ptrs_target, new_conv_state, mask)
             else:  # load_init_state == False
                 # update conv_state by shifting left, BUT
@@ -944,8 +902,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
                 VAL = state_len - seqlen
 
                 x_ptrs = (
-                    x_base[None, :]
-                    + ((idx_tokens_conv - VAL) * stride_x_token)[:, None]
+                    x_base[None, :] + ((idx_tokens_conv - VAL) * stride_x_token)[:, None]
                 )  # [BLOCK_M, BLOCK_N]
 
                 mask_x = (
@@ -956,12 +913,9 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
                 new_conv_state = tl.load(x_ptrs, mask_x, 0.0)
 
                 conv_states_ptrs_target = (
-                    conv_states_base
-                    + (idx_tokens_conv * stride_conv_state_tok)[:, None]
+                    conv_states_base + (idx_tokens_conv * stride_conv_state_tok)[:, None]
                 )  # [BLOCK_M, BLOCK_N]
-                mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[
-                    None, :
-                ]
+                mask = (idx_tokens_conv < state_len)[:, None] & (idx_feats < dim)[None, :]
                 tl.store(conv_states_ptrs_target, new_conv_state, mask)
 
     else:  # chunk_offset > 0
@@ -998,9 +952,7 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
     if HAS_BIAS:
         bias = bias_ptr + idx_feats
         mask_bias = idx_feats < dim
-        acc_preload = tl.load(bias, mask=mask_bias, other=0.0).to(
-            tl.float32
-        )  # [BLOCK_N]
+        acc_preload = tl.load(bias, mask=mask_bias, other=0.0).to(tl.float32)  # [BLOCK_N]
     else:
         acc_preload = tl.zeros((BLOCK_N,), dtype=tl.float32)
 
@@ -1065,13 +1017,10 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
 
         if SILU_ACTIVATION:
             acc = acc / (1 + tl.exp(-acc))
-        mask_1d = (idx_token < segment_len) & (
-            idx_feats < dim
-        )  # token-index  # feature-index
+        mask_1d = (idx_token < segment_len) & (idx_feats < dim)  # token-index  # feature-index
         o_ptrs = (
             o_ptr
-            + (sequence_start_index + token_offset + idx_token).to(tl.int64)
-            * stride_o_token
+            + (sequence_start_index + token_offset + idx_token).to(tl.int64) * stride_o_token
             + (idx_feats * stride_o_dim)
         )
 
@@ -1081,13 +1030,13 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
 def causal_conv1d_fn(
     x: torch.Tensor,
     weight: torch.Tensor,
-    bias: Union[torch.Tensor, None],
+    bias: torch.Tensor | None,
     conv_states: torch.Tensor,
     query_start_loc: torch.Tensor,
-    seq_lens_cpu: List[int],
-    cache_indices: Optional[torch.Tensor] = None,
-    has_initial_state: Optional[torch.Tensor] = None,
-    activation: Optional[str] = "silu",
+    seq_lens_cpu: list[int],
+    cache_indices: torch.Tensor | None = None,
+    has_initial_state: torch.Tensor | None = None,
+    activation: str | None = "silu",
     pad_slot_id: int = PAD_SLOT_ID,
     validate_data=False,
     **kwargs,
@@ -1255,7 +1204,6 @@ def causal_conv1d_fn(
     return out
 
 
-
 # Extracted from python/sglang/kernels/ops/attention/fla/fused_gdn_gating.py
 @triton.jit
 def fused_gdn_gating_kernel(
@@ -1282,9 +1230,7 @@ def fused_gdn_gating_kernel(
     blk_b = tl.load(b + i_b * stride_b + head_off, mask=mask)
     blk_bias = tl.load(dt_bias + head_off, mask=mask)
     x = blk_a.to(tl.float32) + blk_bias.to(tl.float32)
-    softplus_x = tl.where(
-        beta * x <= threshold, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x
-    )
+    softplus_x = tl.where(beta * x <= threshold, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x)
     blk_g = -tl.exp(blk_A_log.to(tl.float32)) * softplus_x
     tl.store(g + off, blk_g.to(g.dtype.element_ty), mask=mask)
     blk_beta_output = tl.sigmoid(blk_b.to(tl.float32))
@@ -1298,7 +1244,7 @@ def fused_gdn_gating(
     dt_bias: torch.Tensor,
     beta: float = 1.0,
     threshold: float = 20.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     batch, num_heads = a.shape
     seq_len = 1
     stride_a = a.stride(0)
@@ -1323,7 +1269,6 @@ def fused_gdn_gating(
         num_warps=1,
     )
     return g, beta_output
-
 
 
 # Extracted from python/sglang/kernels/ops/attention/fla/fused_recurrent.py
@@ -1423,15 +1368,11 @@ def fused_recurrent_gated_delta_rule_packed_decode(
     use_qk_l2norm_in_kernel: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if mixed_qkv.ndim != 2:
-        raise ValueError(
-            f"`mixed_qkv` must be a 2D tensor (got ndim={mixed_qkv.ndim})."
-        )
+        raise ValueError(f"`mixed_qkv` must be a 2D tensor (got ndim={mixed_qkv.ndim}).")
     if mixed_qkv.stride(-1) != 1:
         raise ValueError("`mixed_qkv` must be contiguous in the last dim.")
     if a.ndim != 2 or b.ndim != 2:
-        raise ValueError(
-            f"`a` and `b` must be 2D tensors (got a.ndim={a.ndim}, b.ndim={b.ndim})."
-        )
+        raise ValueError(f"`a` and `b` must be 2D tensors (got a.ndim={a.ndim}, b.ndim={b.ndim}).")
     if a.stride(-1) != 1 or b.stride(-1) != 1:
         raise ValueError("`a`/`b` must be contiguous in the last dim.")
     if A_log.ndim != 1 or dt_bias.ndim != 1:
@@ -1446,10 +1387,7 @@ def fused_recurrent_gated_delta_rule_packed_decode(
         raise ValueError("`out` must be contiguous.")
 
     dev = mixed_qkv.device
-    if any(
-        t.device != dev
-        for t in (a, b, A_log, dt_bias, initial_state, out, ssm_state_indices)
-    ):
+    if any(t.device != dev for t in (a, b, A_log, dt_bias, initial_state, out, ssm_state_indices)):
         raise ValueError("All inputs must be on the same device.")
 
     B = mixed_qkv.shape[0]
@@ -1464,9 +1402,7 @@ def fused_recurrent_gated_delta_rule_packed_decode(
         )
 
     if initial_state.ndim != 4:
-        raise ValueError(
-            f"`initial_state` must be a 4D tensor (got ndim={initial_state.ndim})."
-        )
+        raise ValueError(f"`initial_state` must be a 4D tensor (got ndim={initial_state.ndim}).")
     if initial_state.stride(-1) != 1:
         raise ValueError("`initial_state` must be contiguous in the last dim.")
     HV, V, K = initial_state.shape[-3:]
@@ -1486,23 +1422,17 @@ def fused_recurrent_gated_delta_rule_packed_decode(
     qkv_dim = mixed_qkv.shape[1]
     qk_dim = qkv_dim - HV * V
     if qk_dim <= 0 or qk_dim % 2 != 0:
-        raise ValueError(
-            f"Invalid packed `mixed_qkv` last dim={qkv_dim} for HV={HV}, V={V}."
-        )
+        raise ValueError(f"Invalid packed `mixed_qkv` last dim={qkv_dim} for HV={HV}, V={V}.")
     q_dim = qk_dim // 2
     if q_dim % K != 0:
         raise ValueError(f"Invalid packed Q size {q_dim}: must be divisible by K={K}.")
     H = q_dim // K
     if H <= 0 or HV % H != 0:
-        raise ValueError(
-            f"Invalid head config inferred from mixed_qkv: H={H}, HV={HV}."
-        )
+        raise ValueError(f"Invalid head config inferred from mixed_qkv: H={H}, HV={HV}.")
 
     BK = triton.next_power_of_2(K)
     if triton.cdiv(K, BK) != 1:
-        raise ValueError(
-            f"Packed decode kernel only supports NK=1 (got K={K}, BK={BK})."
-        )
+        raise ValueError(f"Packed decode kernel only supports NK=1 (got K={K}, BK={BK}).")
     BV = min(triton.next_power_of_2(V), 32)
     num_stages = 3
     num_warps = 1
@@ -1545,7 +1475,6 @@ def fused_recurrent_gated_delta_rule_packed_decode(
         num_stages=num_stages,
     )
     return out, initial_state
-
 
 
 # Extracted from python/sglang/kernels/ops/attention/fla/l2norm.py
@@ -1591,9 +1520,7 @@ def l2norm_fwd_kernel(
     tl.store(p_y, b_y.to(p_y.dtype.element_ty), boundary_check=(0, 1))
 
 
-def l2norm_fwd(
-    x: torch.Tensor, eps: float = 1e-6, output_dtype: Optional[torch.dtype] = None
-):
+def l2norm_fwd(x: torch.Tensor, eps: float = 1e-6, output_dtype: torch.dtype | None = None):
     x_shape_og = x.shape
     x = x.view(-1, x.shape[-1])
     # allocate output
@@ -1752,8 +1679,7 @@ def gdn_prefill_qkv_prepare_fwd(
         )
     if v.shape[0] != q.shape[0] or v.shape[2] != q.shape[2]:
         raise ValueError(
-            "GDN fused prepare requires common token and head-dim axes, got "
-            f"{q.shape=}, {v.shape=}"
+            f"GDN fused prepare requires common token and head-dim axes, got {q.shape=}, {v.shape=}"
         )
     if q.device != k.device or q.device != v.device:
         raise ValueError("GDN fused prepare requires Q/K/V on the same device")
@@ -1799,7 +1725,6 @@ def gdn_prefill_qkv_prepare_fwd(
         num_stages=2,
     )
     return l2norm_fwd(q_out, eps), l2norm_fwd(k_out, eps), v_out
-
 
 
 # Extracted from python/sglang/kernels/ops/attention/fla/layernorm_gated.py
@@ -2091,7 +2016,6 @@ def rms_norm_gated(
     return y.reshape(x_shape_og)
 
 
-
 # Extracted from python/sglang/kernels/ops/elementwise/elementwise.py
 @triton.jit
 def _fused_sigmoid_mul_kernel(
@@ -2151,9 +2075,7 @@ def fused_sigmoid_mul(
         gate_stride_head = gate.stride(1)
     else:
         # Flat path: both tensors have the same shape
-        assert attn_output.shape == gate.shape, (
-            "attn_output and gate must have the same shape"
-        )
+        assert attn_output.shape == gate.shape, "attn_output and gate must have the same shape"
         hidden_dim = attn_output.shape[-1]
         num_tokens = attn_output.numel() // hidden_dim
         head_dim = hidden_dim
@@ -2177,10 +2099,9 @@ def fused_sigmoid_mul(
     return out
 
 
-
 # Exact upstream C++/CUDA headers, materialized only for compilation.
 _EMBEDDED_HEADERS = {
-    'elementwise/activation.cuh': r'''#include <sgl_kernel/tensor.h>
+    "elementwise/activation.cuh": r"""#include <sgl_kernel/tensor.h>
 #include <sgl_kernel/utils.h>
 
 #include <sgl_kernel/runtime.cuh>
@@ -2467,8 +2388,8 @@ struct ActivationKernel {
 };
 
 }  // namespace sglang
-''',
-    'elementwise/kvcache.cuh': r'''#include <sgl_kernel/tensor.h>
+""",
+    "elementwise/kvcache.cuh": r"""#include <sgl_kernel/tensor.h>
 #include <sgl_kernel/utils.h>
 
 #include <sgl_kernel/tile.cuh>
@@ -2789,8 +2710,8 @@ struct StoreKVCacheKernel {
 };
 
 }  // namespace sglang
-''',
-    'sgl_kernel/runtime.cuh': r'''/// \file runtime.cuh
+""",
+    "sgl_kernel/runtime.cuh": r"""/// \file runtime.cuh
 /// \brief Host-side CUDA runtime query helpers.
 ///
 /// Thin wrappers around CUDA occupancy and device-property APIs with
@@ -2895,8 +2816,8 @@ inline auto get_available_dynamic_smem_per_block(T&& kernel, int num_blocks, int
 }  // namespace host::runtime
 
 }  // namespace sglang
-''',
-    'sgl_kernel/source_location.h': r'''/// \file source_location.h
+""",
+    "sgl_kernel/source_location.h": r"""/// \file source_location.h
 /// \brief Portable `source_location` wrapper.
 ///
 /// Uses `std::source_location` when available (C++20), otherwise falls
@@ -2943,8 +2864,8 @@ using source_location_t = source_location_fallback;
 #endif
 
 }  // namespace sglang
-''',
-    'sgl_kernel/tensor.h': r'''/// \file tensor.h
+""",
+    "sgl_kernel/tensor.h": r"""/// \file tensor.h
 /// \brief Tensor validation and symbolic matching utilities.
 ///
 /// Provides the `TensorMatcher` fluent API for validating tensor shapes,
@@ -3553,8 +3474,8 @@ struct TensorMatcher {
 }  // namespace host
 
 }  // namespace sglang
-''',
-    'sgl_kernel/tile.cuh': r'''/// \file tile.cuh
+""",
+    "sgl_kernel/tile.cuh": r"""/// \file tile.cuh
 /// \brief Tiled memory access helpers for coalesced global memory I/O.
 ///
 /// `tile::Memory<T>` represents a contiguous memory region where multiple
@@ -3620,8 +3541,8 @@ struct Memory {
 }  // namespace device::tile
 
 }  // namespace sglang
-''',
-    'sgl_kernel/type.cuh': r'''/// \file type.cuh
+""",
+    "sgl_kernel/type.cuh": r"""/// \file type.cuh
 /// \brief Dtype trait system for CUDA scalar/packed types.
 ///
 /// `DTypeTrait<T>` provides per-type metadata: packed type alias,
@@ -3979,8 +3900,8 @@ inline constexpr float kFP8E4M3Max = 448.0f;
 #endif  // USE_ROCM
 
 }  // namespace sglang
-''',
-    'sgl_kernel/utils.cuh': r'''/// \file utils.cuh
+""",
+    "sgl_kernel/utils.cuh": r"""/// \file utils.cuh
 /// \brief Core CUDA/device utilities: type aliases, PDL helpers,
 ///        typed pointer access, kernel launch wrapper, and error checking.
 ///
@@ -4368,8 +4289,8 @@ struct LaunchKernel {
 }  // namespace host
 
 }  // namespace sglang
-''',
-    'sgl_kernel/utils.h': r'''/// \file utils.h
+""",
+    "sgl_kernel/utils.h": r"""/// \file utils.h
 /// \brief Host-side C++ utilities used by JIT kernel wrappers.
 
 #pragma once
@@ -4584,8 +4505,8 @@ struct Error {
 }  // namespace host
 
 }  // namespace sglang
-''',
-    'sgl_kernel/vec.cuh': r'''/// \file vec.cuh
+""",
+    "sgl_kernel/vec.cuh": r"""/// \file vec.cuh
 /// \brief Aligned vector types for coalesced global memory access.
 ///
 /// `AlignedVector<T, N>` wraps `N` elements of type `T` in a naturally
@@ -4746,8 +4667,9 @@ SGL_DEVICE auto reduce_vec(device::AlignedVector<T2, N> (&vec)[M]) -> device::Al
 }  // namespace device
 
 }  // namespace sglang
-''',
+""",
 }
+
 
 @lru_cache
 def _compiled_ops():
@@ -4758,7 +4680,10 @@ def _compiled_ops():
     if major != 10:
         raise RuntimeError("This extracted kernel configuration requires an SM100/SM103 GPU.")
     digest = hashlib.sha256("".join(_EMBEDDED_HEADERS.values()).encode()).hexdigest()[:16]
-    root = Path(os.environ.get("QWEN38_KERNEL_CACHE", Path.home() / ".cache/qwen38_standalone")) / digest
+    root = (
+        Path(os.environ.get("QWEN38_KERNEL_CACHE", Path.home() / ".cache/qwen38_standalone"))
+        / digest
+    )
     root.mkdir(parents=True, exist_ok=True)
     for name, source in _EMBEDDED_HEADERS.items():
         path = root / name
@@ -4768,20 +4693,26 @@ def _compiled_ops():
             tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
             tmp.write_text(source)
             tmp.replace(path)
-    source = '''
+    source = """
 #include <elementwise/activation.cuh>
 #include <elementwise/kvcache.cuh>
 namespace sglang {
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(silu, (ActivationKernel<bf16_t, true>::run_activation));
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(store, (StoreKVCacheKernel<2048, 2048, true>::run));
 }
-'''
+"""
     return load_inline(
         name=f"qwen38_ops_{digest}_sm{major}{minor}",
         cuda_sources=source,
         extra_include_paths=[str(root)],
         extra_cflags=["-std=c++20", "-O3"],
-        extra_cuda_cflags=[f"-arch=sm_{major}{minor}a", f"-DSGL_CUDA_ARCH={major * 100 + minor * 10}", "-std=c++20", "-O3", "--expt-relaxed-constexpr"],
+        extra_cuda_cflags=[
+            f"-arch=sm_{major}{minor}a",
+            f"-DSGL_CUDA_ARCH={major * 100 + minor * 10}",
+            "-std=c++20",
+            "-O3",
+            "--expt-relaxed-constexpr",
+        ],
     )
 
 
@@ -4867,12 +4798,11 @@ def _causal_conv1d_update_kernel(
         ).to(tl.int64)
         if SAVE_INTERMEDIATE:
             intermediate_state_batch_coord = tl.load(
-                intermediate_state_indices_ptr
-                + idx_seq * stride_intermediate_state_indices
+                intermediate_state_indices_ptr + idx_seq * stride_intermediate_state_indices
             ).to(tl.int64)
     else:
         conv_state_batch_coord = idx_seq
-    if USE_PAD_SLOT:  # noqa
+    if USE_PAD_SLOT:
         if conv_state_batch_coord == pad_slot_id:
             # not processing as this is not the actual sequence
             return
@@ -4928,9 +4858,7 @@ def _causal_conv1d_update_kernel(
         + (conv_state_batch_coord * stride_conv_state_seq)
         + conv_state_token_offset * stride_conv_state_tok
         + (idx_feats * stride_conv_state_dim)[None, :]
-        + ((idx_tokens + (1 if IS_SPEC_DECODING else seqlen)) * stride_conv_state_tok)[
-            :, None
-        ]
+        + ((idx_tokens + (1 if IS_SPEC_DECODING else seqlen)) * stride_conv_state_tok)[:, None]
     )  # [BLOCK_M, BLOCK_N]
     mask = (
         (conv_state_batch_coord < num_cache_lines)
@@ -4942,9 +4870,7 @@ def _causal_conv1d_update_kernel(
     VAL = state_len - seqlen
     x_base = x_ptr + (idx_seq * stride_x_seq) + (idx_feats * stride_x_dim)  # [BLOCK_N]
 
-    x_ptrs = (
-        x_base[None, :] + ((idx_tokens - VAL) * stride_x_token)[:, None]
-    )  # [BLOCK_M, BLOCK_N]
+    x_ptrs = x_base[None, :] + ((idx_tokens - VAL) * stride_x_token)[:, None]  # [BLOCK_M, BLOCK_N]
 
     mask_x = (
         (idx_tokens - VAL >= 0)[:, None]
@@ -4971,9 +4897,7 @@ def _causal_conv1d_update_kernel(
     if HAS_BIAS:
         bias = bias_ptr + idx_feats
         mask_bias = idx_feats < dim
-        acc_preload = tl.load(bias, mask=mask_bias, other=0.0).to(
-            tl.float32
-        )  # [BLOCK_N]
+        acc_preload = tl.load(bias, mask=mask_bias, other=0.0).to(tl.float32)  # [BLOCK_N]
     else:
         acc_preload = tl.zeros((BLOCK_N,), dtype=tl.float32)
 
@@ -5036,9 +4960,7 @@ def _causal_conv1d_update_kernel(
                 tl.where(idx_tokens == idx_token, retrieve_next_siblings, 0)
             )
             if retrieve_sibling_token_idx != -1:  # pad slot id
-                parent_idx_token = tl.sum(
-                    tl.where(idx_tokens == idx_token, parent_idx_tokens, 0)
-                )
+                parent_idx_token = tl.sum(tl.where(idx_tokens == idx_token, parent_idx_tokens, 0))
                 parent_idx_tokens = tl.where(
                     idx_tokens == retrieve_sibling_token_idx,
                     parent_idx_token,
@@ -5095,9 +5017,7 @@ def _causal_conv1d_update_kernel(
 
                 # move to parent for next iteration
                 if _idx_token > 0:
-                    _idx_token = tl.sum(
-                        tl.where(idx_tokens == _idx_token, parent_idx_tokens, 0)
-                    )
+                    _idx_token = tl.sum(tl.where(idx_tokens == _idx_token, parent_idx_tokens, 0))
                     x_ptrs_1d = x_base_1d + _idx_token * stride_x_token  # [BLOCK_N]
                     matrix_x = tl.load(x_ptrs_1d, mask=mask_x_1d)
                 else:
@@ -5178,9 +5098,7 @@ def _causal_conv1d_update_kernel(
 
         if SILU_ACTIVATION:
             acc = acc / (1 + tl.exp(-acc))
-        mask_1d = (idx_token < seqlen) & (
-            idx_feats < dim
-        )  # token-index  # feature-index
+        mask_1d = (idx_token < seqlen) & (idx_feats < dim)  # token-index  # feature-index
         o_ptrs = (
             o_ptr
             + (idx_seq) * stride_o_seq
@@ -5205,16 +5123,16 @@ def causal_conv1d_update(
     x: torch.Tensor,
     conv_state: torch.Tensor,
     weight: torch.Tensor,
-    bias: Optional[torch.Tensor] = None,
-    activation: Union[bool, str, None] = None,
-    cache_seqlens: Optional[torch.Tensor] = None,
-    conv_state_indices: Optional[torch.Tensor] = None,
-    num_accept_tokens: Optional[torch.Tensor] = None,
-    intermediate_conv_window: Optional[torch.Tensor] = None,
-    intermediate_state_indices: Optional[torch.Tensor] = None,
-    retrieve_next_token: Optional[torch.Tensor] = None,
-    retrieve_next_sibling: Optional[torch.Tensor] = None,
-    retrieve_parent_token: Optional[torch.Tensor] = None,
+    bias: torch.Tensor | None = None,
+    activation: bool | str | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    conv_state_indices: torch.Tensor | None = None,
+    num_accept_tokens: torch.Tensor | None = None,
+    intermediate_conv_window: torch.Tensor | None = None,
+    intermediate_state_indices: torch.Tensor | None = None,
+    retrieve_next_token: torch.Tensor | None = None,
+    retrieve_next_sibling: torch.Tensor | None = None,
+    retrieve_parent_token: torch.Tensor | None = None,
     pad_slot_id: int = PAD_SLOT_ID,
     metadata=None,
     validate_data=False,
@@ -5287,13 +5205,9 @@ def causal_conv1d_update(
 
     stride_o_seq, stride_o_dim, stride_o_token = out.stride()
     stride_istate_seq, stride_istate_dim, stride_istate_token = conv_state.stride()
-    stride_state_indices = (
-        conv_state_indices.stride(0) if conv_state_indices is not None else 0
-    )
+    stride_state_indices = conv_state_indices.stride(0) if conv_state_indices is not None else 0
     stride_intermediate_state_indices = (
-        intermediate_state_indices.stride(0)
-        if intermediate_state_indices is not None
-        else 0
+        intermediate_state_indices.stride(0) if intermediate_state_indices is not None else 0
     )
     if num_accept_tokens is not None:
         state_len = width - 1 + (seqlen - 1)  # effective state_len needed
@@ -5543,11 +5457,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
         idx = tl.load(h0_indices + i_n).to(tl.int64)
         if idx >= 0:
             p_h0 = (
-                h0_source
-                + idx * stride_h0_source
-                + i_hv * K * V
-                + o_v[None, :] * K
-                + o_k[:, None]
+                h0_source + idx * stride_h0_source + i_hv * K * V + o_v[None, :] * K + o_k[:, None]
             )
             b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
 
@@ -5560,9 +5470,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
             + (i_n * stride_retrieve_parent_token_seq)
             + token_indices * stride_retrieve_parent_token_token
         )
-        parent_idx_tokens = tl.load(
-            retrieve_parent_token_base, mask=mask_retrieve, other=0
-        )
+        parent_idx_tokens = tl.load(retrieve_parent_token_base, mask=mask_retrieve, other=0)
 
     # Prepare intermediate state cache index if enabled. int64: the buffer is
     # contiguous but `cache_idx * cache_steps * HV * K * V` can exceed int32 for
@@ -5577,9 +5485,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
         if HAS_EAGLE_TREE_CUSTOM_ATTN_MASK:
             # step_idx == 0 uses b_h from USE_INITIAL_STATE
             if step_idx != 0 and cache_idx >= 0:
-                parent_step_idx = tl.sum(
-                    tl.where(token_indices == step_idx, parent_idx_tokens, 0)
-                )
+                parent_step_idx = tl.sum(tl.where(token_indices == step_idx, parent_idx_tokens, 0))
                 step_offset = parent_step_idx * HV * K * V
                 cache_ptr = (
                     intermediate_states_buffer
@@ -5765,25 +5671,25 @@ def fused_sigmoid_gating_delta_rule_update(
     b: torch.Tensor,
     initial_state_source: torch.Tensor,
     initial_state_indices: torch.Tensor,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     use_qk_l2norm_in_kernel: bool = False,
-    cu_seqlens: Optional[torch.Tensor] = None,
+    cu_seqlens: torch.Tensor | None = None,
     is_kda: bool = False,
-    lower_bound: Optional[float] = None,
+    lower_bound: float | None = None,
     # Optional parameters for target_verify support
     disable_state_update: bool = False,
-    intermediate_states_buffer: Optional[torch.Tensor] = None,
-    intermediate_state_indices: Optional[torch.Tensor] = None,
-    cache_steps: Optional[int] = None,
-    retrieve_parent_token: Optional[torch.Tensor] = None,
+    intermediate_states_buffer: torch.Tensor | None = None,
+    intermediate_state_indices: torch.Tensor | None = None,
+    cache_steps: int | None = None,
+    retrieve_parent_token: torch.Tensor | None = None,
     # fused ReplaySSM ring-write (spec verify). When cache_ring, each draft step
     # stores pre-norm k / raw v / gate / beta into these per-slot rings,
     # replacing the eager ring-write. Off by default -> decode unchanged.
     cache_ring: bool = False,
-    replayssm_rawv: Optional[torch.Tensor] = None,
-    replayssm_rawk: Optional[torch.Tensor] = None,
-    replayssm_g: Optional[torch.Tensor] = None,
-    replayssm_beta: Optional[torch.Tensor] = None,
+    replayssm_rawv: torch.Tensor | None = None,
+    replayssm_rawk: torch.Tensor | None = None,
+    replayssm_g: torch.Tensor | None = None,
+    replayssm_beta: torch.Tensor | None = None,
 ):
     """
     Fused triton implementation of sigmoid gating delta rule update.
@@ -5939,7 +5845,6 @@ def fused_sigmoid_gating_delta_rule_update(
     return o
 
 
-
 @dataclasses.dataclass
 class HybridCache:
     """Per-request keys, values, convolution history, and recurrent state.
@@ -5948,6 +5853,7 @@ class HybridCache:
     lengths are counts of tokens already consumed, not generated tokens pending
     consumption. Do not mutate a cache concurrently from multiple calls.
     """
+
     owner: int
     lengths: list[int]
     capacity: int
@@ -5957,10 +5863,15 @@ class HybridCache:
     recurrent: dict[int, torch.Tensor]
 
     def clone(self):
-        return HybridCache(self.owner, self.lengths.copy(), self.capacity, self.max_context,
-                           {i: (k.clone(), v.clone()) for i, (k, v) in self.kv.items()},
-                           {i: x.clone() for i, x in self.conv.items()},
-                           {i: x.clone() for i, x in self.recurrent.items()})
+        return HybridCache(
+            self.owner,
+            self.lengths.copy(),
+            self.capacity,
+            self.max_context,
+            {i: (k.clone(), v.clone()) for i, (k, v) in self.kv.items()},
+            {i: x.clone() for i, x in self.conv.items()},
+            {i: x.clone() for i, x in self.recurrent.items()},
+        )
 
     @torch.inference_mode()
     def reset(self, request_indices=None):
@@ -5991,7 +5902,9 @@ def _token_batch(input_ids):
                 raise ValueError("Each request must be a 1D integer sequence")
             row = row.tolist()
         if not isinstance(row, (list, tuple)) or not row:
-            raise ValueError("Empty requests and padded tensors are not accepted; pass unpadded lists")
+            raise ValueError(
+                "Empty requests and padded tensors are not accepted; pass unpadded lists"
+            )
         if any(type(t) is not int for t in row):
             raise ValueError("Token IDs must be integers")
         result.append(list(row))
@@ -6005,9 +5918,10 @@ class Qwen38:
     def __init__(self, model_path="/path/to/Qwen3.8-27B", device="cuda:0", max_context=None):
         import flashinfer
         from flashinfer.gdn_prefill import chunk_gated_delta_rule
+
         # sglang-kernel 0.4.6.post1 delegates these BF16 calls to FlashInfer.
         # Import that same implementation directly, without its Torch ABI binding.
-        from flashinfer.norm import gemma_rmsnorm, gemma_fused_add_rmsnorm
+        from flashinfer.norm import gemma_fused_add_rmsnorm, gemma_rmsnorm
 
         self.path = Path(model_path)
         self.device = torch.device(device)
@@ -6019,16 +5933,28 @@ class Qwen38:
         self.dtype = torch.bfloat16
         self.config = json.loads((self.path / "config.json").read_text())["text_config"]
         c = self.config
-        expected = {"hidden_size": 5120, "intermediate_size": 17408,
-                    "num_attention_heads": 24, "num_key_value_heads": 4,
-                    "head_dim": 256, "linear_num_key_heads": 16,
-                    "linear_num_value_heads": 48, "linear_key_head_dim": 128,
-                    "linear_value_head_dim": 128, "linear_conv_kernel_dim": 4,
-                    "num_hidden_layers": 64, "vocab_size": 248320}
+        expected = {
+            "hidden_size": 5120,
+            "intermediate_size": 17408,
+            "num_attention_heads": 24,
+            "num_key_value_heads": 4,
+            "head_dim": 256,
+            "linear_num_key_heads": 16,
+            "linear_num_value_heads": 48,
+            "linear_key_head_dim": 128,
+            "linear_value_head_dim": 128,
+            "linear_conv_kernel_dim": 4,
+            "num_hidden_layers": 64,
+            "vocab_size": 248320,
+        }
         for key, value in expected.items():
             if c.get(key) != value:
                 raise ValueError(f"Not the supported Qwen3.8-27B configuration: {key}={c.get(key)}")
-        if c.get("attention_bias") or c.get("hidden_act") != "silu" or not c.get("attn_output_gate"):
+        if (
+            c.get("attention_bias")
+            or c.get("hidden_act") != "silu"
+            or not c.get("attn_output_gate")
+        ):
             raise ValueError("Unsupported attention/activation configuration")
         if c.get("output_gate_type", "swish") != "swish" or c.get("quantization_config"):
             raise ValueError("Only unquantized weights with the swish output gate are supported")
@@ -6037,7 +5963,9 @@ class Qwen38:
         if not 1 <= self.max_context <= c["max_position_embeddings"]:
             raise ValueError("max_context must be within the model context limit")
         self.layer_types = c["layer_types"]
-        if self.layer_types != ["full_attention" if i % 4 == 3 else "linear_attention" for i in range(64)]:
+        if self.layer_types != [
+            "full_attention" if i % 4 == 3 else "linear_attention" for i in range(64)
+        ]:
             raise ValueError("Unexpected hybrid attention layout")
         generation = json.loads((self.path / "generation_config.json").read_text())
         eos = generation.get("eos_token_id", c["eos_token_id"])
@@ -6051,7 +5979,9 @@ class Qwen38:
         self._context_attention = flashinfer.prefill.trtllm_batch_context_with_kv_cache
         self._decode_attention = flashinfer.decode.trtllm_batch_decode_with_kv_cache
         sm_count = flashinfer.utils.get_device_sm_count(self.device)
-        counter_bytes = flashinfer.utils.get_trtllm_gen_multi_ctas_kv_counter_bytes(8192, 24, sm_count)
+        counter_bytes = flashinfer.utils.get_trtllm_gen_multi_ctas_kv_counter_bytes(
+            8192, 24, sm_count
+        )
         self._attention_counter = torch.zeros(counter_bytes, dtype=torch.uint8, device=self.device)
         self._load_weights()
         # RoPE is the same partial, non-interleaved rotation as the text path in
@@ -6062,7 +5992,13 @@ class Qwen38:
             raise ValueError("Unsupported rotary embedding configuration")
         # Upstream builds this cache under the CUDA model-loading context.
         # Computing it on CPU changes transcendental rounding before rotation.
-        inv_freq = 1.0 / (rp["rope_theta"] ** (torch.arange(0, self.rotary_dim, 2, dtype=torch.float32, device=self.device) / self.rotary_dim))
+        inv_freq = 1.0 / (
+            rp["rope_theta"]
+            ** (
+                torch.arange(0, self.rotary_dim, 2, dtype=torch.float32, device=self.device)
+                / self.rotary_dim
+            )
+        )
         positions = torch.arange(self.max_context, dtype=torch.float32, device=self.device)
         freqs = torch.einsum("i,j->ij", positions, inv_freq)
         self.rope = torch.cat((freqs.cos(), freqs.sin()), dim=-1)
@@ -6090,13 +6026,25 @@ class Qwen38:
         self.layers = []
         for i, kind in enumerate(self.layer_types):
             p = prefix + f"layers.{i}."
-            w = {"input_norm": read(p + "input_layernorm.weight", (5120,)),
-                 "post_norm": read(p + "post_attention_layernorm.weight", (5120,)),
-                 "down": read(p + "mlp.down_proj.weight", (5120, 17408))}
-            w["gate_up"] = torch.cat((read(p + "mlp.gate_proj.weight", (17408, 5120)), read(p + "mlp.up_proj.weight", (17408, 5120))))
+            w = {
+                "input_norm": read(p + "input_layernorm.weight", (5120,)),
+                "post_norm": read(p + "post_attention_layernorm.weight", (5120,)),
+                "down": read(p + "mlp.down_proj.weight", (5120, 17408)),
+            }
+            w["gate_up"] = torch.cat(
+                (
+                    read(p + "mlp.gate_proj.weight", (17408, 5120)),
+                    read(p + "mlp.up_proj.weight", (17408, 5120)),
+                )
+            )
             if kind == "full_attention":
                 p += "self_attn."
-                w["qkv"] = torch.cat([read(p + name + ".weight", (dim, 5120)) for name, dim in [("q_proj", 12288), ("k_proj", 1024), ("v_proj", 1024)]])
+                w["qkv"] = torch.cat(
+                    [
+                        read(p + name + ".weight", (dim, 5120))
+                        for name, dim in [("q_proj", 12288), ("k_proj", 1024), ("v_proj", 1024)]
+                    ]
+                )
                 w["out"] = read(p + "o_proj.weight", (5120, 6144))
                 w["q_norm"] = read(p + "q_norm.weight", (256,))
                 w["k_norm"] = read(p + "k_norm.weight", (256,))
@@ -6105,18 +6053,32 @@ class Qwen38:
                 if p + "in_proj_qkvz.weight" in index:
                     w["qkvz"] = read(p + "in_proj_qkvz.weight", (16384, 5120))
                 else:
-                    w["qkvz"] = torch.cat((read(p + "in_proj_qkv.weight", (10240, 5120)), read(p + "in_proj_z.weight", (6144, 5120))))
+                    w["qkvz"] = torch.cat(
+                        (
+                            read(p + "in_proj_qkv.weight", (10240, 5120)),
+                            read(p + "in_proj_z.weight", (6144, 5120)),
+                        )
+                    )
                 if p + "in_proj_ba.weight" in index:
                     w["ba"] = read(p + "in_proj_ba.weight", (96, 5120))
                 else:
-                    w["ba"] = torch.cat((read(p + "in_proj_b.weight", (48, 5120)), read(p + "in_proj_a.weight", (48, 5120))))
+                    w["ba"] = torch.cat(
+                        (
+                            read(p + "in_proj_b.weight", (48, 5120)),
+                            read(p + "in_proj_a.weight", (48, 5120)),
+                        )
+                    )
                 w["conv"] = read(p + "conv1d.weight", (10240, 1, 4)).view(10240, 4)
                 w["A_log"] = read(p + "A_log", (48,), dtype=torch.float32)
                 w["dt_bias"] = read(p + "dt_bias", (48,))
                 w["norm"] = read(p + "norm.weight", (128,))
                 w["out"] = read(p + "out_proj.weight", (5120, 6144))
             self.layers.append(w)
-        unexpected = [name for name in index if name.startswith(prefix) and name not in loaded and ".mtp." not in name]
+        unexpected = [
+            name
+            for name in index
+            if name.startswith(prefix) and name not in loaded and ".mtp." not in name
+        ]
         if unexpected:
             raise ValueError(f"Unconsumed language-model weights: {unexpected[:8]}")
         self.loaded_weight_names = sorted(loaded)
@@ -6135,10 +6097,14 @@ class Qwen38:
                 shape = (batch_size * capacity + self.page_size, 4, 256)
                 # Upstream initializes the entire pool, including unused page
                 # tails and the reserved page, to zero. Preserve that invariant.
-                kv[i] = tuple(torch.zeros(shape, dtype=self.dtype, device=self.device) for _ in range(2))
+                kv[i] = tuple(
+                    torch.zeros(shape, dtype=self.dtype, device=self.device) for _ in range(2)
+                )
             else:
                 conv[i] = torch.zeros((batch_size, 10240, 3), dtype=self.dtype, device=self.device)
-                recurrent[i] = torch.zeros((batch_size, 48, 128, 128), dtype=torch.float32, device=self.device)
+                recurrent[i] = torch.zeros(
+                    (batch_size, 48, 128, 128), dtype=torch.float32, device=self.device
+                )
         return HybridCache(id(self), [0] * batch_size, capacity, limit, kv, conv, recurrent)
 
     def _reserve(self, cache, needed):
@@ -6146,14 +6112,29 @@ class Qwen38:
             raise ValueError(f"Context limit exceeded: {needed} > {cache.max_context}")
         if needed <= cache.capacity:
             return
-        capacity = math.ceil(min(cache.max_context, max(needed, cache.capacity * 2)) / self.page_size) * self.page_size
+        capacity = (
+            math.ceil(min(cache.max_context, max(needed, cache.capacity * 2)) / self.page_size)
+            * self.page_size
+        )
         new_kv = {}
         for i, pair in cache.kv.items():
             new_pair = []
             for old in pair:
-                new = torch.zeros((len(cache.lengths) * capacity + self.page_size, 4, 256), dtype=self.dtype, device=self.device)
+                new = torch.zeros(
+                    (len(cache.lengths) * capacity + self.page_size, 4, 256),
+                    dtype=self.dtype,
+                    device=self.device,
+                )
                 for slot, length in enumerate(cache.lengths):
-                    new[self.page_size + slot * capacity:self.page_size + slot * capacity + length].copy_(old[self.page_size + slot * cache.capacity:self.page_size + slot * cache.capacity + length])
+                    new[
+                        self.page_size + slot * capacity : self.page_size + slot * capacity + length
+                    ].copy_(
+                        old[
+                            self.page_size + slot * cache.capacity : self.page_size
+                            + slot * cache.capacity
+                            + length
+                        ]
+                    )
                 new_pair.append(new)
             new_kv[i] = tuple(new_pair)
         cache.kv = new_kv
@@ -6170,15 +6151,24 @@ class Qwen38:
             kv_cache.lengths[slot] = length
         return logits
 
-    def _prepare_step(self, input_ids, kv_cache, request_indices=None,
-                      return_all_logits=False, fixed_pages=False):
+    def _prepare_step(
+        self, input_ids, kv_cache, request_indices=None, return_all_logits=False, fixed_pages=False
+    ):
         rows, _ = _token_batch(input_ids)
         cache = kv_cache
         if not isinstance(cache, HybridCache) or cache.owner != id(self):
             raise ValueError("kv_cache must have been created by this model")
-        slots = list(range(len(cache.lengths))) if request_indices is None else list(request_indices)
-        if len(slots) != len(rows) or len(set(slots)) != len(slots) or any(type(s) is not int or s < 0 or s >= len(cache.lengths) for s in slots):
-            raise ValueError("request_indices must identify one distinct cache slot per input sequence")
+        slots = (
+            list(range(len(cache.lengths))) if request_indices is None else list(request_indices)
+        )
+        if (
+            len(slots) != len(rows)
+            or len(set(slots)) != len(slots)
+            or any(type(s) is not int or s < 0 or s >= len(cache.lengths) for s in slots)
+        ):
+            raise ValueError(
+                "request_indices must identify one distinct cache slot per input sequence"
+            )
         flat = [t for row in rows for t in row]
         if any(t < 0 or t >= self.config["vocab_size"] for t in flat):
             raise ValueError("Token ID outside model vocabulary")
@@ -6190,38 +6180,82 @@ class Qwen38:
                 raise ValueError("Prepared cache capacity exceeded")
         else:
             self._reserve(cache, max(lengths))
-        offsets = getattr(cache, "slot_offsets", [s * cache.capacity for s in range(len(cache.lengths))])
+        offsets = getattr(
+            cache, "slot_offsets", [s * cache.capacity for s in range(len(cache.lengths))]
+        )
         is_decode = all(n == 1 and p > 0 for n, p in zip(lens, prefixes))
         cu = [0]
         kv_cu = [0]
         for n, length in zip(lens, lengths):
             cu.append(cu[-1] + n)
             kv_cu.append(kv_cu[-1] + length)
+
         def tensor(data, dtype=torch.int32):
             return torch.tensor(data, dtype=dtype, device=self.device)
+
         query_start = tensor(cu)
         state_indices = tensor(slots)
         positions = tensor([p + j for p, n in zip(prefixes, lens) for j in range(n)], torch.int64)
-        locations = tensor([self.page_size + offsets[s] + p + j for s, p, n in zip(slots, prefixes, lens) for j in range(n)], torch.int64)
+        locations = tensor(
+            [
+                self.page_size + offsets[s] + p + j
+                for s, p, n in zip(slots, prefixes, lens)
+                for j in range(n)
+            ],
+            torch.int64,
+        )
         pages_per_slot = cache.capacity // self.page_size
         max_pages = pages_per_slot if fixed_pages else math.ceil(max(lengths) / self.page_size)
-        page_table = tensor([[1 + offsets[s] // self.page_size + j if j < math.ceil(n / self.page_size) else 0 for j in range(max_pages)] for s, n in zip(slots, lengths)])
+        page_table = tensor(
+            [
+                [
+                    1 + offsets[s] // self.page_size + j if j < math.ceil(n / self.page_size) else 0
+                    for j in range(max_pages)
+                ]
+                for s, n in zip(slots, lengths)
+            ]
+        )
         sequence_lengths = tensor(lengths)
         kv_starts = tensor(kv_cu)
         has_initial = tensor([p > 0 for p in prefixes], torch.bool)
         inputs = dict(
-            token_ids=tensor(flat, torch.int64), query_start=query_start,
-            state_indices=state_indices, positions=positions, locations=locations,
-            page_table=page_table, sequence_lengths=sequence_lengths,
-            kv_starts=kv_starts, has_initial=has_initial, is_decode=is_decode,
-            max_q_len=max(lens), query_lens=lens,
-            last_indices=None if return_all_logits else tensor([end - 1 for end in cu[1:]], torch.int64),
+            token_ids=tensor(flat, torch.int64),
+            query_start=query_start,
+            state_indices=state_indices,
+            positions=positions,
+            locations=locations,
+            page_table=page_table,
+            sequence_lengths=sequence_lengths,
+            kv_starts=kv_starts,
+            has_initial=has_initial,
+            is_decode=is_decode,
+            max_q_len=max(lens),
+            query_lens=lens,
+            last_indices=None
+            if return_all_logits
+            else tensor([end - 1 for end in cu[1:]], torch.int64),
         )
         return slots, lengths, inputs
 
-    def _forward(self, cache, *, token_ids, query_start, state_indices, positions,
-                 locations, page_table, sequence_lengths, kv_starts, has_initial,
-                 is_decode, max_q_len, query_lens, last_indices, verify=False):
+    def _forward(
+        self,
+        cache,
+        *,
+        token_ids,
+        query_start,
+        state_indices,
+        positions,
+        locations,
+        page_table,
+        sequence_lengths,
+        kv_starts,
+        has_initial,
+        is_decode,
+        max_q_len,
+        query_lens,
+        last_indices,
+        verify=False,
+    ):
         hidden = F.embedding(token_ids, self.embedding)
         residual = None
         for i, (kind, w) in enumerate(zip(self.layer_types, self.layers)):
@@ -6233,16 +6267,64 @@ class Qwen38:
             if kind == "full_attention":
                 projected = F.linear(hidden, w["qkv"])
                 qg, k, v = projected.split([12288, 1024, 1024], dim=-1)
-                q, k, gate = fused_qk_gemma_rmsnorm_rope_gate(qg, k, w["q_norm"], w["k_norm"], self.rope, positions, self.eps, 24, 4, 256, self.rotary_dim, has_gate=True)
+                q, k, gate = fused_qk_gemma_rmsnorm_rope_gate(
+                    qg,
+                    k,
+                    w["q_norm"],
+                    w["k_norm"],
+                    self.rope,
+                    positions,
+                    self.eps,
+                    24,
+                    4,
+                    256,
+                    self.rotary_dim,
+                    has_gate=True,
+                )
                 kc, vc = cache.kv[i]
-                self._ops.store(k.view(-1, 1024), v, kc.view(-1, 1024), vc.view(-1, 1024), locations, 4, kc.shape[0], 0)
-                paged_kv = tuple(t.view(-1, self.page_size, 4, 256).permute(0, 2, 1, 3) for t in (kc, vc))
-                attention_args = dict(query=q.view(-1, 24, 256), kv_cache=paged_kv, workspace_buffer=self.workspace, block_tables=page_table, seq_lens=sequence_lengths, bmm1_scale=256 ** -0.5, bmm2_scale=1.0, window_left=-1, sinks=None, skip_softmax_threshold_scale_factor=None, out_dtype=self.dtype)
+                self._ops.store(
+                    k.view(-1, 1024),
+                    v,
+                    kc.view(-1, 1024),
+                    vc.view(-1, 1024),
+                    locations,
+                    4,
+                    kc.shape[0],
+                    0,
+                )
+                paged_kv = tuple(
+                    t.view(-1, self.page_size, 4, 256).permute(0, 2, 1, 3) for t in (kc, vc)
+                )
+                attention_args = dict(
+                    query=q.view(-1, 24, 256),
+                    kv_cache=paged_kv,
+                    workspace_buffer=self.workspace,
+                    block_tables=page_table,
+                    seq_lens=sequence_lengths,
+                    bmm1_scale=256**-0.5,
+                    bmm2_scale=1.0,
+                    window_left=-1,
+                    sinks=None,
+                    skip_softmax_threshold_scale_factor=None,
+                    out_dtype=self.dtype,
+                )
                 if is_decode or verify:
                     extra = {"q_len_per_req": max_q_len} if verify else {}
-                    out = self._decode_attention(**attention_args, max_seq_len=self.max_context, multi_ctas_kv_counter_buffer=self._attention_counter, **extra)
+                    out = self._decode_attention(
+                        **attention_args,
+                        max_seq_len=self.max_context,
+                        multi_ctas_kv_counter_buffer=self._attention_counter,
+                        **extra,
+                    )
                 else:
-                    out = self._context_attention(**attention_args, max_q_len=max_q_len, max_kv_len=self.max_context, batch_size=state_indices.numel(), cum_seq_lens_q=query_start, cum_seq_lens_kv=kv_starts)
+                    out = self._context_attention(
+                        **attention_args,
+                        max_q_len=max_q_len,
+                        max_kv_len=self.max_context,
+                        batch_size=state_indices.numel(),
+                        cum_seq_lens_q=query_start,
+                        cum_seq_lens_kv=kv_starts,
+                    )
                 out = out.view(-1, 6144)
                 out = fused_sigmoid_mul(out, gate.view(-1, 6144), inplace=True)
                 hidden = F.linear(out, w["out"])
@@ -6250,46 +6332,120 @@ class Qwen38:
                 qkvz = F.linear(hidden, w["qkvz"])
                 ba = F.linear(hidden, w["ba"])
                 if is_decode:
-                    mixed, z, b, a = fused_qkvzba_causal_conv1d_update_contiguous(qkvz, ba, cache.conv[i], w["conv"], None, state_indices, qkv_dim=10240, v_dim=6144, num_v_heads=48, head_v_dim=128, activation="silu")
+                    mixed, z, b, a = fused_qkvzba_causal_conv1d_update_contiguous(
+                        qkvz,
+                        ba,
+                        cache.conv[i],
+                        w["conv"],
+                        None,
+                        state_indices,
+                        qkv_dim=10240,
+                        v_dim=6144,
+                        num_v_heads=48,
+                        head_v_dim=128,
+                        activation="silu",
+                    )
                     out = mixed.new_empty(state_indices.numel(), 1, 48, 128)
-                    fused_recurrent_gated_delta_rule_packed_decode(mixed_qkv=mixed, a=a, b=b, A_log=w["A_log"], dt_bias=w["dt_bias"], scale=128 ** -0.5, initial_state=cache.recurrent[i], out=out, ssm_state_indices=state_indices, use_qk_l2norm_in_kernel=True)
+                    fused_recurrent_gated_delta_rule_packed_decode(
+                        mixed_qkv=mixed,
+                        a=a,
+                        b=b,
+                        A_log=w["A_log"],
+                        dt_bias=w["dt_bias"],
+                        scale=128**-0.5,
+                        initial_state=cache.recurrent[i],
+                        out=out,
+                        ssm_state_indices=state_indices,
+                        use_qk_l2norm_in_kernel=True,
+                    )
                     z = z.reshape(-1, 128)
                 elif verify:
-                    mixed, z, b, a = qwen3_5_gdn_prefill_projection_views(qkvz, ba, 16, 48, 128, 128)
-                    mixed = causal_conv1d_update(
-                        mixed.view(state_indices.numel(), max_q_len, -1).transpose(1, 2),
-                        cache.conv[i], w["conv"], activation="silu",
-                        conv_state_indices=state_indices,
-                        intermediate_conv_window=cache.verify_conv[i],
-                        intermediate_state_indices=state_indices,
-                    ).transpose(1, 2).reshape(-1, 10240)
+                    mixed, z, b, a = qwen3_5_gdn_prefill_projection_views(
+                        qkvz, ba, 16, 48, 128, 128
+                    )
+                    mixed = (
+                        causal_conv1d_update(
+                            mixed.view(state_indices.numel(), max_q_len, -1).transpose(1, 2),
+                            cache.conv[i],
+                            w["conv"],
+                            activation="silu",
+                            conv_state_indices=state_indices,
+                            intermediate_conv_window=cache.verify_conv[i],
+                            intermediate_state_indices=state_indices,
+                        )
+                        .transpose(1, 2)
+                        .reshape(-1, 10240)
+                    )
                     q, k, v = mixed.split([2048, 2048, 6144], dim=-1)
                     out = fused_sigmoid_gating_delta_rule_update(
-                        A_log=w["A_log"], dt_bias=w["dt_bias"], a=a, b=b,
-                        q=q.view(1, -1, 16, 128), k=k.view(1, -1, 16, 128),
+                        A_log=w["A_log"],
+                        dt_bias=w["dt_bias"],
+                        a=a,
+                        b=b,
+                        q=q.view(1, -1, 16, 128),
+                        k=k.view(1, -1, 16, 128),
                         v=v.view(1, -1, 48, 128),
-                        initial_state_source=cache.recurrent[i], initial_state_indices=state_indices,
-                        cu_seqlens=query_start, use_qk_l2norm_in_kernel=True,
-                        softplus_beta=1.0, softplus_threshold=20.0,
+                        initial_state_source=cache.recurrent[i],
+                        initial_state_indices=state_indices,
+                        cu_seqlens=query_start,
+                        use_qk_l2norm_in_kernel=True,
+                        softplus_beta=1.0,
+                        softplus_threshold=20.0,
                         disable_state_update=True,
                         intermediate_states_buffer=cache.verify_recurrent[i],
-                        intermediate_state_indices=state_indices, cache_steps=max_q_len,
+                        intermediate_state_indices=state_indices,
+                        cache_steps=max_q_len,
                     )
                 else:
-                    mixed, z, b, a = qwen3_5_gdn_prefill_projection_views(qkvz, ba, 16, 48, 128, 128)
-                    mixed = causal_conv1d_fn(mixed.T, w["conv"], None, cache.conv[i], query_start, query_lens, cache_indices=state_indices, has_initial_state=has_initial, activation="silu").T
+                    mixed, z, b, a = qwen3_5_gdn_prefill_projection_views(
+                        qkvz, ba, 16, 48, 128, 128
+                    )
+                    mixed = causal_conv1d_fn(
+                        mixed.T,
+                        w["conv"],
+                        None,
+                        cache.conv[i],
+                        query_start,
+                        query_lens,
+                        cache_indices=state_indices,
+                        has_initial_state=has_initial,
+                        activation="silu",
+                    ).T
                     q, k, v = fused_qkv_split_gdn_prefill(mixed, 16, 16, 48, 128, 128, 128)
                     q, k, v = gdn_prefill_qkv_prepare_fwd(q[0], k[0], v[0])
                     g, beta = fused_gdn_gating(w["A_log"], a, b, w["dt_bias"])
                     initial = cache.recurrent[i][state_indices.to(torch.int64)].contiguous()
                     final = torch.empty_like(initial)
-                    out, final = self._gdn_prefill(q=q, k=k, v=v, g=torch.exp(g[0].float()), beta=beta[0].float(), scale=None, initial_state=initial, output_final_state=True, cu_seqlens=query_start.to(torch.int64), use_qk_l2norm_in_kernel=False, output_state=final)
+                    out, final = self._gdn_prefill(
+                        q=q,
+                        k=k,
+                        v=v,
+                        g=torch.exp(g[0].float()),
+                        beta=beta[0].float(),
+                        scale=None,
+                        initial_state=initial,
+                        output_final_state=True,
+                        cu_seqlens=query_start.to(torch.int64),
+                        use_qk_l2norm_in_kernel=False,
+                        output_state=final,
+                    )
                     cache.recurrent[i].index_copy_(0, state_indices.to(torch.int64), final)
-                out = rms_norm_gated(x=out.reshape(-1, 128), weight=w["norm"], bias=None, z=z, eps=self.eps, norm_before_gate=True, is_rms_norm=True, activation="swish")
+                out = rms_norm_gated(
+                    x=out.reshape(-1, 128),
+                    weight=w["norm"],
+                    bias=None,
+                    z=z,
+                    eps=self.eps,
+                    norm_before_gate=True,
+                    is_rms_norm=True,
+                    activation="swish",
+                )
                 hidden = F.linear(out.reshape(-1, 6144), w["out"])
             self._add_norm(hidden, residual, w["post_norm"], self.eps)
             gate_up = F.linear(hidden, w["gate_up"])
-            activated = torch.empty((token_ids.numel(), 17408), dtype=self.dtype, device=self.device)
+            activated = torch.empty(
+                (token_ids.numel(), 17408), dtype=self.dtype, device=self.device
+            )
             self._ops.silu(gate_up, activated, "silu")
             hidden = F.linear(activated, w["down"])
         self._add_norm(hidden, residual, self.final_norm, self.eps)
@@ -6299,7 +6455,9 @@ class Qwen38:
         return logits
 
     @torch.inference_mode()
-    def generate(self, input_ids, *, max_new_tokens=None, eos_token_ids=None, prefill_chunk_size=512):
+    def generate(
+        self, input_ids, *, max_new_tokens=None, eos_token_ids=None, prefill_chunk_size=512
+    ):
         """Generate new tokens until each request emits EOS, including that EOS.
 
         max_new_tokens=None means no artificial generation cutoff. Exhausting
@@ -6312,8 +6470,14 @@ class Qwen38:
             raise ValueError("max_new_tokens must be a nonnegative integer or None")
         if type(prefill_chunk_size) is not int or prefill_chunk_size < 1:
             raise ValueError("prefill_chunk_size must be a positive integer")
-        eos = self.eos_token_ids if eos_token_ids is None else ({eos_token_ids} if isinstance(eos_token_ids, int) else set(eos_token_ids))
-        if not eos or any(type(t) is not int or t < 0 or t >= self.config["vocab_size"] for t in eos):
+        eos = (
+            self.eos_token_ids
+            if eos_token_ids is None
+            else ({eos_token_ids} if isinstance(eos_token_ids, int) else set(eos_token_ids))
+        )
+        if not eos or any(
+            type(t) is not int or t < 0 or t >= self.config["vocab_size"] for t in eos
+        ):
             raise ValueError("eos_token_ids must contain valid vocabulary IDs")
         output = [[] for _ in rows]
         if max_new_tokens == 0:
@@ -6324,7 +6488,7 @@ class Qwen38:
         last_logits = {}
         for offset in range(0, max(map(len, rows)), prefill_chunk_size):
             slots = [i for i, row in enumerate(rows) if offset < len(row)]
-            chunks = [rows[i][offset:offset + prefill_chunk_size] for i in slots]
+            chunks = [rows[i][offset : offset + prefill_chunk_size] for i in slots]
             logits = self.forward_step(chunks, cache, request_indices=slots)
             for j, slot in enumerate(slots):
                 last_logits[slot] = logits[j]
@@ -6335,10 +6499,14 @@ class Qwen38:
             next_active, next_inputs = [], []
             for slot, token in zip(active, tokens):
                 output[slot].append(token)
-                if token in eos or (max_new_tokens is not None and len(output[slot]) >= max_new_tokens):
+                if token in eos or (
+                    max_new_tokens is not None and len(output[slot]) >= max_new_tokens
+                ):
                     continue
                 if cache.lengths[slot] >= cache.max_context:
-                    raise RuntimeError(f"Request {slot} exhausted context without EOS; produced {len(output[slot])} tokens")
+                    raise RuntimeError(
+                        f"Request {slot} exhausted context without EOS; produced {len(output[slot])} tokens"
+                    )
                 next_active.append(slot)
                 next_inputs.append([token])
             active = next_active
@@ -6365,9 +6533,7 @@ class DecodeRunner:
         limit = model.max_context if max_context is None else max_context
         self.cache = model.new_cache(batch_size, initial_capacity=limit, max_context=limit)
         self.cache.lengths[:] = [1] * batch_size
-        _, _, self.inputs = model._prepare_step(
-            [[0]] * batch_size, self.cache, fixed_pages=True
-        )
+        _, _, self.inputs = model._prepare_step([[0]] * batch_size, self.cache, fixed_pages=True)
         self.graph = torch.cuda.CUDAGraph()
         stream = torch.cuda.Stream(device=model.device)
         stream.wait_stream(torch.cuda.current_stream(model.device))
@@ -6399,9 +6565,7 @@ class DecodeRunner:
             raise ValueError("DecodeRunner requires a permutation of its cache slots")
         if any(self.cache.lengths[slot] == 0 for slot in slots):
             raise ValueError("Prefill each selected slot before decoding")
-        slots, lengths, inputs = self.model._prepare_step(
-            rows, self.cache, slots, fixed_pages=True
-        )
+        slots, lengths, inputs = self.model._prepare_step(rows, self.cache, slots, fixed_pages=True)
         for name, destination in self.inputs.items():
             if isinstance(destination, torch.Tensor):
                 destination.copy_(inputs[name])

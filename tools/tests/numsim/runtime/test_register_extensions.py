@@ -10,15 +10,32 @@ import pytest
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.register_cases import masked_arithmetic_case
 
-
 # PTX spelling, raw carrier, operand carrier, input vectors, expected bits.
 CASES = [
     ("neg.f64", "uint64", "float64", [[0, 0x8000000000000000]], [0x8000000000000000, 0]),
-    ("abs.f64", "uint64", "float64", [[0xBFF0000000000000, 0xFFF0000000000000]], [0x3FF0000000000000, 0x7FF0000000000000]),
+    (
+        "abs.f64",
+        "uint64",
+        "float64",
+        [[0xBFF0000000000000, 0xFFF0000000000000]],
+        [0x3FF0000000000000, 0x7FF0000000000000],
+    ),
     ("neg.ftz.f32", "uint32", "float32", [[1, 0x80000001]], [0x80000000, 0]),
     ("lg2.approx.f32", "uint32", "float32", [[0x3F800000, 0x40800000]], [0, 0x40000000]),
-    ("rsqrt.approx.ftz.f64", "uint64", "float64", [[0x3FF0000000000000, 0x4010000000000000]], [0x3FF0000000000000, 0x3FE0000000000000]),
-    ("min.f32", "uint32", "float32", [[0, 0x3F800000], [0x80000000, 0xBF800000]], [0x80000000, 0xBF800000]),
+    (
+        "rsqrt.approx.ftz.f64",
+        "uint64",
+        "float64",
+        [[0x3FF0000000000000, 0x4010000000000000]],
+        [0x3FF0000000000000, 0x3FE0000000000000],
+    ),
+    (
+        "min.f32",
+        "uint32",
+        "float32",
+        [[0, 0x3F800000], [0x80000000, 0xBF800000]],
+        [0x80000000, 0xBF800000],
+    ),
     ("max.f32", "uint32", "float32", [[0x80000000, 0xBF800000], [0, 0x3F800000]], [0, 0x3F800000]),
     ("min.abs.f32", "uint32", "float32", [[0xC0400000], [0x40000000], [0xBF800000]], [0x3F800000]),
     ("max.abs.f32", "uint32", "float32", [[0xC0400000], [0x40000000], [0xBF800000]], [0x40400000]),
@@ -44,7 +61,9 @@ for dtype, one, half in (("f16", 0x3C00, 0x3800), ("bf16", 0x3F80, 0x3F00)):
             (f"fma.rn.oob.relu.{suffix}", [[pack(0x7FF7, one)], [positive], [0]], [0]),
             (f"ex2.approx.{'' if dtype == 'f16' else 'ftz.'}{suffix}", [[0]], [pack(one, one)]),
         )
-        CASES.extend((spelling, carrier, None, inputs, expected) for spelling, inputs, expected in cases)
+        CASES.extend(
+            (spelling, carrier, None, inputs, expected) for spelling, inputs, expected in cases
+        )
 
 CASES += [
     ("add.rn.sat.f16", "uint16", None, [[0xBC00, 0x4000], [0, 0x3C00]], [0, 0x3C00]),
@@ -65,7 +84,10 @@ def register_cases(carrier, operand):
         if (raw, typed) != (carrier, operand):
             continue
         names = tuple(f"arg_{len(forms)}_{i}" for i in range(len(vectors)))
-        inputs.update((name, np.resize(np.asarray(values, carrier), 32)) for name, values in zip(names, vectors))
+        inputs.update(
+            (name, np.resize(np.asarray(values, carrier), 32))
+            for name, values in zip(names, vectors)
+        )
         forms.append((spelling, names))
         expected.append(np.resize(np.asarray(bits, carrier), 32))
     expected = np.stack(expected)

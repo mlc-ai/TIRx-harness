@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 from tests.numsim.microtests.harness import NUMSIM_GPU_MARK, require_numsim_gpu, run_paired_primfunc
-from tests.numsim.runtime.test_pointer_null import backed_pointer_null_predicates, numeric_null_handle
+from tests.numsim.runtime.test_pointer_null import (
+    backed_pointer_null_predicates,
+    numeric_null_handle,
+)
 
 
 @NUMSIM_GPU_MARK

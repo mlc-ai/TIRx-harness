@@ -432,9 +432,7 @@ def mapa_exposes_integer_address_bits(
     T.ptx.mapa.shared__cluster.u32(mapped32[0], local32[0], peer)
     T.ptx.mapa.shared__cluster.u32(remapped32[0], mapped32[0], T.cast(cta, "uint32"))
     T.ptx.cvta.to.shared__cluster.u64(converted64[0], shared.ptr_to([lane]))
-    T.ptx.mapa.shared__cluster.u64(
-        mapped_shared64[0], T.cast(local32[0], "uint64"), peer
-    )
+    T.ptx.mapa.shared__cluster.u64(mapped_shared64[0], T.cast(local32[0], "uint64"), peer)
     T.ptx.mapa.u64(mapped_generic64[0], T.address_of(shared[lane]), peer)
     addresses32[cta, lane, 0] = local32[0]
     addresses32[cta, lane, 1] = mapped32[0]
@@ -467,9 +465,7 @@ def mapped_addresses_use_ordinary_integer_dataflow(output: T.Buffer((2, 32), "in
     T.cuda.warp_sync()
     loaded[0] = address_slots[31 - lane]
     selected: T.uint32 = T.if_then_else(lane % 2 == 0, mapped[0], loaded[0])
-    shuffled: T.uint32 = T.cuda.__shfl_xor_sync(
-        T.uint32(0xFFFFFFFF), selected, 1, 32
-    )
+    shuffled: T.uint32 = T.cuda.__shfl_xor_sync(T.uint32(0xFFFFFFFF), selected, 1, 32)
     T.ptx.ld.shared__cluster.s32(value[0], shuffled)
     output[cta, lane] = value[0]
 

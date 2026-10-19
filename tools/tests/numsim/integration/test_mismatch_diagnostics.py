@@ -296,9 +296,7 @@ def test_oversized_inner_helper_splits_subthreshold_runs(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("checker", ("synccheck", "racecheck"))
-def test_analysis_inner_split_without_suspend_is_synchronous(
-    checker, tmp_path, monkeypatch
-):
+def test_analysis_inner_split_without_suspend_is_synchronous(checker, tmp_path, monkeypatch):
     monkeypatch.setattr(suspend_scaffold, "_ROOT_UNIFORM_IF_SPLIT_MIN_LINES", 0)
     monkeypatch.setattr(suspend_scaffold, "_INNER_VARYING_IF_SPLIT_MIN_LINES", 0)
     monkeypatch.setattr(suspend_scaffold, "_INNER_ASYNC_SPLIT_MIN_LINES", 10**9)

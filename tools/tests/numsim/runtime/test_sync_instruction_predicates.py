@@ -1,10 +1,10 @@
 """Remaining sync predicates reuse the existing lane mask and register contract."""
 
 import numpy as np
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def pending_predicate_kernel(*, drop=False, valid=True):

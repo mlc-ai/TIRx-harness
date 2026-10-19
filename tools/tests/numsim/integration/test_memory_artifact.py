@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.transpiler import suspend_scaffold

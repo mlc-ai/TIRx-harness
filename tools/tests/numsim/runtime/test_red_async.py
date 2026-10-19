@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
+from tvm.script import tirx as T
 
 
 def reduction_kernel(op, ptx_type, *, bulk=False, wait=True, lanes=1):
@@ -104,5 +104,6 @@ def test_shared_async_reduction_completion(bulk, ptx_type, op, expected, tmp_pat
     report = racecheck(reduction_kernel(op, ptx_type, bulk=bulk, wait=False), args)
     assert report.verdict == "error"
     assert any(
-        f.status == "error" and f.details["access_pair"] in {"write_read", "read_write"} for f in report.findings
+        f.status == "error" and f.details["access_pair"] in {"write_read", "read_write"}
+        for f in report.findings
     )

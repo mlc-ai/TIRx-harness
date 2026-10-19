@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
+from tvm.script import tirx as T
 
 LDMATRIX_B8_CASES = [
     (bits, rows, count)
@@ -101,7 +101,9 @@ def test_ldmatrix_b8_invalid_controls(mutation):
     report = racecheck(kernel, inputs)
     assert report.verdict == "error", report.format()
     if mutation == "unordered":
-        assert any(finding.details["access_pair"] == "write_read" for finding in report.findings), report.format()
+        assert any(finding.details["access_pair"] == "write_read" for finding in report.findings), (
+            report.format()
+        )
     elif mutation == "unaligned":
         assert "row address must be 16-byte aligned" in report.format()
     else:

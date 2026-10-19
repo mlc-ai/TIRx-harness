@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from tirx_harness.numsim.dtype_abi import dtype_itemsize, vector_dtype_abi
-from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tests.numsim.support.manifest import (
     call_op_names,
     evaluated_kernel,
     resolved_kernel,
 )
+from tirx_harness.numsim.dtype_abi import dtype_itemsize, vector_dtype_abi
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.backend.cuda.op import cuda_atomic_cas
 from tvm.tirx import Cast, Var, decl_buffer
 

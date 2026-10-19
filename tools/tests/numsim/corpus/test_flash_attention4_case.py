@@ -10,6 +10,8 @@ from tests.numsim.corpus.kernels.attention import (
 )
 from tests.numsim.corpus.kernels.attention import (
     numpy_attention_reference,
+)
+from tests.numsim.corpus.kernels.attention import (
     prepare_flash_attention4_case as prepare_numsim_case,
 )
 from tests.numsim.support._tirx_kernels import load_tirx_kernel

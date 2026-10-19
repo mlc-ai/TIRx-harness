@@ -1,10 +1,10 @@
 """Primitive bitwise nodes are subject to NumSim's scalar dtype contract."""
 
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm.script import tirx as T
 
 
 @pytest.mark.parametrize(

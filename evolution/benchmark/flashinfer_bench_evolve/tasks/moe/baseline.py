@@ -6,7 +6,6 @@ from __future__ import annotations
 import torch
 from flashinfer.fused_moe import trtllm_fp8_block_scale_moe
 
-
 NUM_EXPERTS = 256
 TOP_K = 8
 N_GROUP = 8

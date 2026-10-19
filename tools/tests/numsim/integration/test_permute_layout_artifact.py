@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import (
     global_permute_layout_roundtrip,
     permuted_global_layout_read,
@@ -12,6 +11,7 @@ from tests.numsim.support.kernels import (
     shared_permute_layout_zero_fills_fp16_padding,
     shared_permute_layout_zero_fills_uninitialized_padding,
 )
+from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TileLayout

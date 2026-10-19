@@ -6,9 +6,6 @@ from time import perf_counter
 
 import pytest
 
-from tirx_kernels.registry import discover_kernels
-from tirx_harness.numsim import Engine, run_case, transpile
-from tirx_harness.numsim.api import ExecutionSubset
 from tests.numsim.corpus.canonical_cases import (
     CANONICAL_KERNEL_CASES,
     CANONICAL_KERNEL_MANIFEST,
@@ -16,7 +13,9 @@ from tests.numsim.corpus.canonical_cases import (
 )
 from tests.numsim.corpus.kernels.deepgemm import prepare_mega_moe_case
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
-
+from tirx_harness.numsim import Engine, run_case, transpile
+from tirx_harness.numsim.api import ExecutionSubset
+from tirx_kernels.registry import discover_kernels
 
 _MEGA_MOE_MAX_CONFIG_LABEL = "t8192_m8192_h7168_i3072_e384_k6_g1"
 # 2026-09-18: this exact Engine.run took 130.602536/136.797175s on the 224-CPU runner,
@@ -66,7 +65,8 @@ def test_rubin_gather_swiglu_reuses_all_eight_a_stages():
     for checker in ("synccheck", "racecheck"):
         module = transpile(case.kernel, _analysis_checker=checker)
         result = getattr(Engine(), f"run_{checker}_phase")(
-            module, case.args,
+            module,
+            case.args,
         )
         assert result.verdict == "clean", result.to_dict()
 

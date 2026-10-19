@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import float8_buffer_codecs
+from tirx_harness import numsim
 
 
 def _decode_e4m3(bits: np.ndarray) -> np.ndarray:

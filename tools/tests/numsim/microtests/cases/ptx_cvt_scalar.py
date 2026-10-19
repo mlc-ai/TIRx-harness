@@ -8,6 +8,7 @@ instruction rather than per array offset.
 from __future__ import annotations
 
 import numpy as np
+
 from tvm.script import tirx as T
 
 from .ptx_cvt_scalar_goldens import SCALAR_CVT_INPUTS

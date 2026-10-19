@@ -27,7 +27,8 @@ def test_native_alphamoe_public_m8_matches_reference(pytestconfig):
     reference, abs_sum = module._torch_reference(case)
     module.check_correctness(
         {"first": first, "actual": actual, "reference": reference, "abs_sum": abs_sum},
-        label="m8_official", num_tokens=8,
+        label="m8_official",
+        num_tokens=8,
     )
 
 

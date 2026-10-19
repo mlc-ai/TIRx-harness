@@ -3,9 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness.numsim import checkers
-
 from tests.numsim.runtime.test_raw_tcgen_codegen import raw_tcgen_mma_bf16_ss
+from tirx_harness.numsim import checkers
 
 
 @pytest.mark.parametrize(

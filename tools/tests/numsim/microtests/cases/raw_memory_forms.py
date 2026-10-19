@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
 from tests.numsim.integration.test_raw_memory_artifact import (
     raw_global_nc_eviction_and_prefetch_hint_matrix,
     raw_global_nc_v2_destination_load,

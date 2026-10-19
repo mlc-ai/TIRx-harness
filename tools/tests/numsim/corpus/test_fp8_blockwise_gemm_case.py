@@ -8,9 +8,6 @@ import torch
 
 from tests.numsim.corpus.kernels.gemm import (
     FP8_1D1D_NUM_SMS,
-    FP8_BLOCKWISE_CONFIGS as NUMSIM_CONFIGS,
-)
-from tests.numsim.corpus.kernels.gemm import (
     _e4m3fn_bits_to_float32,
     _e8m0_bits_from_exponents,
     _e8m0_bits_to_float32,
@@ -18,6 +15,9 @@ from tests.numsim.corpus.kernels.gemm import (
     _fp8_blockwise_reference,
     _pack_e8m0_scales,
     _unpack_e8m0_scales,
+)
+from tests.numsim.corpus.kernels.gemm import (
+    FP8_BLOCKWISE_CONFIGS as NUMSIM_CONFIGS,
 )
 from tests.numsim.corpus.kernels.gemm import (
     prepare_fp8_blockwise_case as prepare_numsim_case,

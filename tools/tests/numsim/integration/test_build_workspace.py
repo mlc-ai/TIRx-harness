@@ -14,14 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.numsim.support.kernels import lane_add, no_op_kernel
 from tirx_harness.numsim import api as numsim_api
-from tirx_harness.numsim.errors import NumSimBuildError
-from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.abi import abi_metadata
+from tirx_harness.numsim.errors import NumSimBuildError, NumSimExecutionError
 from tirx_harness.numsim.transpiler import build, cache
 from tirx_harness.numsim.transpiler.frontend import analyze
-
-from tests.numsim.support.kernels import lane_add, no_op_kernel
 
 
 def _generated_key(build_identity: dict[str, object]) -> bytes:
@@ -323,7 +321,6 @@ def test_cached_manifest_rejects_a_numsim_abi_mismatch(tmp_path, field):
     )
     assert len(diagnostics) == 1
     assert field in diagnostics[0]
-
 
 
 def test_reused_artifact_metadata_observes_disk_changes_and_library_corruption(tmp_path):
@@ -630,10 +627,7 @@ def test_corrupt_local_library_is_restored_from_shared_artifact(monkeypatch, tmp
     assert second.library_path.read_bytes() == b"build-1"
 
 
-
-def test_cached_artifact_rejects_a_replaced_spec_with_stale_content_identity(
-    monkeypatch, tmp_path
-):
+def test_cached_artifact_rejects_a_replaced_spec_with_stale_content_identity(monkeypatch, tmp_path):
     _mock_build_environment(monkeypatch, tmp_path)
     spec = analyze(no_op_kernel)
     cached = SimpleNamespace(spec=spec)

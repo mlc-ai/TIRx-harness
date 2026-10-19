@@ -4,13 +4,13 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 import zipfile
 from pathlib import Path
 
-import tvm
+import tomllib
 import tvm_ffi
 
+import tvm
 from tests.numsim.support.paths import REPO_ROOT, TOOLS_ROOT
 
 
@@ -73,7 +73,9 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
         packaged = set(archive.namelist())
         metadata_name = next(name for name in packaged if name.endswith(".dist-info/METADATA"))
         metadata = archive.read(metadata_name).decode()
-        native_identity = archive.read("tirx_harness/numsim/_tvm_rust_ext.identity").decode().strip()
+        native_identity = (
+            archive.read("tirx_harness/numsim/_tvm_rust_ext.identity").decode().strip()
+        )
         assert native_identity
         assert "tirx_harness/numsim/dtype_registry.json" in packaged
 
@@ -99,9 +101,7 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     assert "Name: tirx-harness\n" in metadata
     assert "tirx-harness-workspace" not in metadata
     assert "file://" not in metadata
-    assert not any(
-        line.startswith("Requires-Dist: tirx-harness") for line in metadata.splitlines()
-    )
+    assert not any(line.startswith("Requires-Dist: tirx-harness") for line in metadata.splitlines())
 
     install_root = tmp_path / "installed"
     installed = subprocess.run(

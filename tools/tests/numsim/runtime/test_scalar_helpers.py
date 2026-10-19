@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness import numsim
 from tests.numsim.corpus.kernels.deepgemm import (
     bfloat16_bits_to_float32,
     float32_to_bfloat16_bits,
     float32_to_e4m3fn_bits,
 )
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.script import tirx as T
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import ml_dtypes
 import numpy as np
-import tvm
 
+import tvm
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tvm.backend.cuda.tile_primitive.tma_utils import (
     SwizzleMode,

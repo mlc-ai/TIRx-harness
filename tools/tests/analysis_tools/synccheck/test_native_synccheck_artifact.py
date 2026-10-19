@@ -5,10 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-from tirx_harness.numsim.api import ExecutionSubset
-from tirx_harness.numsim.checker_report import SyncCheckReport
-from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
 from tests.numsim.support.kernels import (
     mapped_remote_mbarrier_pointer,
     mbarrier_missing_arrivals,
@@ -18,6 +14,10 @@ from tests.numsim.support.remote_mbarrier import (
     mapped_remote_mbarrier_cluster_view,
     mapped_remote_mbarrier_pointer_expect_tx,
 )
+from tirx_harness import numsim
+from tirx_harness.numsim.api import ExecutionSubset
+from tirx_harness.numsim.checker_report import SyncCheckReport
+from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 
@@ -1152,7 +1152,12 @@ def test_native_synccheck_subset_is_typed_incomplete_for_fixed_run(tmp_path):
         "total_warp_count": 2,
     }
     assert single.incomplete == [
-        {"kind": "analysis_incomplete", "reason": "subset_execution", "selected_warp_count": 1, "total_warp_count": 2}
+        {
+            "kind": "analysis_incomplete",
+            "reason": "subset_execution",
+            "selected_warp_count": 1,
+            "total_warp_count": 2,
+        }
     ]
     assert single.payload["coverage"]["status"] == "complete_within_bounds"
     assert single.payload["search"]["algorithm"] == "fixed_sync_state"

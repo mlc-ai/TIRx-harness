@@ -1,21 +1,20 @@
 """Native node access preserves NumSim's identity and metadata contracts."""
 
-
 import json
 
 import pytest
-import tvm
 import tvm_ffi
+
+import tvm
+from tests.numsim.integration.test_host_prelude import host_encoded_tensor_map_store
+from tests.numsim.support.kernels import lane_add
+from tirx_harness.numsim.transpiler import frontend, host_prelude, native_frontend
+from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SINK, PtxCallDecodeError, decode_ptx_call
+from tirx_harness.numsim.transpiler.semantic_ir import semantic_ir_json
 from tvm import tirx
 from tvm.ir import Expr
 from tvm.script import tirx as T
 from tvm.tirx import Stmt
-
-from tirx_harness.numsim.transpiler import frontend, host_prelude, native_frontend
-from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SINK, PtxCallDecodeError, decode_ptx_call
-from tirx_harness.numsim.transpiler.semantic_ir import semantic_ir_json
-from tests.numsim.integration.test_host_prelude import host_encoded_tensor_map_store
-from tests.numsim.support.kernels import lane_add
 
 
 def _substitute_vars(value, replacements):
@@ -42,17 +41,26 @@ def native_calls(monkeypatch):
 
 
 def test_native_post_order_preserves_dag_order_handles_and_spans(native_calls):
-    span = tvm.ir.SequentialSpan([
-        tvm.ir.Span(tvm.ir.SourceName("first.py"), 3, 3, 1, 8),
-        tvm.ir.Span(tvm.ir.SourceName("second.py"), 7, 7, 2, 9),
-    ])
+    span = tvm.ir.SequentialSpan(
+        [
+            tvm.ir.Span(tvm.ir.SourceName("first.py"), 3, 3, 1, 8),
+            tvm.ir.Span(tvm.ir.SourceName("second.py"), 7, 7, 2, 9),
+        ]
+    )
     variable = tirx.Var("value", "int32", span)
     repeated = tirx.Evaluate(variable + 1, span=span)
     body = tirx.SeqStmt([repeated, repeated, tirx.Evaluate(variable + 2)])
     before = tvm.ir.save_json(body)
     last = body.seq[2]
     expected = [
-        variable, repeated.value.b, repeated.value, repeated, last.value.b, last.value, last, body
+        variable,
+        repeated.value.b,
+        repeated.value,
+        repeated,
+        last.value.b,
+        last.value,
+        last,
+        body,
     ]
     actual = native_frontend.post_order_nodes(body)
     assert len(actual) == len(expected)
@@ -68,10 +76,12 @@ def test_native_post_order_preserves_dag_order_handles_and_spans(native_calls):
 def test_semantic_serialization_removes_spans_without_changing_the_ir(root_span, sequential_span):
     span = tvm.ir.Span(tvm.ir.SourceName("kernel.py"), 3, 3, 1, 8)
     if sequential_span:
-        span = tvm.ir.SequentialSpan([
-            span,
-            tvm.ir.Span(tvm.ir.SourceName("inlined.py"), 7, 7, 2, 9),
-        ])
+        span = tvm.ir.SequentialSpan(
+            [
+                span,
+                tvm.ir.Span(tvm.ir.SourceName("inlined.py"), 7, 7, 2, 9),
+            ]
+        )
     variable = tirx.Var("value", "int32", span)
     shared = tirx.Evaluate(variable + 1, span=span)
     body = tirx.SeqStmt(
@@ -81,9 +91,9 @@ def test_semantic_serialization_removes_spans_without_changing_the_ir(root_span,
 
     expected_variable = tirx.Var("value", "int32")
     expected_shared = tirx.Evaluate(expected_variable + 1)
-    expected = tirx.SeqStmt([
-        expected_shared, expected_shared, tirx.Evaluate(expected_variable + 2)
-    ])
+    expected = tirx.SeqStmt(
+        [expected_shared, expected_shared, tirx.Evaluate(expected_variable + 2)]
+    )
     serialized = semantic_ir_json(body)
     assert serialized == tvm.ir.save_json(expected)
     restored = tvm.ir.load_json(serialized)
@@ -95,10 +105,13 @@ def test_semantic_serialization_removes_spans_without_changing_the_ir(root_span,
 def test_frontend_source_map_consumes_one_native_body_walk(native_calls):
     spec = frontend.analyze(lane_add).kernels[0]
     # The native analyzer owns the whole walk: one analysis call, no Python walk.
-    assert sum(
-        name == "numsim_analyze_module" and args[0][0].same_as(lane_add)
-        for name, args in native_calls
-    ) == 1
+    assert (
+        sum(
+            name == "numsim_analyze_module" and args[0][0].same_as(lane_add)
+            for name, args in native_calls
+        )
+        == 1
+    )
     assert not any(name == "numsim_post_order_nodes" for name, _ in native_calls)
     expected = native_frontend.post_order_nodes(lane_add.body)
     assert len(spec.source_map) == len(expected)
@@ -111,15 +124,19 @@ def test_frontend_source_map_consumes_one_native_body_walk(native_calls):
 def test_host_promotion_preserves_parameters_types_spans_and_references(native_calls, rename):
     original = host_encoded_tensor_map_store
     allocation = original.body.seq[0].var
-    span = tvm.ir.SequentialSpan([
-        tvm.ir.Span(tvm.ir.SourceName("host.py"), 4, 4, 1, 9),
-        tvm.ir.Span(tvm.ir.SourceName("device.py"), 8, 8, 2, 10),
-    ])
+    span = tvm.ir.SequentialSpan(
+        [
+            tvm.ir.Span(tvm.ir.SourceName("host.py"), 4, 4, 1, 9),
+            tvm.ir.Span(tvm.ir.SourceName("device.py"), 8, 8, 2, 10),
+        ]
+    )
     variable = tirx.Var("output" if rename else str(allocation.name), allocation.ty, span)
-    body = tirx.SeqStmt([
-        tirx.Bind(variable, original.body.seq[0].value),
-        *(_substitute_vars(stmt, {allocation: variable}) for stmt in original.body.seq[1:]),
-    ])
+    body = tirx.SeqStmt(
+        [
+            tirx.Bind(variable, original.body.seq[0].value),
+            *(_substitute_vars(stmt, {allocation: variable}) for stmt in original.body.seq[1:]),
+        ]
+    )
     func = tirx.PrimFunc(original.params, body, original.ret_type, original.attrs, span)
     before = tvm.ir.save_json(func)
     normalized = host_prelude.normalize_host_tensor_map_prelude(func)
@@ -137,9 +154,7 @@ def test_host_promotion_preserves_parameters_types_spans_and_references(native_c
     )
     assert tvm_ffi.structural_equal(normalized, expected)
     assert tvm_ffi.structural_equal(normalized.ty, expected.ty)
-    assert any(
-        node.same_as(promoted) for node in native_frontend.post_order_nodes(normalized.body)
-    )
+    assert any(node.same_as(promoted) for node in native_frontend.post_order_nodes(normalized.body))
     assert tvm.ir.save_json(func) == before
     assert sum(name == "numsim_normalize_host_tensor_maps" for name, _ in native_calls) == 1
 

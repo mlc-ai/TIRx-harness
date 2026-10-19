@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 from tvm_ffi import structural_map
-from tvm.script import tirx as T
 
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
+from tvm.script import tirx as T
 
 
 def block_tmem_case(
@@ -56,7 +56,7 @@ def block_tmem_case(
         return storage
 
     b_storage = shared_storage(b_bits, b_width)
-    if not tmem_a or k == 64 and block_scale:
+    if not tmem_a or (k == 64 and block_scale):
         a_bits = shared_storage(a_bits, a_width)
     elif a_format == 5:
         a_bits <<= 2  # PTX padded FP4 TMEM format: 00 S E2 M1 00.
@@ -143,9 +143,7 @@ def test_block_scaled_tmem_a(cta_group, a_format, b_format, tmp_path):
                 ret_ty=node.ty,
             )
 
-        changed = kernel.with_body(
-            structural_map(kernel.body, replace_descriptor)
-        )
+        changed = kernel.with_body(structural_map(kernel.body, replace_descriptor))
         for report in assert_rejected(changed, args, message, verdict=verdict, cache_dir=tmp_path):
             assert "test_tcgen05_ti16.py:" in report.format()
 

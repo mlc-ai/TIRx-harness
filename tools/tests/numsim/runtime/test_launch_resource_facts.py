@@ -1,9 +1,9 @@
 """Launch-model defaults, pointer observations, and CTA-local TMEM lifetimes."""
 
 import numpy as np
-from tvm.script import tirx as T
 
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 @T.prim_func

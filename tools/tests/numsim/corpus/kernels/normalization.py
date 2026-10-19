@@ -514,14 +514,14 @@ def prepare_flashinfer_fused_add_rmsnorm_quant_case() -> NumSimCase:
 
 
 __all__ = [
+    "prepare_flashinfer_add_rmsnorm_fp4quant_case",
     "prepare_flashinfer_fused_add_rmsnorm_case",
     "prepare_flashinfer_fused_add_rmsnorm_quant_case",
-    "prepare_flashinfer_add_rmsnorm_fp4quant_case",
     "prepare_flashinfer_fused_dit_layernorm_case",
     "prepare_flashinfer_layernorm_case",
     "prepare_flashinfer_qk_rmsnorm_case",
     "prepare_flashinfer_rmsnorm_case",
-    "prepare_flashinfer_rmsnorm_quant_case",
     "prepare_flashinfer_rmsnorm_fp4quant_case",
+    "prepare_flashinfer_rmsnorm_quant_case",
     "prepare_rmsnorm_case",
 ]

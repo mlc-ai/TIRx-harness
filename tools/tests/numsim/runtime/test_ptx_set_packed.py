@@ -7,7 +7,6 @@ import numpy as np
 from tirx_harness import numsim
 from tvm.script import tirx as T
 
-
 _PACKED_FORMS = (
     *(("u8x4", cmp) for cmp in ("eq", "ne", "lt", "le", "gt", "ge", "lo", "ls", "hi", "hs")),
     *(("s8x4", cmp) for cmp in ("eq", "ne", "lt", "le", "gt", "ge")),

@@ -2,9 +2,9 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tests.numsim.support.execution import assert_rejected, run_checked
+from tvm.script import tirx as T
 
 
 def readonly_kernel(*, before=False, after=False, disjoint=False, predicate=True):
@@ -19,7 +19,9 @@ def readonly_kernel(*, before=False, after=False, disjoint=False, predicate=True
         value[0] = T.uint32(123)
         if before:
             data[lane + write_offset] = T.cast(lane, "uint32")
-        T.ptx["ld.global.u32.proxy::readonly"](value[0], data.ptr_to([lane]), pred=predicate, preserve_dst=True)
+        T.ptx["ld.global.u32.proxy::readonly"](
+            value[0], data.ptr_to([lane]), pred=predicate, preserve_dst=True
+        )
         if after:
             data[lane + write_offset] = T.cast(lane, "uint32")
         output[lane] = value[0]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase, TensorMap
 from tests.numsim.corpus.kernels.gemm import (
     _align_up,
     _e2m1_bits_to_float32,
@@ -15,6 +14,7 @@ from tests.numsim.corpus.kernels.gemm import (
     _pack_sf_128x4,
 )
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase, TensorMap
 
 
 def _nvfp4_operand(rows: int, k: int, seed: int):

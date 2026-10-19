@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
-from typing import Any, Callable
-
-from tvm import tirx
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from tests.numsim.corpus.kernels.attention import (
-    FLASH_ATTENTION_BACKWARD_CONFIGS,
     FLASH_ATTENTION4_CONFIGS,
+    FLASH_ATTENTION_BACKWARD_CONFIGS,
+    prepare_flash_attention4_case,
     prepare_flash_attention_backward_case,
     prepare_flash_attention_backward_persistent_analysis_case,
 )
@@ -23,23 +23,23 @@ from tests.numsim.corpus.kernels.deepgemm import (
     prepare_tf32_hc_case,
 )
 from tests.numsim.corpus.kernels.gemm import (
-    FP16_BF16_CONFIGS,
     FP8_BLOCKWISE_CONFIGS,
+    FP16_BF16_CONFIGS,
     NVFP4_CONFIGS,
+    prepare_fp8_blockwise_case,
     prepare_fp16_bf16_case,
     prepare_nvfp4_case,
-    prepare_fp8_blockwise_case,
 )
-from tests.numsim.corpus.kernels.attention import prepare_flash_attention4_case
 from tirx_harness.numsim.bindings import _tensor_map_base_array
+from tvm import tirx
 
 
 @dataclass(frozen=True)
 class WikiRacecheckSpec:
     family: str
     config: dict[str, Any]
-    prepare: Callable[[dict[str, Any]], "PreparedWikiRacecheckCase"]
-    expected_uninitialized_read: "WikiUninitializedReadExpectation | None" = None
+    prepare: Callable[[dict[str, Any]], PreparedWikiRacecheckCase]
+    expected_uninitialized_read: WikiUninitializedReadExpectation | None = None
 
     @property
     def case_id(self) -> str:
@@ -148,7 +148,9 @@ def _prepare_tf32_hc(config: dict[str, Any]) -> PreparedWikiRacecheckCase:
 
 FLASH_ATTENTION_BACKWARD_PERSISTENT_CONFIGS = ({"label": "s256_h2_persistent_reuse"},)
 
-_DEEPGEMM_1D1D_KERNEL_SOURCE_SUFFIX = "/tirx_kernels/ported/deepgemm/_sm100_fp8_fp4_gemm_1d1d/kernel.py"
+_DEEPGEMM_1D1D_KERNEL_SOURCE_SUFFIX = (
+    "/tirx_kernels/ported/deepgemm/_sm100_fp8_fp4_gemm_1d1d/kernel.py"
+)
 
 
 _EXPECTED_UNINITIALIZED_READS = {
@@ -219,8 +221,8 @@ def prepare_wiki_racecheck_case(spec: WikiRacecheckSpec) -> PreparedWikiRacechec
 
 
 __all__ = [
-    "PreparedWikiRacecheckCase",
     "WIKI_RACECHECK_SPECS",
+    "PreparedWikiRacecheckCase",
     "WikiRacecheckSpec",
     "WikiUninitializedReadExpectation",
     "prepare_wiki_racecheck_case",

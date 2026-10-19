@@ -5,11 +5,19 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import R, S, TCol, TLane, TileLayout, tcgen05_atom_layout
-from tvm.tirx.layout import tmem_datapath_layout, wg_local_layout
-
+from tvm.tirx.layout import (
+    R,
+    S,
+    TCol,
+    TileLayout,
+    TLane,
+    tcgen05_atom_layout,
+    tmem_datapath_layout,
+    wg_local_layout,
+)
 
 _CP_SHAPE_ROUTES = (
     ("4x256b", "", 4, 32),

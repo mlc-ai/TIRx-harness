@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
+from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import (
@@ -16,9 +18,6 @@ from tvm.tirx.layout import (
     tmem_datapath_layout,
     wg_local_layout,
 )
-
-from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 _REPLICATED_CP_LAYOUT = TileLayout(S[(32, 4) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
@@ -94,9 +93,7 @@ def tcgen_cp_to_mma_handoff(
     if (warp == 1) and (lane == 0):
         if handoff == 1:
             observed = T.int32(0)
-            T.cuda.wait_until(
-                observed, flag.ptr_to([0]), observed != T.int32(0), "cta", "global"
-            )
+            T.cuda.wait_until(observed, flag.ptr_to([0]), observed != T.int32(0), "cta", "global")
         elif handoff == 2:
             T.cuda.mbarrier_wait(T.address_of(barriers[2]), 0)
         elif handoff >= 3:

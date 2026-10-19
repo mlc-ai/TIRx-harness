@@ -13,8 +13,8 @@ import pathlib
 
 import numpy as np
 import pytest
-import tvm.tirx as tirx
 
+import tvm.tirx as tirx
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tvm.script import tirx as T
@@ -67,7 +67,11 @@ def _kernel_with_rebuilt_root():
 
 def _only_frontend_finding(report):
     assert report.verdict == "incomplete"
-    findings = [f for f in report.findings if f.kind == "analysis_incomplete" and f.details["reason"] == "native_frontend_unsupported"]
+    findings = [
+        f
+        for f in report.findings
+        if f.kind == "analysis_incomplete" and f.details["reason"] == "native_frontend_unsupported"
+    ]
     assert len(findings) == 1, [f.kind for f in report.findings]
     return findings[0]
 

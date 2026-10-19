@@ -99,9 +99,7 @@ def _holdout_specs(shape: tuple[int, int] | None = None) -> tuple[dict, ...]:
                     if shape is None
                     else (shape[1],)
                 ),
-                "distribution_offset": distribution_offsets[
-                    index % len(distribution_offsets)
-                ],
+                "distribution_offset": distribution_offsets[index % len(distribution_offsets)],
                 "locations": locations,
                 "spreads": spreads,
                 "a_min": rng.uniform(0.5, 3.0),
@@ -144,11 +142,7 @@ def _apply_deep_mode(spec: dict, g, dt_bias, A_log, generator) -> None:
     if mode == "random":
         A_log.normal_(generator=generator)
         dt_bias.normal_(generator=generator)
-        g.copy_(
-            torch.randn(
-                g.shape, dtype=torch.float32, device=device, generator=generator
-            )
-        )
+        g.copy_(torch.randn(g.shape, dtype=torch.float32, device=device, generator=generator))
         return
     gate = _deep_values(g.shape, 2.0, 3.0, g.dtype, device, generator)
     bias = _deep_values(dt_bias.shape, -0.5, 0.0, dt_bias.dtype, device, generator)
@@ -207,9 +201,7 @@ def _apply_key_mode(spec: dict, q, k, g, beta, generator) -> None:
 def _draw(spec: dict, slot: int, shape, dtype, device, generator):
     location = spec["locations"][slot]
     spread = spec["spreads"][slot]
-    distribution = _DISTRIBUTIONS[
-        (spec["distribution_offset"] + slot) % len(_DISTRIBUTIONS)
-    ]
+    distribution = _DISTRIBUTIONS[(spec["distribution_offset"] + slot) % len(_DISTRIBUTIONS)]
     if distribution == "normal":
         values = (
             torch.randn(shape, dtype=torch.float32, device=device, generator=generator)
@@ -240,12 +232,9 @@ def _draw(spec: dict, slot: int, shape, dtype, device, generator):
         )
     else:
         centered = (
-            torch.rand(shape, dtype=torch.float32, device=device, generator=generator)
-            - 0.5
+            torch.rand(shape, dtype=torch.float32, device=device, generator=generator) - 0.5
         ).clamp_(-0.499, 0.499)
-        values = location - spread * torch.sign(centered) * torch.log1p(
-            -2.0 * torch.abs(centered)
-        )
+        values = location - spread * torch.sign(centered) * torch.log1p(-2.0 * torch.abs(centered))
     return values.clamp_(-3.0, 3.0).to(dtype)
 
 
@@ -269,9 +258,9 @@ def _make_inputs(spec: dict, device):
         generator,
     )
     A_log = torch.log(
-        torch.rand(
-            num_heads, dtype=torch.float32, device=device, generator=generator
-        ).mul_(spec["a_max"] - spec["a_min"])
+        torch.rand(num_heads, dtype=torch.float32, device=device, generator=generator).mul_(
+            spec["a_max"] - spec["a_min"]
+        )
         + spec["a_min"]
     )
     dt = torch.exp(
@@ -288,9 +277,7 @@ def _make_inputs(spec: dict, device):
     _apply_key_mode(spec, q, k, g, beta, generator)
     cu_seqlens = None
     if len(seq_lens) > 1:
-        cu_seqlens = torch.tensor(
-            [0, *accumulate(seq_lens)], device=device, dtype=torch.long
-        )
+        cu_seqlens = torch.tensor([0, *accumulate(seq_lens)], device=device, dtype=torch.long)
     initial_state = _draw(
         spec,
         5,
@@ -346,7 +333,7 @@ def verify_holdout(
             with torch.no_grad():
                 candidate = candidate_fn(*clone_args(args))
             torch.cuda.synchronize(device)
-        except Exception:  # noqa: BLE001 - hide holdout details from the submission.
+        except Exception:
             passed = False
             break
         tolerance = {

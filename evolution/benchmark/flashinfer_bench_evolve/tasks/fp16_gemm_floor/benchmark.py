@@ -13,6 +13,7 @@ from ...benchmark_common import (
     load_task_workloads,
     run_benchmark,
 )
+
 TASK_NAME = "fp16_gemm_floor"
 
 ATOL = 1e-1
@@ -52,12 +53,8 @@ def make_inputs(entry, device):
     axes = entry["axes"]
     torch.manual_seed(0)
     return [
-        torch.randn(
-            (axes["M"], axes["K"]), dtype=torch.float16, device=device
-        ),
-        torch.randn(
-            (axes["N"], axes["K"]), dtype=torch.float16, device=device
-        ),
+        torch.randn((axes["M"], axes["K"]), dtype=torch.float16, device=device),
+        torch.randn((axes["N"], axes["K"]), dtype=torch.float16, device=device),
     ]
 
 
@@ -84,9 +81,7 @@ def _print_aggregate(rows):
     valid = [
         row
         for row in rows
-        if row["passed"]
-        and row["baseline_ms"] is not None
-        and row["kernel_ms"] is not None
+        if row["passed"] and row["baseline_ms"] is not None and row["kernel_ms"] is not None
     ]
     total_baseline_ms = sum(row["baseline_ms"] for row in valid)
     total_kernel_ms = sum(row["kernel_ms"] for row in valid)
@@ -99,10 +94,7 @@ def _print_aggregate(rows):
         speedup_text = "0.000x"
     print()
     print("# Aggregate result")
-    print(
-        f"| candidate | candidate ({len(valid)}/{len(rows)} PASS) | "
-        f"{latency} | {speedup_text} |"
-    )
+    print(f"| candidate | candidate ({len(valid)}/{len(rows)} PASS) | {latency} | {speedup_text} |")
 
 
 def run_suite(

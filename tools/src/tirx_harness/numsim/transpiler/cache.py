@@ -6,9 +6,10 @@ import hashlib
 import os
 import shutil
 import subprocess
-import tomllib
 from functools import cache
 from pathlib import Path
+
+import tomllib
 
 PYO3_VERSION = "0.29.0"
 

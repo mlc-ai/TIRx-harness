@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tirx_harness.numsim.checkers import _run_racecheck as racecheck
+
 from tests.analysis_tools.racecheck._native_race_trace import full_direct_race_run
+from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 
 

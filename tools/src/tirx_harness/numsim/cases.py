@@ -42,8 +42,14 @@ _TENSOR_MAP_FORMAT_TAGS = {None: _TENSOR_MAP_MAGIC, 16: 0xA6, 32: 0xA5}
 # Swizzle mode and atomicity are independent descriptor fields: replacing the
 # former must not erase the latter. Atomicity occupies tag bits 3 and 6.
 _TENSOR_MAP_SWIZZLES = {
-    None: (0, 0), "32B": (1, 0), "64B": (2, 0), "128B": (3, 0), "96B": (4, 0),
-    "128B_ATOM_32B": (3, 1), "128B_ATOM_32B_FLIP_8B": (3, 2), "128B_ATOM_64B": (3, 3),
+    None: (0, 0),
+    "32B": (1, 0),
+    "64B": (2, 0),
+    "128B": (3, 0),
+    "96B": (4, 0),
+    "128B_ATOM_32B": (3, 1),
+    "128B_ATOM_32B_FLIP_8B": (3, 2),
+    "128B_ATOM_64B": (3, 3),
 }
 _TENSOR_MAP_FLAG_MAGIC = 0x80
 _TENSOR_MAP_DTYPE_CODES = {
@@ -213,7 +219,13 @@ class TensorMap:
             else self.dtype
         )
         if self.tma_dtype not in {
-            None, "none", "tf32", "tfloat32", "float32_ftz", "tf32_ftz", "uint6",
+            None,
+            "none",
+            "tf32",
+            "tfloat32",
+            "float32_ftz",
+            "tf32_ftz",
+            "uint6",
         }:
             raise ValueError(f"unsupported TensorMap TMA dtype {self.tma_dtype!r}")
         if self.tma_dtype == "uint6":

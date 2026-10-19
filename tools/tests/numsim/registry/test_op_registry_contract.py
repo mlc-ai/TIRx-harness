@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from tvm import ir
 
 from tests.numsim.support.kernels import raw_scalar_call_mix, tile_copy_cast_mul
 from tests.numsim.support.manifest import call_op_names
@@ -14,6 +13,7 @@ from tests.support.tirx_device_surface import (
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
+from tvm import ir
 
 _DEVICE_PREFIXES = ("tirx.cuda.", "tirx.ptx.")
 

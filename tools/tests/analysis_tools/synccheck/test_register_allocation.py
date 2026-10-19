@@ -1,9 +1,9 @@
 """Check launch-bound register allocation and unsatisfiable register budgets."""
 
 import numpy as np
-from tvm.script import tirx as T
 
 from tirx_harness import racecheck, synccheck
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -51,5 +51,7 @@ def test_launch_bounds_allow_register_redistribution_above_initial_count():
     # Two resident 384-thread CTAs start at 80 registers per thread. The
     # third WG releases 32, covering the other WGs' increases of 24 and 8.
     for checker in (synccheck, racecheck):
-        report = checker(resident_register_redistribution, {"output": np.zeros(384, dtype=np.int32)})
+        report = checker(
+            resident_register_redistribution, {"output": np.zeros(384, dtype=np.int32)}
+        )
         assert report.verdict == "clean", report.to_dict()

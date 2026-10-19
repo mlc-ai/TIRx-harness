@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import numpy as np
-import tvm
 from ml_dtypes import bfloat16
-from tvm.script import tirx as T
 
-from tirx_harness import numsim
+import tvm
 from tests.numsim.support.runtime_domains import (
     CUDA_ATOMIC_ADD_PACKED_GLOBAL_DTYPES,
     CUDA_ATOMIC_ADD_PACKED_SHARED_DTYPES,
     CUDA_ATOMIC_ADD_SCALAR_DTYPES,
     CUDA_ATOMIC_CAS_DTYPES,
 )
-
+from tirx_harness import numsim
+from tvm.script import tirx as T
 
 _ADD_DTYPES = (
     *CUDA_ATOMIC_ADD_SCALAR_DTYPES,

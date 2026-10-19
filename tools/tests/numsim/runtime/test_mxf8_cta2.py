@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-from tirx_harness import numsim, racecheck, synccheck
-from tirx_harness.numsim.errors import NumSimExecutionError
 from tests.numsim.microtests.cases.mxf8_cta2 import make_arguments, raw_mxf8_cta2_m128, reference
 from tests.numsim.microtests.harness import PairedBuffer
+from tirx_harness import numsim, racecheck, synccheck
+from tirx_harness.numsim.errors import NumSimExecutionError
 
 
 @pytest.mark.parametrize("nan_scales", (False, True), ids=("finite", "nan"))

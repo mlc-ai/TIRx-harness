@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tirx_harness.numsim.bindings import prepare_bindings
 from tests.numsim.corpus.kernels.deepgemm import (
     FP4_MQA_CONFIGS,
     FP8_MQA_CONFIGS,
@@ -19,6 +18,7 @@ from tests.numsim.corpus.kernels.deepgemm import (
     prepare_fp8_mqa_case,
 )
 from tests.numsim.support._tirx_kernels import config_params, load_tirx_kernel
+from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.transpiler.frontend import analyze
 
 _DENSE_KERNELS = (

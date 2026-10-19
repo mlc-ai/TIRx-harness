@@ -2,9 +2,9 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tirx_harness import numsim, racecheck, synccheck
+from tvm.script import tirx as T
 
 
 @T.prim_func
@@ -261,7 +261,12 @@ def test_half_vector_predicate_alias_is_captured_before_either_result_store(tmp_
             old[0] = enabled
             old[1] = T.uint16(0xDEAD)
             T.ptx.atom.relaxed.gpu.global_.add.noftz.v2.f16(
-                old[0], old[1], cell.ptr_to([0]), T.uint16(0x3800), T.uint16(0x3400), pred=old[0] != 0
+                old[0],
+                old[1],
+                cell.ptr_to([0]),
+                T.uint16(0x3800),
+                T.uint16(0x3400),
+                pred=old[0] != 0,
             )
             out[0] = old[0]
             out[1] = old[1]

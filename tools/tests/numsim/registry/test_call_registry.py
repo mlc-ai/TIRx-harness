@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
-from tirx_harness import numsim
+import tvm
 from tests.numsim.support.kernels import (
     fetch_register_coordinates,
     raw_scalar_call_mix,
     unsupported_exp,
 )
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze
+from tvm.script import tirx as T
+
 
 def _synthetic_call_kernel(
     result_dtype: str, op_name: str, arguments: tuple[str, ...], value_dtype: str | None
@@ -215,6 +216,4 @@ def test_registry_exposes_scalar_and_collective_names():
     assert "tirx.ptx.rcp" not in names
     assert _accepted("float32", "tirx.fma", "T.float32(1)", "T.float32(1)", "T.float32(1)")
     assert _accepted("handle", "tirx.reinterpret", "T.uint64(1)")
-    assert _accepted(
-        "uint64", "tirx.reinterpret", "values.ptr_to([lane])", value_dtype="uint8"
-    )
+    assert _accepted("uint64", "tirx.reinterpret", "values.ptr_to([lane])", value_dtype="uint8")

@@ -53,9 +53,9 @@ def test_public_native_racecheck_distinguishes_disjoint_and_overlapping_warp_sli
     assert disjoint_native["incomplete"] == []
 
     assert overlapping.verdict == "error"
-    assert [(finding.status, finding.details["access_pair"]) for finding in overlapping.findings] == [
-        ("error", "write_write")
-    ]
+    assert [
+        (finding.status, finding.details["access_pair"]) for finding in overlapping.findings
+    ] == [("error", "write_write")]
     overlapping_native = overlapping.to_dict()["native"]
     assert overlapping_native["analysis_scope"] == disjoint_native["analysis_scope"]
     assert overlapping_native["input"]["digest"] != disjoint_native["input"]["digest"]

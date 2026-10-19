@@ -4,8 +4,6 @@ import json
 from dataclasses import replace
 
 import pytest
-from tvm import tirx
-from tvm.ir import load_json, save_json
 from tvm_ffi import Object
 
 from tests.numsim.support.kernels import lane_add
@@ -21,6 +19,8 @@ from tirx_harness.numsim.transpiler.frontend import (
 )
 from tirx_harness.numsim.transpiler.native_frontend import post_order_nodes
 from tirx_harness.numsim.transpiler.source_map import flatten_source_span
+from tvm import tirx
+from tvm.ir import load_json, save_json
 
 _PLAIN = {"analysis_capable": False, "analysis_checker": None}
 
@@ -180,9 +180,7 @@ def test_split_configuration_and_abi_version_have_their_own_entries(monkeypatch,
         suspend_scaffold._ROOT_SYNC_SPLIT_TARGET_LINES + 1,
     )
     compile_cache.compile_module_cached(lane_add, **_PLAIN)
-    monkeypatch.setattr(
-        compile_cache, "NUMSIM_ABI_VERSION", compile_cache.NUMSIM_ABI_VERSION + 1
-    )
+    monkeypatch.setattr(compile_cache, "NUMSIM_ABI_VERSION", compile_cache.NUMSIM_ABI_VERSION + 1)
     compile_cache.compile_module_cached(lane_add, **_PLAIN)
 
     assert len(compiles) == 3

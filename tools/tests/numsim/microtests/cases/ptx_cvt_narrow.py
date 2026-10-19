@@ -28,8 +28,6 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
-from tvm.script import tirx as T
-
 from tests.numsim.microtests.cases.ptx_cvt_narrow_goldens import (
     BF16X2_SOURCE,
     F4X2_SOURCE,
@@ -41,6 +39,8 @@ from tests.numsim.microtests.cases.ptx_cvt_narrow_goldens import (
     SCALE_SOURCE,
     UE8X2_SOURCE,
 )
+
+from tvm.script import tirx as T
 
 VALUE_COUNT = 256
 

@@ -1,16 +1,16 @@
 """Capture production dispatch on CPU, preserving its kernels and argument aliases."""
 
+import ctypes
+import sys
 from contextlib import ExitStack
 from importlib.util import module_from_spec, spec_from_file_location
-import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import ctypes
 import numpy as np
 import torch
-import tvm
 
+import tvm
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase, TensorMap
 
@@ -207,9 +207,7 @@ def prepare_native_msa_case(*, build_case=_prepare):
 
 
 def prepare_native_vsa_case(*, build_case=_prepare):
-    return build_case(
-        "vsa_multishape", dict(seq_len=384, num_heads=1, topk=2, block_size=128)
-    )
+    return build_case("vsa_multishape", dict(seq_len=384, num_heads=1, topk=2, block_size=128))
 
 
 def prepare_native_kda_decode_case(*, build_case=_prepare):

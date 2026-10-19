@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 @T.prim_func

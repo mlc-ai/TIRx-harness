@@ -47,9 +47,7 @@ def native_ptx_atom_cas_shared(output: T.Buffer((1,), "uint32")):
     T.cuda.cta_sync()
     if lane == 0:
         old = T.alloc_local((1,), "uint32")
-        T.ptx.atom.relaxed.cta.shared.cas.b32(
-            old[0], slot.ptr_to([0]), T.uint32(0), T.uint32(1)
-        )
+        T.ptx.atom.relaxed.cta.shared.cas.b32(old[0], slot.ptr_to([0]), T.uint32(0), T.uint32(1))
         output[0] = old[0]
 
 

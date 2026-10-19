@@ -6,7 +6,6 @@ import pytest
 from tirx_harness import numsim
 from tvm.script import tirx as T
 
-
 _COMBINE_SOURCE = r"""
 __device__ __forceinline__ float combine_int_frac_ex2(float x_rounded, float frac_ex2) {
   float out;

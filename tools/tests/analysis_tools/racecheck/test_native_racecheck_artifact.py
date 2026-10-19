@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import numpy as np
+
+from tests.numsim.support.remote_mbarrier import mapped_remote_mbarrier_cluster_view
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
+from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.checker_report import RaceReport
 from tirx_harness.numsim.checkers import _run_racecheck as internal_racecheck
-from tirx_harness.numsim.bindings import prepare_bindings
-from tests.numsim.support.remote_mbarrier import mapped_remote_mbarrier_cluster_view
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TileLayout
-
 
 _RACECHECK_PERMUTED_SHARED_LAYOUT = TileLayout(S[(4, 32) : (1, 4)])
 
@@ -658,8 +658,7 @@ def test_public_native_racecheck_typed_tma_overlapping_destinations_race(tmp_pat
     native = report.to_dict()["native"]
     assert native["findings"][0]["access_pair"] == "write_write"
     assert {
-        (finding["ordering_domain"], finding["ordering_failure"])
-        for finding in native["findings"]
+        (finding["ordering_domain"], finding["ordering_failure"]) for finding in native["findings"]
     } == {("execution", "missing_inter_actor_sync")}
     # Direct mode compacts the four adjacent element fragments into the exact
     # full-operation footprint.  Both TMA writes cover all four float32 cells,
@@ -811,7 +810,12 @@ def test_native_racecheck_subset_is_typed_incomplete(tmp_path):
         "total_warp_count": 2,
     }
     assert result.incomplete == [
-        {"kind": "analysis_incomplete", "reason": "subset_execution", "selected_warp_count": 1, "total_warp_count": 2}
+        {
+            "kind": "analysis_incomplete",
+            "reason": "subset_execution",
+            "selected_warp_count": 1,
+            "total_warp_count": 2,
+        }
     ]
 
 

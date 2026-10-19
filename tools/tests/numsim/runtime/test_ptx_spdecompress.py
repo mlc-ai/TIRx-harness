@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tvm
 
+import tvm
 from tirx_harness import numsim
 from tvm.script import tirx as T
 

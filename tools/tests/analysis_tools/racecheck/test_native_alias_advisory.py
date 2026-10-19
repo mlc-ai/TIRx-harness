@@ -375,7 +375,13 @@ def test_native_advisory_keeps_error_incomplete_review_precedence():
             **base,
             "verdict": "incomplete",
             "findings": [],
-            "incomplete": [{"kind": "analysis_incomplete", "reason": "coverage_limit", "message": "not exhaustive"}],
+            "incomplete": [
+                {
+                    "kind": "analysis_incomplete",
+                    "reason": "coverage_limit",
+                    "message": "not exhaustive",
+                }
+            ],
         }
     )
     error = RaceReport.from_native(
@@ -383,7 +389,13 @@ def test_native_advisory_keeps_error_incomplete_review_precedence():
             **base,
             "verdict": "error",
             "findings": [{"kind": "data_race", "access_pair": "write_read", "message": "race"}],
-            "incomplete": [{"kind": "analysis_incomplete", "reason": "coverage_limit", "message": "not exhaustive"}],
+            "incomplete": [
+                {
+                    "kind": "analysis_incomplete",
+                    "reason": "coverage_limit",
+                    "message": "not exhaustive",
+                }
+            ],
         }
     )
 

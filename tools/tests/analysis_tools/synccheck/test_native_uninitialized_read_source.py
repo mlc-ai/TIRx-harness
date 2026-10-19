@@ -6,9 +6,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
+from tvm.script import tirx as T
 
 
 @T.prim_func

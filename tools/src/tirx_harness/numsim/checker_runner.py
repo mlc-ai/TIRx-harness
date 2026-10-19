@@ -7,10 +7,12 @@ import hashlib
 import json
 import threading
 from concurrent.futures import Future
-from dataclasses import dataclass, field as dataclass_field, replace
+from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from typing import Any, Literal
 
 import numpy as np
+
 from tvm import tirx
 from tvm.ir.type import PointerType
 
@@ -182,9 +184,7 @@ def prepare_native_bindings(
             canonical_inputs=evidence_canonical,
             execution_inputs=canonical,
             input_digest=None,
-            scalar_bindings=copy.deepcopy(
-                supplemental_prepared.identity_payload()["scalars"]
-            ),
+            scalar_bindings=copy.deepcopy(supplemental_prepared.identity_payload()["scalars"]),
             missing_bindings=missing,
             prepared_bindings=None,
             _identity_future=None,
@@ -239,9 +239,7 @@ def _concretize_checker_launch(
             continue
         value = inputs[name]
         if isinstance(value, np.ndarray):
-            raise NumSimExecutionError(
-                f"native analysis scalar input {name!r} has a buffer value"
-            )
+            raise NumSimExecutionError(f"native analysis scalar input {name!r} has a buffer value")
         prepared = prepare_bindings(
             {name: value},
             expected_scalar_dtypes={name: str(parameter.ty.dtype)},
@@ -258,9 +256,7 @@ def _concretize_checker_launch(
     concrete_topology = _extract_topology(func, provided)
     required = dict(provided)
     for parameter in provided:
-        candidate = {
-            key: value for key, value in required.items() if not key.same_as(parameter)
-        }
+        candidate = {key: value for key, value in required.items() if not key.same_as(parameter)}
         try:
             candidate_topology = _extract_topology(func, candidate)
         except UnsupportedTIRxError:

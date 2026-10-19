@@ -3,8 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tests.numsim.microtests.cases.tcgen05_transfer_semantics import (
+    _ldst_oracle,
+    _make_raw_ldst_kernel,
+)
 from tests.numsim.support.kernels import (
     inactive_tcgen_transfer_is_noop,
     tcgen_float16_cta_group2,
@@ -15,9 +17,11 @@ from tests.numsim.support.kernels import (
     tcgen_shared_to_tmem_replica,
     tcgen_tmem_to_local_roundtrip,
 )
-from tests.numsim.microtests.cases.tcgen05_transfer_semantics import (
-    _ldst_oracle,
-    _make_raw_ldst_kernel,
+from tirx_harness import numsim
+from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
+    sf_smem_layout,
+    sf_tmem_layout,
 )
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
@@ -30,10 +34,6 @@ from tvm.tirx.layout import (
     tcgen05_atom_layout,
     tmem_datapath_layout,
     wg_local_layout,
-)
-from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
-    sf_smem_layout,
-    sf_tmem_layout,
 )
 
 _WRONG_M64_TMEM_IDENTITY = TileLayout(S[(64, 8) : (1 @ TLane, 1 @ TCol)])
@@ -178,7 +178,10 @@ def _tmem_dtype_view_roundtrip(
     fragment = T.alloc_tcgen05_ldst_frag("32x32b", (128, 64), "uint32")
     rows = tmem.rearrange("h (b t) -> (b h) t", b=2)
     bits = T.decl_buffer(
-        rows.shape, "uint32", layout=rows.layout, scope="tmem",
+        rows.shape,
+        "uint32",
+        layout=rows.layout,
+        scope="tmem",
         allocated_addr=0,
     )
     Tx.wg.copy_async(fragment[:, :], bits[:, :])

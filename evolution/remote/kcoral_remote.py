@@ -45,7 +45,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from evolution.benchmark.adapter import (  # noqa: E402
+from evolution.benchmark.adapter import (
     CANDIDATES_ROOT,
     PACKAGED,
     blobs,
@@ -77,9 +77,18 @@ def _request(task_name: str, overrides: dict, workloads: list, candidate: bytes 
     program = Program()
     module = program.upload(id="bundle", kind="module", source=_bundle(task_name))
     bundle = program.get_function(id="main", module=module, name="main")
-    solution = None if candidate is None else program.upload(id="solution", kind="bytes", value=candidate)
-    handles = [program.upload(id=f"blob{i}", kind="tensor", value=tensor) for i, tensor in enumerate(tensors)]
-    init = program.run(id="init", fn=bundle, args=["init", task_name, overrides, workloads, keys, solution, *handles])
+    solution = (
+        None if candidate is None else program.upload(id="solution", kind="bytes", value=candidate)
+    )
+    handles = [
+        program.upload(id=f"blob{i}", kind="tensor", value=tensor)
+        for i, tensor in enumerate(tensors)
+    ]
+    init = program.run(
+        id="init",
+        fn=bundle,
+        args=["init", task_name, overrides, workloads, keys, solution, *handles],
+    )
     program.return_(key="init", value=init)
     return program, bundle, handles
 
@@ -90,23 +99,36 @@ def _execute(url: str, program, timeout_seconds: int, output_limit_bytes: int | 
     from kcoral import Client
 
     with Client(url) as client:
-        result = client.execute(program, timeout_seconds=timeout_seconds,
-                                output_limit_bytes=output_limit_bytes)
+        result = client.execute(
+            program, timeout_seconds=timeout_seconds, output_limit_bytes=output_limit_bytes
+        )
     sys.stdout.write(result.stdout)  # the harness's own output, verbatim
     sys.stderr.write(result.stderr)
     if not result.completed:
         error = result.error or {}
-        raise SystemExit(f"benchmark server request {result.status} ({error.get('kind')} at "
-                         f"{error.get('instruction_id')}): {error.get('message')}\n{error.get('traceback', '')}")
+        raise SystemExit(
+            f"benchmark server request {result.status} ({error.get('kind')} at "
+            f"{error.get('instruction_id')}): {error.get('message')}\n{error.get('traceback', '')}"
+        )
     return result
 
 
-def run_remote(task_name: str, workload_dir: Path, version: str, *, warmup: int, repeat: int, shape_mode: str,
-               url: str, timeout: int):
+def run_remote(
+    task_name: str,
+    workload_dir: Path,
+    version: str,
+    *,
+    warmup: int,
+    repeat: int,
+    shape_mode: str,
+    url: str,
+    timeout: int,
+):
     """Score ``vN`` (or the baseline): one self-contained request for the full suite."""
 
-    overrides, workloads, candidate = plan(task_name, workload_dir, version, warmup=warmup,
-                                           repeat=repeat, shape_mode=shape_mode)
+    overrides, workloads, candidate = plan(
+        task_name, workload_dir, version, warmup=warmup, repeat=repeat, shape_mode=shape_mode
+    )
     program, bundle, handles = _request(task_name, overrides, workloads, candidate)
     program.return_(key="rows", value=program.run(id="run", fn=bundle, args=["run"]))
     print(f"benchmark server: {url} ({len(workloads)} workloads, {len(handles)} blob tensors)")
@@ -162,6 +184,7 @@ def _tar(path: Path) -> bytes:
             tar.add(path, arcname=path.name)
     return buffer.getvalue()
 
+
 OUTPUT_LIMIT_BYTES = 16 * 1024**2  # the server's maximum; a build log outgrows the 1 MB default
 
 
@@ -191,22 +214,50 @@ def run_cmd(script: str, send: Path | None = None, *, url: str, timeout: int) ->
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("workload", nargs="?", default=None, help=f"packaged workload: {', '.join(PACKAGED)}")
-    parser.add_argument("version", nargs="?", default=None, help="Version directory (e.g. v0) or 'baseline' (default).")
-    parser.add_argument("--remote", metavar="URL", required=True, help="the kcoral benchmark server (must already be running)")
+    parser.add_argument(
+        "workload", nargs="?", default=None, help=f"packaged workload: {', '.join(PACKAGED)}"
+    )
+    parser.add_argument(
+        "version",
+        nargs="?",
+        default=None,
+        help="Version directory (e.g. v0) or 'baseline' (default).",
+    )
+    parser.add_argument(
+        "--remote",
+        metavar="URL",
+        required=True,
+        help="the kcoral benchmark server (must already be running)",
+    )
     parser.add_argument("--warmup", type=int, default=None, help="default: per-workload value")
     parser.add_argument("--repeat", type=int, default=None, help="default: per-workload value")
-    parser.add_argument("--cmd", metavar="CMD", default=None,
-                        help="run a kernel diagnostic CMD under bash (or a diagnostic bash file); no remote environment changes")
-    parser.add_argument("--send", metavar="PATH", type=Path, default=None,
-                        help="with --cmd: ship PATH as a tar, unpacked into the command's cwd ($KCORAL_DIR)")
-    parser.add_argument("--timeout", type=int, default=3600, help="server-side seconds for the full request, including all workloads (max 3600)")
+    parser.add_argument(
+        "--cmd",
+        metavar="CMD",
+        default=None,
+        help="run a kernel diagnostic CMD under bash (or a diagnostic bash file); no remote environment changes",
+    )
+    parser.add_argument(
+        "--send",
+        metavar="PATH",
+        type=Path,
+        default=None,
+        help="with --cmd: ship PATH as a tar, unpacked into the command's cwd ($KCORAL_DIR)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=3600,
+        help="server-side seconds for the full request, including all workloads (max 3600)",
+    )
     args = parser.parse_args(argv)
     if args.send is not None and args.cmd is None:
         parser.error("--send needs --cmd: nothing would run the unpacked files")
     if args.cmd is not None:
         source = Path(args.cmd)
-        script = source.read_text() if os.path.isfile(source) else args.cmd  # a long inline script is no path
+        script = (
+            source.read_text() if os.path.isfile(source) else args.cmd
+        )  # a long inline script is no path
         if args.send is not None and not args.send.exists():
             parser.error(f"--send path does not exist: {args.send}")
         raise SystemExit(run_cmd(script, args.send, url=args.remote, timeout=args.timeout))
@@ -216,9 +267,13 @@ def main(argv=None) -> None:
     if key not in PACKAGED:
         parser.error(f"only packaged workloads run on the server, not {key!r}")
     task, warmup, repeat, shape_mode = PACKAGED[key]
-    kwargs = dict(warmup=warmup if args.warmup is None else args.warmup,
-                  repeat=repeat if args.repeat is None else args.repeat, shape_mode=shape_mode,
-                  url=args.remote, timeout=args.timeout)
+    kwargs = dict(
+        warmup=warmup if args.warmup is None else args.warmup,
+        repeat=repeat if args.repeat is None else args.repeat,
+        shape_mode=shape_mode,
+        url=args.remote,
+        timeout=args.timeout,
+    )
     version = "baseline" if args.version is None else args.version
     run_remote(task, CANDIDATES_ROOT / key, version, **kwargs)
 

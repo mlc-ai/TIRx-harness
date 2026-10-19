@@ -21,6 +21,4 @@ def make_workloads(config=None):
 
 
 def run_suite(config=None, candidate_fn=None, workloads=None, candidate_prepare_fn=None):
-    return shared.run_suite(
-        "prefill", config, candidate_fn, workloads, candidate_prepare_fn
-    )
+    return shared.run_suite("prefill", config, candidate_fn, workloads, candidate_prepare_fn)

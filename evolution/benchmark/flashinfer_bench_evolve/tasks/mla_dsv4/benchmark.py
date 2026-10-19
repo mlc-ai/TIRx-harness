@@ -12,8 +12,8 @@ from ...benchmark_common import (
     compare_tensors,
     config_from_env,
     load_candidate_override,
-    load_task_workloads,
     load_task_reference,
+    load_task_workloads,
     run_benchmark,
 )
 
@@ -123,8 +123,10 @@ def build_inputs(axes, seed, device):
         pages_per_seq = (int(seq_lens.max()) + page_size - 1) // page_size
         block_table = randperm(num_seqs * pages_per_seq).view(num_seqs, pages_per_seq)
         cache = (
-            randn((num_seqs * pages_per_seq, 1, page_size, head_dim)) * KV_RANDOM_SCALE
-        ).add_(value_offset).clamp_(-1.0, 1.0)
+            (randn((num_seqs * pages_per_seq, 1, page_size, head_dim)) * KV_RANDOM_SCALE)
+            .add_(value_offset)
+            .clamp_(-1.0, 1.0)
+        )
         return seq_lens.to(torch.int32), block_table, cache
 
     dense_query = str(axes.get("query_layout", "varlen")) == "dense"
@@ -151,9 +153,7 @@ def build_inputs(axes, seed, device):
         query = query.view(num_seqs, max_q_len, num_heads, head_dim)
     sinks = randn((num_heads,), torch.float32) * SINK_STD + SINK_MEAN
 
-    seq_lens, swa_table, swa_kv_cache = pool(
-        int(axes["swa_seq_len"]), swa_page, SWA_KV_OFFSET
-    )
+    seq_lens, swa_table, swa_kv_cache = pool(int(axes["swa_seq_len"]), swa_page, SWA_KV_OFFSET)
     swa_columns = torch.arange(SWA_TOPK, device=device)
     if comp_page:
         comp_base = max(int(axes["compressed_seq_len"]), comp_topk, max_q_len)
@@ -172,9 +172,7 @@ def build_inputs(axes, seed, device):
             token = int(seq_lens[b]) - q_lens[b] + q_idx
             num_valid = min(SWA_TOPK, token + 1)
             logical = torch.full_like(swa_columns, -1)
-            logical[:num_valid] = torch.arange(
-                token - num_valid + 1, token + 1, device=device
-            )
+            logical[:num_valid] = torch.arange(token - num_valid + 1, token + 1, device=device)
             row = [_flat_indices(logical, swa_table[b], swa_page)]
             active = SWA_TOPK
             if comp_page:
@@ -188,9 +186,7 @@ def build_inputs(axes, seed, device):
                 if comp_page == 2:
                     active += min(c_len, comp_topk)
                 else:
-                    active += min(
-                        max(comp_topk - (comp_topk // 16) * b - q_idx, 1), comp_topk
-                    )
+                    active += min(max(comp_topk - (comp_topk // 16) * b - q_idx, 1), comp_topk)
             index_rows.append(torch.cat(row))
             lens.append(active)
     sparse_indices = torch.stack(index_rows).contiguous()
@@ -299,11 +295,7 @@ def run_suite(
     # sweep; the rows are returned in one list.
     selected = make_workloads(cfg) if workloads is None else workloads
     groups = {
-        kv_dtype: [
-            w
-            for w in selected
-            if str(w["axes"].get("kv_dtype", "bfloat16")) == kv_dtype
-        ]
+        kv_dtype: [w for w in selected if str(w["axes"].get("kv_dtype", "bfloat16")) == kv_dtype]
         for kv_dtype in KV_DTYPES
     }
     groups = {k: v for k, v in groups.items() if v} or {"bfloat16": []}

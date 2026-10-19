@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
-import tvm
-from tvm.script import tirx as T
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim
+from tvm.script import tirx as T
 
 
 def interleaved_im2col_case(rank, width, *, packed=False, store=False):

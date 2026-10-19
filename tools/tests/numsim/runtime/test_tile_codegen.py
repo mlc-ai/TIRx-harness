@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tests.numsim.support.kernels import (
     cta_copy_roundtrip,
     cta_ldgsts_copy_roundtrip,
@@ -27,11 +26,13 @@ from tests.numsim.support.kernels import (
     tma_scalar_hoist_fallbacks,
     tma_scalar_hoist_respects_boundary,
 )
-from tirx_harness.numsim.transpiler.frontend import analyze, verify
+from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
+from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TileLayout
+
 
 def _typed_tma_reduce_kernel(dtype: str, reduction: str):
     @T.prim_func

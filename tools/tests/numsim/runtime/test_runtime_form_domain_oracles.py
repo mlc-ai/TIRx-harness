@@ -4,15 +4,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 import tvm
+from tests.numsim.support.runtime_domains import CUDA_LDG_DTYPES
+from tirx_harness import numsim
+from tirx_harness.numsim.dtype_abi import vector_dtype_abi
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import S, TCol, TileLayout, TLane, laneid, wg_local_layout, wid_in_wg
-
-from tirx_harness import numsim
-from tirx_harness.numsim.dtype_abi import vector_dtype_abi
-from tests.numsim.support.runtime_domains import CUDA_LDG_DTYPES
-
 
 _NUMPY_SCALAR_DTYPES = {
     "float16": np.float16,

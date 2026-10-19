@@ -9,7 +9,6 @@ from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 
-
 _BULK_REDUCE_ADD_F32 = "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.f32"
 
 
@@ -216,9 +215,7 @@ def test_bulk_reduce_preserves_f32_subnormals(tmp_path):
     result = numsim.Engine().run(module, {"source": source, "destination": destination})
 
     expected = np.array([0x007FFFFF, 0x807FFFFF, 2, 0x80000002], dtype=np.uint32)
-    np.testing.assert_array_equal(
-        result.outputs["destination"].view(np.uint32), expected
-    )
+    np.testing.assert_array_equal(result.outputs["destination"].view(np.uint32), expected)
 
     # Tensor and non-tensor F32 reductions share the same non-flushing addition.
     tensor_module = numsim.transpile(_typed_tma_reduce_kernel("float32", "add"), cache_dir=tmp_path)

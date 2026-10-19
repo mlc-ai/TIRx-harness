@@ -20,7 +20,6 @@ from tvm.tirx.layout import (
     wg_local_layout,
 )
 
-
 LANES = 32
 _LANE_OWNER_LAYOUT = TileLayout(S[LANES : 1 @ laneid])
 

@@ -2,10 +2,10 @@
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
-from tirx_harness import racecheck, synccheck
 from tests.numsim.support.execution import run_checked
+from tirx_harness import racecheck, synccheck
+from tvm.script import tirx as T
 
 
 def discard_kernel(*, restore=True, offset=0, predicate=True):

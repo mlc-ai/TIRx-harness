@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from tirx_harness._report import CheckFailed
 from tirx_harness.numsim.checker_report import SyncCheckReport
 from tirx_harness.numsim.checker_runner import (
@@ -155,12 +156,21 @@ _KERNEL_ANCHORED_FINDING_SHAPES = [
         (
             "incomplete",
             "cluster_barrier_warp_exit_unmodeled",
-            {"kind": "analysis_incomplete", "reason": "cluster_barrier_warp_exit_unmodeled", "kernel_index": 0},
+            {
+                "kind": "analysis_incomplete",
+                "reason": "cluster_barrier_warp_exit_unmodeled",
+                "kernel_index": 0,
+            },
         ),
         (
             "incomplete",
             "fixed_sync_state_limit_without_operation",
-            {"kind": "analysis_incomplete", "reason": "resource_limit", "resource": "fixed_sync_states", "operation": None},
+            {
+                "kind": "analysis_incomplete",
+                "reason": "resource_limit",
+                "resource": "fixed_sync_states",
+                "operation": None,
+            },
         ),
         (
             "execution_error",
@@ -299,7 +309,8 @@ def test_native_race_finding_falls_back_to_kernel_name_without_parser_spans() ->
         "findings": [
             {
                 "status": "error",
-                "kind": "data_race", "access_pair": "read_write",
+                "kind": "data_race",
+                "access_pair": "read_write",
                 "ordering_failure": "missing_proxy_bridge",
             }
         ],

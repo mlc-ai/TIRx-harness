@@ -9,7 +9,6 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any
 
-
 from ..errors import NumSimBuildError, UnmodeledTIRxFormError, UnsupportedTIRxError
 
 
@@ -25,7 +24,10 @@ def library_path() -> Path:
     # through the repository's parent or a thirdparty source path.
     for installed in distributions(name="tirx-harness"):
         for file in installed.files or ():
-            if str(file).startswith("tirx_harness/numsim/_tvm_rust_ext.") and file.suffix in {".so", ".pyd"}:
+            if str(file).startswith("tirx_harness/numsim/_tvm_rust_ext.") and file.suffix in {
+                ".so",
+                ".pyd",
+            }:
                 candidate = Path(installed.locate_file(file)).resolve()
                 if candidate.is_file():
                     return candidate

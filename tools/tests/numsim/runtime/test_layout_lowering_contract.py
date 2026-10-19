@@ -7,7 +7,6 @@ from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import ComposeLayout, S, TCol, TileLayout, TLane, laneid
 
-
 _PADDED_TILE = TileLayout(S[(2, 4) : (8, 1)])
 _SMALL_SWIZZLE = ComposeLayout(0, 1, 2, TileLayout(S[(8,)]))
 _TMA_SWIZZLE_32B = ComposeLayout(2, 1, 3, TileLayout(S[(64,)]))
@@ -30,8 +29,13 @@ def physical_buffers_with_strided_alias(output: T.Buffer((32, 3), "int32", layou
     compact = T.alloc_buffer((2, 4), "int32", scope="shared", layout=None)
     storage = T.alloc_buffer((16,), "int32", scope="shared", layout=None)
     alias = T.decl_buffer(
-        (2, 4), "int32", data=storage.data, strides=(6, 1), elem_offset=1,
-        scope="shared", layout=None,
+        (2, 4),
+        "int32",
+        data=storage.data,
+        strides=(6, 1),
+        elem_offset=1,
+        scope="shared",
+        layout=None,
     )
     private = T.alloc_buffer((2,), "int32", scope="local", layout=None)
     private[0] = lane * 10

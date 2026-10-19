@@ -5,17 +5,17 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from tvm.script import tirx as T
-
+from tests.numsim.runtime.test_approximate_f32_contract import (
+    approximate_f32_calls,
+    f16x2_exp2_calls,
+)
 from tests.numsim.runtime.test_scalar_control import (
     cuda_packed_nan_semantics,
     ptx_dps_arithmetic,
     ptx_dps_modifier_forms,
 )
-from tests.numsim.runtime.test_approximate_f32_contract import (
-    approximate_f32_calls,
-    f16x2_exp2_calls,
-)
+
+from tvm.script import tirx as T
 
 
 @T.prim_func

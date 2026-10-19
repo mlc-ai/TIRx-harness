@@ -68,10 +68,11 @@ def test_tensor_map_numpy_is_copyable_descriptor_state(tmp_path) -> None:
     assert payload["output_allocations"] == sorted(prepared.descriptor_allocations)
 
     import tvm
-    from tvm.script import tirx as T
     from tirx_harness import numsim, racecheck, synccheck
+    from tvm.script import tirx as T
 
-    disable = tvm.script.from_source('''@T.prim_func
+    disable = tvm.script.from_source(
+        """@T.prim_func
 def disable(descriptor: T.Buffer((128,), "uint8")):
     T.device_entry()
     _warp = T.warp_id([1])
@@ -79,12 +80,18 @@ def disable(descriptor: T.Buffer((128,), "uint8")):
     if lane == 0:
         T.ptx["tensormap_replace.tile.swizzle_mode.global.b1024.b32"](descriptor.ptr_to([0]), 0)
         T.ptx.fence.proxy.tensormap__generic.release.gpu()
-''', {"T": T})
+""",
+        {"T": T},
+    )
     module = numsim.transpile(disable, cache_dir=tmp_path)
     for swizzle in ("128B", "128B_ATOM_32B", "128B_ATOM_32B_FLIP_8B", "128B_ATOM_64B"):
         descriptor = TensorMap(
-            base_a, global_shape=(4, 3), global_strides=(16,), box_shape=(4, 3),
-            element_strides=(1, 1), swizzle=swizzle,
+            base_a,
+            global_shape=(4, 3),
+            global_strides=(16,),
+            box_shape=(4, 3),
+            element_strides=(1, 1),
+            swizzle=swizzle,
         ).numpy()
         tag = descriptor[63]
         inputs = {"descriptor": descriptor}

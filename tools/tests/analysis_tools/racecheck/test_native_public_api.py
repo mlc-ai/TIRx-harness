@@ -4,13 +4,13 @@ import inspect
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tirx_harness import numsim
-from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness import racecheck as facade_racecheck
 from tirx_harness import synccheck as facade_synccheck
+from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.checker_runner import transpile_native_checker_artifact
+from tvm.script import tirx as T
 
 _DESCRIPTOR_SOURCE = np.arange(4, dtype=np.float32)
 

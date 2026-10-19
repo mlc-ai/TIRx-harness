@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tvm.script import tirx as T
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tvm.script import tirx as T
 
 
 @T.prim_func
