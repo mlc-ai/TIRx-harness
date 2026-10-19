@@ -85,3 +85,30 @@ def test_constant_input_is_changed():
     ones = torch.ones(8)
     perturb_inputs_([ones], seed=1)
     assert ones.unique().numel() > 1
+
+
+@pytest.mark.parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+@pytest.mark.parametrize("cached", [False, True])
+def test_float8_input_dependence(dtype, cached):
+    bound = (torch.linspace(-1, 1, 64).to(dtype),)
+
+    def reference(value):
+        return value.float() * 2
+
+    stored = reference(*bound)
+    candidate = KernelRun(lambda value: stored if cached else reference(value), bound)
+    result = input_dependence_check(
+        candidate_runner=candidate,
+        bound_args=bound,
+        correctness_fn=reference,
+        correctness_prepare=None,
+        device=torch.device("cpu"),
+        atol=1e-4,
+        rtol=1e-4,
+        required_matched_ratio=1.0,
+        required_rms_error_ratios=None,
+        phase="float8 input dependence",
+        seed=1,
+    )
+    assert result is not None
+    assert result.ok is not cached

@@ -7,11 +7,13 @@ import torch
 from ...benchmark_common import (
     BenchConfig,
     choose_device,
+    compare_outputs,
     config_from_env,
     include_synthetic_workloads,
     load_candidate_override,
     load_safetensor,
     load_task_workloads,
+    normalize_outputs,
     rand_tensor,
     run_benchmark,
 )
@@ -20,6 +22,11 @@ TASK_NAME = "moe"
 ATOL = 1.0
 RTOL = 0.3
 REQUIRED_MATCHED_RATIO = 0.9
+# Reject zeroed and rescaled outputs even when they fit within ATOL.
+REQUIRED_RMS_ERROR_RATIOS = (0.2,)
+# Allow rare reference/baseline outliers in large workloads while
+# rejecting missing contributions that affect only a few tokens.
+REQUIRED_TOKEN_MATCHED_RATIO = 0.9999
 
 HIDDEN_SIZE = 7168
 INTERMEDIATE_SIZE = 2048
@@ -174,6 +181,39 @@ def tirx_run(kernel_fn, data):
     return data["output"]
 
 
+def compare_moe_outputs(
+    candidate, baseline, atol, rtol, required_matched_ratio, required_rms_error_ratios
+):
+    """Apply global and per-token normalized RMS checks to the MoE output."""
+    result = compare_outputs(
+        candidate, baseline, atol, rtol, required_matched_ratio, required_rms_error_ratios
+    )
+    if not result[0]:
+        return result
+
+    output = normalize_outputs(candidate)[0].float()
+    reference = normalize_outputs(baseline)[0].float()
+    if reference.numel() == 0:
+        return result
+    error = output - reference
+    token_rms = error.square().mean(dim=-1).sqrt() / (
+        reference.square().mean(dim=-1).sqrt() + 1e-8
+    )
+    bad_tokens = (token_rms >= required_rms_error_ratios[0]) & (
+        error.abs().amax(dim=-1) > 1e-6
+    )
+    bad_count = int(bad_tokens.sum().item())
+    token_matched = 1.0 - bad_count / bad_tokens.numel()
+    if token_matched < REQUIRED_TOKEN_MATCHED_RATIO:
+        return (
+            False,
+            *result[1:5],
+            f"per-token normalized RMS matched ratio {token_matched:.6g} "
+            f"< {REQUIRED_TOKEN_MATCHED_RATIO:.6g} ({bad_count} failing tokens)",
+        )
+    return result
+
+
 def run_suite(
     config: BenchConfig | None = None,
     candidate_fn=None,
@@ -200,6 +240,7 @@ def run_suite(
         baseline_fn=baseline_moe,
         candidate_fn=candidate,
         candidate_prepare_fn=candidate_prepare_fn,
+        compare_fn=compare_moe_outputs,
         device=device,
         warmup=cfg.warmup,
         iters=cfg.iters,
@@ -207,6 +248,7 @@ def run_suite(
         atol=ATOL,
         rtol=RTOL,
         required_matched_ratio=REQUIRED_MATCHED_RATIO,
+        required_rms_error_ratios=REQUIRED_RMS_ERROR_RATIOS,
         group_axis="seq_len",
         correctness_runs=cfg.correctness_runs,
         check_after_timing=cfg.check_after_timing,
