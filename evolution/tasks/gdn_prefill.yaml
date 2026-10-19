@@ -44,6 +44,7 @@ spec: |
   The kernel must respect cu_seqlens boundaries.
 
   Correctness: atol=0.01, rtol=0.01, matched_ratio=1.0 (adapter.py checks this).
+  Each output also requires normalized RMS error below 0.2.
   The adapter scores all official trace workloads and both synthetic stress rows.
 
   Use tensor cores and TMA whenever possible through explicit low-level

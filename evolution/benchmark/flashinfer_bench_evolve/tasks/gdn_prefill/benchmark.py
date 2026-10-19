@@ -22,6 +22,8 @@ TASK_NAME = "gdn_prefill"
 ATOL = 1e-2
 RTOL = 1e-2
 REQUIRED_MATCHED_RATIO = None
+# Bound each output independently so small signals cannot be replaced by zeros.
+REQUIRED_RMS_ERROR_RATIOS = (0.2, 0.2)
 
 LARGE_WORKLOADS = [
     {"total_seq_len": 16384, "num_seqs": 64, "len_cu_seqlens": 65},
@@ -189,6 +191,7 @@ def run_suite(
         atol=ATOL,
         rtol=RTOL,
         required_matched_ratio=REQUIRED_MATCHED_RATIO,
+        required_rms_error_ratios=REQUIRED_RMS_ERROR_RATIOS,
         group_axis="total_seq_len",
         correctness_runs=cfg.correctness_runs,
         check_after_timing=cfg.check_after_timing,
