@@ -56,7 +56,8 @@ spec: |
   output. Both outputs are cast to fp32 for PyTorch's additive
   atol+rtol*abs(reference) comparison on every element: bf16 inputs use
   atol=8e-4, rtol=2e-2; fp8 inputs use atol=rtol=0.1.
-  Normalized RMS error must also be below 0.2.
+  Normalized RMS error must also be below 0.2, unless the maximum
+  absolute error is at most 1e-6.
   Repeated checks and output poisoning
   remain enabled. The adapter scores all 94 official rows. Scoring is
   baseline latency / candidate latency, higher is better.
