@@ -3,6 +3,16 @@
 from ..qwen38 import benchmark as shared
 from ..qwen38.benchmark import HARNESS_FILES, default_config, tirx_prepare, tirx_run
 
+__all__ = [
+    "HARNESS_FILES",
+    "TASK_NAME",
+    "default_config",
+    "make_workloads",
+    "run_suite",
+    "tirx_prepare",
+    "tirx_run",
+]
+
 TASK_NAME = "qwen38_expand"
 
 

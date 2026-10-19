@@ -97,8 +97,6 @@ target-version = "py310"
 extend-exclude = [
   "skills/tirx-wiki/references/repos/",
   "tirx-kernels/",
-  "evolution/benchmark/",
-  "evolution/remote/",
 ]
 
 [tool.ruff.lint]
