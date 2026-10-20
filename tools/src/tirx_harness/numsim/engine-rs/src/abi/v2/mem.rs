@@ -5,6 +5,6 @@
 //! the engine crate.
 
 pub use crate::runtime::instructions::mem::{
-    atom, declared_wait, discard, ld, ldmatrix, red, st, st_bulk, stmatrix, variant, AtomVariant,
-    LdVariant, LdmatrixVariant, MemoryType, RedVariant, StBulkVariant, StVariant, StmatrixVariant,
+    atom, declared_wait, discard, ld, ldmatrix, multimem, red, st, st_bulk, stmatrix, variant,
+    AtomVariant, LdVariant, LdmatrixVariant, MemoryType, MultimemVariant, RedVariant, StBulkVariant, StVariant, StmatrixVariant,
 };

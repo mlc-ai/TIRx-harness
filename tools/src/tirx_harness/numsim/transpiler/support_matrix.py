@@ -34,6 +34,11 @@ def render_engine_support_matrix() -> str:
             "outside its exact specialization domain. Handwritten runtime cases cover "
             "registered operations; GPU parity is tested where the required hardware is available."
         ),
+        (
+            "Partial-warp CTA launches preserve the exact thread count and mask absent lanes. "
+            "Scalar/control flow, memory operations, and atomics are supported; warp/CTA/cluster "
+            "collectives and setmaxnreg in such launches currently fail closed as unsupported."
+        ),
         "",
         "## TIRx CUDA/PTX Ops",
         "",

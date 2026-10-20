@@ -284,15 +284,8 @@ def two_waiters(state: T.Buffer((1,), "int32"), data: T.Buffer((1,), "int32"),
     racecheck(kernel, inputs=inputs, max_workers=2).require_clean()
 
 
-def test_a_morally_strong_pair_is_exempt_unless_one_side_is_a_plain_read():
-    """Guards the split PTX ISA 8.7's own definition asks for.
-
-    A data race needs the pair to be *not* morally strong, so a publication and
-    a contribution on one naturally aligned word -- neither of them a plain
-    read -- is exempt however the two are ordered. Narrow that to
-    read-modify-writes and a release store against the contributions joining
-    its release sequence starts reporting `write_write`.
-    """
+def test_a_strong_store_and_atomic_contribution_are_exempt():
+    """PTX 8.7.1 exempts a store/RMW pair on one naturally aligned word."""
     kernel = tvm.script.from_source(
         """
 @T.prim_func

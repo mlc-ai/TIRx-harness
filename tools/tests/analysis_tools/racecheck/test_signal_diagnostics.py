@@ -10,7 +10,10 @@ from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
 
 
 def _raw_spin(*, ordered):
-    store_order = "release" if ordered else "relaxed"
+    publication = (
+        "T.ptx.st.release.gpu.global_.s32(flag.ptr_to([0]), T.int32(7))"
+        if ordered else "flag[0] = T.int32(7)"
+    )
     rendezvous = "T.ptx.bar.sync(T.uint32(0), T.uint32(64))" if ordered else "T.evaluate(0)"
     return tvm.script.from_source(
         f"""
@@ -21,7 +24,7 @@ def raw_spin(flag: T.Buffer((1,), "int32"), out: T.Buffer((1,), "int32")):
     lane = T.lane_id([32])
     seen = T.alloc_local((1,), "int32")
     if warp == 0 and lane == 0:
-        T.ptx.st.{store_order}.gpu.global_.s32(flag.ptr_to([0]), T.int32(7))
+        {publication}
     {rendezvous}
     if warp == 1 and lane == 0:
         seen[0] = 0
@@ -37,7 +40,7 @@ def _inputs():
     return {"flag": np.zeros(1, dtype=np.int32), "out": np.zeros(1, dtype=np.int32)}
 
 
-def test_raw_spin_missing_hb_reports_race_with_conditional_wait_hint():
+def test_raw_spin_weak_publication_reports_race_with_conditional_wait_hint():
     report = racecheck(_raw_spin(ordered=False), _inputs())
     assert report.verdict == "error", report.format()
     assert {f.kind for f in report.findings} == {"data_race"}

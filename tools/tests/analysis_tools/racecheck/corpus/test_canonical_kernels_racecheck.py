@@ -35,11 +35,11 @@ _MEGA_MOE_RACECHECK_LARGE_CONFIG_LABEL = "t64_h4096_i1536_e96_k4_g1"
 # from the three-round calibration above; all observations remain recorded.
 # Preparation and compilation are excluded; correctness checks are unchanged.
 _MEGA_MOE_RACECHECK_CASES = [
-    pytest.param("p1_tok2_h1024_i512_e2_k1_bm16", 2.39, 2, 8, id="two_tokens"),
-    pytest.param("p1_tok16_h1024_i512_e2_k2_bm32", 2.3, 4, 8, id="sixteen_tokens"),
-    pytest.param("t8_h1024_i512_e24_k2_g1", 2.7, 24, 96, id="twenty_four_experts"),
-    pytest.param("p1_tok2_h1024_i512_e2_k1_bm16_s1", 2.3, 2, 8, id="shared_expert"),
-    pytest.param(_MEGA_MOE_RACECHECK_MEDIUM_CONFIG_LABEL, 16.7, 1536, 128, id="medium_moe"),
+    pytest.param("p1_tok2_h1024_i512_e2_k1_bm16", 2.39, id="two_tokens"),
+    pytest.param("p1_tok16_h1024_i512_e2_k2_bm32", 2.3, id="sixteen_tokens"),
+    pytest.param("t8_h1024_i512_e24_k2_g1", 2.7, id="twenty_four_experts"),
+    pytest.param("p1_tok2_h1024_i512_e2_k1_bm16_s1", 2.3, id="shared_expert"),
+    pytest.param(_MEGA_MOE_RACECHECK_MEDIUM_CONFIG_LABEL, 16.7, id="medium_moe"),
     # 2026-09-20 UTC, same host/TVM/kernels and -n16/worksteal configuration:
     # full six-case jobs measured 28.561079/31.629900/31.330127s, with accepted
     # CPU load. User-requested 35s cap gives 10.7% headroom over the maximum,
@@ -47,7 +47,7 @@ _MEGA_MOE_RACECHECK_CASES = [
     # Focused -n16 verification at 35s: 25.737327s, 1 passed, accepted CPU load.
     # All 2368 tasks and 409256 operations complete. Existing caps stay fixed;
     # the medium-case overruns in these jobs remain recorded in pr_comment.md.
-    pytest.param(_MEGA_MOE_RACECHECK_LARGE_CONFIG_LABEL, 35.0, 1536, 128, id="large_moe"),
+    pytest.param(_MEGA_MOE_RACECHECK_LARGE_CONFIG_LABEL, 35.0, id="large_moe"),
 ]
 
 
@@ -128,13 +128,11 @@ def test_native_racecheck_validates_canonical_kernel(
 
 @pytest.mark.performance
 @pytest.mark.parametrize(
-    "config_label,limit_seconds,alias_occurrences,alias_bytes", _MEGA_MOE_RACECHECK_CASES
+    "config_label,limit_seconds", _MEGA_MOE_RACECHECK_CASES
 )
 def test_real_mega_moe_racecheck_completes_within_performance_budget(
     config_label: str,
     limit_seconds: float,
-    alias_occurrences: int,
-    alias_bytes: int,
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
     record_property,
@@ -190,15 +188,7 @@ def test_real_mega_moe_racecheck_completes_within_performance_budget(
         == payload["stats"]["task_count"]
         == _MEGA_MOE_RACECHECK_NUM_SMS * 16
     ), payload
-    # Verify the expected review's footprint and count as well as completion.
-    (advisory,) = result.advisories
-    assert advisory["space"] == "shared", payload
-    assert advisory["reader_buffer"] == "anonymous_buffer_29", payload
-    assert advisory["writer_buffer"] == "anonymous_buffer_8", payload
-    assert advisory["occurrences"] == alias_occurrences, payload
-    assert advisory["overlaps"] == [
-        {"allocation_id": 0, "byte_offset": 0, "byte_len": alias_bytes, "byte_end": alias_bytes}
-    ], payload
+    assert result.advisories == [], payload
     assert elapsed < limit_seconds, (
         f"{config_label} Racecheck took {elapsed:.3f}s; "
         f"budget is {limit_seconds:.3f}s"

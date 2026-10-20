@@ -302,13 +302,7 @@ CANONICAL_KERNEL_CASES = (
     CanonicalKernelCase(
         "sm100_fp8_fp4_mega_moe",
         prepare_mega_moe_case,
-        # Combine intentionally reuses the shared-pool prefix previously
-        # named ``smem_expert_count``. Its raw TMA overwrite has no logical
-        # buffer tag, so the later ``combine_chunks`` read retains one
-        # aggregated stale-name advisory while physical ordering stays clean.
-        racecheck_expected_verdict="review",
-        racecheck_review_kinds=frozenset({"alias_stale_read"}),
-        racecheck_review_counts=(("alias_stale_read", 1),),
+        racecheck_expected_verdict="clean",
     ),
     CanonicalKernelCase(
         "deepgemm_sm100_fp4_mqa_logits",

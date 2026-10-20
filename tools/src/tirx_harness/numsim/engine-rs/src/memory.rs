@@ -313,6 +313,70 @@ impl BufferView {
         self.allocation
     }
 
+    /// Per-rank replicas when this view lies in a multicast address window.
+    pub(crate) fn multicast_replicas(&self) -> Option<&Arc<[BufferView]>> {
+        self.allocation_ref.multicast_replicas.get()
+    }
+
+    /// Make this allocation a multicast window over `replicas`, one per rank.
+    pub(crate) fn bind_multicast_replicas(&self, replicas: Vec<BufferView>) -> Result<(), EngineError> {
+        if replicas.is_empty() {
+            return Err(EngineError::message("a multicast window needs at least one replica"));
+        }
+        for (rank, replica) in replicas.iter().enumerate() {
+            if replica.arena_id != self.arena_id
+                || replica.allocation == self.allocation
+                || replica.multicast_replicas().is_some()
+            {
+                return Err(EngineError::message(format!(
+                    "multicast replica {rank} must be a distinct unicast allocation of the same memory"
+                )));
+            }
+            if replica.byte_len < self.allocation_ref.byte_len {
+                return Err(EngineError::message(format!(
+                    "multicast replica {rank} has {} bytes, fewer than its {}-byte window",
+                    replica.byte_len, self.allocation_ref.byte_len
+                )));
+            }
+            if replicas[..rank].iter().any(|other| other.allocation == replica.allocation) {
+                return Err(EngineError::message(format!(
+                    "multicast replica {rank} repeats another rank's allocation"
+                )));
+            }
+        }
+        self.allocation_ref
+            .multicast_replicas
+            .set(replicas.into())
+            .map_err(|_| EngineError::message("allocation is already a multicast window"))
+    }
+
+    pub(crate) fn rank_mapping(&self) -> Option<&RankMapping> {
+        self.allocation_ref.rank_mapping.get()
+    }
+
+    pub(crate) fn bind_rank_mapping(&self, mapping: RankMapping) -> Result<(), EngineError> {
+        self.allocation_ref
+            .rank_mapping
+            .set(mapping)
+            .map_err(|_| EngineError::message("allocation already has a rank mapping"))
+    }
+
+    /// Whether `rank`'s threads can address this allocation: their own
+    /// device's memory, symmetric memory on any device (peer-mapped over
+    /// NVLink), or an unowned host array.
+    pub(crate) fn check_reachable_from(&self, rank: usize) -> Result<(), EngineError> {
+        match self.rank_mapping() {
+            Some(RankMapping { rank: owner, symmetric: false, name }) if *owner != rank => {
+                Err(EngineError::message(format!(
+                    "rank {rank} addresses rank {owner}'s buffer '{name}', which is not \
+                     symmetric memory: another GPU maps only symmetric-memory allocations \
+                     (bind it with numsim.SymmetricBuffer)"
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub const fn byte_offset(&self) -> usize {
         self.byte_offset
     }
@@ -1400,7 +1464,7 @@ impl GlobalMemory {
         byte_offset: usize,
         byte_len: usize,
     ) -> Result<BufferView, MemoryError> {
-        let allocation = self.allocation_for_view(parent)?;
+        let allocation = self.view_allocation(parent)?;
         validate_view(parent, allocation.byte_len())?;
         validate_range(
             parent.allocation,
@@ -2995,9 +3059,22 @@ impl GlobalMemory {
         write_rwlock(&self.inner.allocations).insert(id, allocation);
     }
 
-    fn allocation_for_view<'a>(&self, view: &'a BufferView) -> Result<&'a Allocation, MemoryError> {
+    /// Arena membership only. Forming a view inside a multicast window is
+    /// legal; touching its bytes is not, so data paths use
+    /// [`Self::allocation_for_view`].
+    fn view_allocation<'a>(&self, view: &'a BufferView) -> Result<&'a Allocation, MemoryError> {
         if view.arena_id != self.inner.arena_id {
             return Err(MemoryError::UnknownAllocation {
+                allocation: view.allocation,
+            });
+        }
+        Ok(&view.allocation_ref)
+    }
+
+    fn allocation_for_view<'a>(&self, view: &'a BufferView) -> Result<&'a Allocation, MemoryError> {
+        self.view_allocation(view)?;
+        if view.allocation_ref.multicast_replicas.get().is_some() {
+            return Err(MemoryError::MulticastAddressAccess {
                 allocation: view.allocation,
             });
         }
@@ -3046,9 +3123,28 @@ enum MemoryMode {
     QueuedOwnerPrivate,
 }
 
+/// Which device of a multi-rank launch an allocation is memory of, and
+/// whether the other devices map it: symmetric memory (an NVSHMEM or CUDA
+/// symmetric-memory allocation, a multicast object's backing) is mapped on
+/// every rank and reached over NVLink; any other device memory only on its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RankMapping {
+    pub(crate) rank: usize,
+    pub(crate) symmetric: bool,
+    /// The owner's binding name, for diagnostics.
+    pub(crate) name: Arc<str>,
+}
+
 struct Allocation {
     byte_len: usize,
     observed_address: OnceLock<u64>,
+    /// Set when this allocation is a multicast (multimem) address window: one
+    /// full-length view per rank's physical replica. Only multimem operations
+    /// may access such a window; its own bytes are never read or written.
+    multicast_replicas: OnceLock<Arc<[BufferView]>>,
+    /// The device whose memory this is, in a multi-rank launch. Unset for a
+    /// single-device launch and for host arrays several ranks bind.
+    rank_mapping: OnceLock<RankMapping>,
     backing: AllocationBacking,
     write_through: bool,
     /// The bytes this allocation was launched with, kept for the whole run.
@@ -3729,6 +3825,8 @@ impl Allocation {
             backing,
             write_through: false,
             observed_address: OnceLock::new(),
+            multicast_replicas: OnceLock::new(),
+            rank_mapping: OnceLock::new(),
             launch_bytes: Some(launch),
         }
     }
@@ -3761,6 +3859,8 @@ impl Allocation {
             backing,
             write_through: false,
             observed_address: OnceLock::new(),
+            multicast_replicas: OnceLock::new(),
+            rank_mapping: OnceLock::new(),
             launch_bytes: Some(launch),
         }
     }
@@ -3774,6 +3874,8 @@ impl Allocation {
             backing: AllocationBacking::Shared(SharedAllocationBacking::new_host_all_valid(bytes)),
             write_through: true,
             observed_address: OnceLock::new(),
+            multicast_replicas: OnceLock::new(),
+            rank_mapping: OnceLock::new(),
             // A host region is mapped, not copied, so there is no launch
             // snapshot to keep; callers see `None` and treat it as unknown.
             launch_bytes: None,
@@ -4543,6 +4645,9 @@ pub enum MemoryError {
     UnknownAllocation {
         allocation: AllocationId,
     },
+    MulticastAddressAccess {
+        allocation: AllocationId,
+    },
     ViewOutOfBounds {
         allocation: AllocationId,
         allocation_byte_len: usize,
@@ -4621,6 +4726,10 @@ impl fmt::Display for MemoryError {
             Self::UnknownAllocation { allocation } => {
                 write!(f, "unknown global-memory {allocation}")
             }
+            Self::MulticastAddressAccess { allocation } => write!(
+                f,
+                "{allocation} is a multicast address window; only multimem operations may access it (PTX ISA 8.2.3)"
+            ),
             Self::ViewOutOfBounds {
                 allocation,
                 allocation_byte_len,

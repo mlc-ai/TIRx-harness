@@ -12,19 +12,25 @@ if TYPE_CHECKING:
     from tvm.tir import PrimFunc
 
 
-def synccheck(kernel: PrimFunc, inputs: dict | None = None) -> SyncCheckReport:
-    """Run native synchronization analysis for one concrete invocation."""
+def synccheck(kernel: PrimFunc, inputs: dict | list[dict] | None = None) -> SyncCheckReport:
+    """Run native synchronization analysis for one concrete invocation.
+
+    A list of per-rank input dicts launches one rank per entry.
+    """
     return _run_synccheck(kernel, inputs=inputs)
 
 
-def racecheck(kernel: PrimFunc, inputs: dict | None = None) -> RaceReport:
-    """Run native memory-race analysis for one concrete invocation."""
+def racecheck(kernel: PrimFunc, inputs: dict | list[dict] | None = None) -> RaceReport:
+    """Run native memory-race analysis for one concrete invocation.
+
+    A list of per-rank input dicts launches one rank per entry.
+    """
     return _run_racecheck(kernel, inputs=inputs)
 
 
 def _run_synccheck(
     kernel: PrimFunc,
-    inputs: dict | None = None,
+    inputs: dict | list[dict] | None = None,
     *,
     coverage_bounds=None,
     resource_limits=None,
@@ -56,7 +62,7 @@ def _run_synccheck(
 
 def _run_racecheck(
     kernel: PrimFunc,
-    inputs: dict | None = None,
+    inputs: dict | list[dict] | None = None,
     *,
     subset=None,
     cache_dir: str | Path | None = None,

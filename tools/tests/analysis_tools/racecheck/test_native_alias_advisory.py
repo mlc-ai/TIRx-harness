@@ -68,6 +68,34 @@ def native_explicit_view_provenance(output: T.Buffer((1,), "int32")):
 
 
 @T.prim_func
+def native_bulk_copy_replaces_named_provenance(
+    source: T.Buffer((4,), "uint32"), output: T.Buffer((4,), "uint32")
+):
+    T.device_entry()
+    _warp = T.warp_id([1])
+    lane = T.lane_id([32])
+    storage = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
+    old_view = T.decl_buffer((4,), "uint32", data=storage.data, scope="shared")
+    new_view = T.decl_buffer((4,), "uint32", data=storage.data, scope="shared")
+    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+    if lane == 0:
+        T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
+        T.ptx.fence.mbarrier_init.release.cluster()
+        for offset in T.serial(4):
+            old_view[offset] = T.uint32(99)
+        T.ptx.fence.proxy.async_.shared__cta()
+    T.cuda.warp_sync()
+    if lane == 0:
+        T.ptx.mbarrier.arrive.expect_tx.shared.b64(barrier.ptr_to([0]), 16)
+        T.ptx["cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes"](
+            storage.ptr_to([0]), source.ptr_to([0]), T.uint32(16), barrier.ptr_to([0])
+        )
+    T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
+    if lane < 4:
+        output[lane] = new_view[lane]
+
+
+@T.prim_func
 def native_tmem_view_provenance(output: T.Buffer((32,), "uint32")):
     T.device_entry()
     _warp = T.warp_id([1])
@@ -201,6 +229,19 @@ def test_public_native_stale_logical_name_read_is_review(tmp_path):
     rendered = report.format()
     assert "Reader: warp 0" in rendered
     assert "Writer: warp 0" in rendered
+
+
+def test_completed_bulk_copy_does_not_retain_an_overwritten_logical_name(tmp_path):
+    report = racecheck(
+        native_bulk_copy_replaces_named_provenance,
+        inputs={"source": np.arange(4, dtype=np.uint32), "output": np.zeros(4, dtype=np.uint32)},
+        cache_dir=tmp_path,
+    )
+
+    assert report.verdict == "clean", report.format()
+    assert report.native_payload["findings"] == []
+    assert report.native_payload["advisories"] == []
+    assert report.native_payload["incomplete"] == []
 
 
 def test_raw_ptx_shared_address_retains_logical_alias_owner(tmp_path):

@@ -40,6 +40,7 @@ class LaunchTopology:
     ctas_per_cluster: int
     warps_per_cta: int
     warps_per_warpgroup: int
+    threads_per_cta: int
 
     @property
     def warp_count(self) -> int:
@@ -140,6 +141,7 @@ class PrimFuncSpec:
 @dataclass(frozen=True)
 class ModuleSpec:
     kernels: tuple[PrimFuncSpec, ...]
+    parameter_buffers: tuple[tuple[str, ...], ...] = ()
 
     @cached_property
     def host_abi(self) -> dict[str, Any]:
@@ -162,12 +164,15 @@ class ModuleSpec:
         return self.kernels[0].topology
 
     def to_manifest(self, *, include_source_spans: bool = True) -> dict[str, Any]:
-        return {
+        manifest = {
             "kernels": [
                 kernel.to_manifest(include_source_spans=include_source_spans)
                 for kernel in self.kernels
             ],
         }
+        if self.parameter_buffers:
+            manifest["parameter_buffers"] = [list(names) for names in self.parameter_buffers]
+        return manifest
 
 
 def _derived_manifest_fields(source_map: list[SourceEntry]) -> dict[str, Any]:
@@ -239,7 +244,25 @@ def module_spec_from_manifest(value: Any) -> ModuleSpec:
             kernels.append(_primfunc_spec_from_manifest(kernel))
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise ValueError(f"invalid module spec manifest: {error}") from error
-    result = ModuleSpec(kernels=tuple(kernels))
+    parameter_buffers = value.get("parameter_buffers", [])
+    if not isinstance(parameter_buffers, list) or (
+        parameter_buffers and len(parameter_buffers) != len(kernels)
+    ):
+        raise ValueError("module parameter buffers must name each kernel phase")
+    for kernel, names in zip(kernels, parameter_buffers):
+        if (
+            not isinstance(names, list)
+            or not all(isinstance(name, str) for name in names)
+            or names != sorted(set(names))
+            or not set(names) <= {buffer.parameter for buffer in kernel.buffers}
+        ):
+            raise ValueError("invalid module parameter-buffer bindings")
+    if parameter_buffers and not any(parameter_buffers):
+        raise ValueError("empty parameter-buffer metadata must be omitted")
+    result = ModuleSpec(
+        kernels=tuple(kernels),
+        parameter_buffers=tuple(tuple(names) for names in parameter_buffers),
+    )
     canonical = json.dumps(result.to_manifest(), sort_keys=True, separators=(",", ":"))
     supplied = json.dumps(value, sort_keys=True, separators=(",", ":"))
     if canonical != supplied:
@@ -279,6 +302,12 @@ def attach_source_nodes(
     funcs = tuple(normalize_host_tensor_map_prelude(func) for func in sources)
     if len(funcs) != len(spec.kernels):
         raise ValueError("cached module spec does not match the source kernel count")
+    from .parameter_buffers import parameter_buffer_names
+
+    parameter_buffers = tuple(parameter_buffer_names(func) for func in funcs)
+    expected_parameters = parameter_buffers if any(parameter_buffers) else ()
+    if spec.parameter_buffers != expected_parameters:
+        raise ValueError("cached module spec does not match parameter snapshot metadata")
     cache_key = None if _cache_key is None else (_cache_key, _render_script)
     if cache_key is not None and len(funcs) == 1:
         # Normalization returns a temporary Python wrapper. Key the weak cache
@@ -358,7 +387,13 @@ def native_module_spec(
                 script=_plain_text(func.script()) if render_script else "",
             )
         )
-    result = ModuleSpec(kernels=tuple(bound))
+    from .parameter_buffers import parameter_buffer_names
+
+    parameter_buffers = tuple(parameter_buffer_names(func) for func in funcs)
+    result = ModuleSpec(
+        kernels=tuple(bound),
+        parameter_buffers=parameter_buffers if any(parameter_buffers) else (),
+    )
     # The native frontend named this very manifest, so the memo needs no second
     # native call to confirm it.
     object.__setattr__(result, "host_abi", host_abi)

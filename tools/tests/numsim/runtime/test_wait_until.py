@@ -26,12 +26,10 @@ def _memory_variants(rust_source):
     The wait is dropped from both spellings, because the two express it
     differently on purpose. Written raw it is a loop of loads, and the engine
     has to execute every one of them; written through the primitive it is one
-    suspending operation and the engine does the waiting itself. That is the
-    whole point of the operation — a spin's reads all race the publisher's
-    write by construction, so handing them to the memory model reports every
-    correct protocol. The CUDA both spellings lower to is still the same loop,
-    instruction for instruction; `tests/python/tirx/codegen/test_cuda_wait_until.py`
-    is where that is pinned.
+    suspending operation and the engine does the waiting itself. Scoped strong
+    flag accesses are not data races in either spelling; acquiring unrelated
+    payload bytes still requires observing a publication. The CUDA spellings
+    lower to the same loop, as checked by the compiler codegen tests.
 
     So: `mem::declared_wait` goes, and so does everything inside a native
     `while` body. What the two spellings have to agree on is everything else.
@@ -252,20 +250,8 @@ def test_packed_wait_matches_raw_spelling(dtype, tmp_path):
     assert _memory_variants(module.rust_source) == _memory_variants(raw_module.rust_source)
     for name in inputs():
         np.testing.assert_array_equal(outputs[name], raw_outputs[name])
-    # The primitive lets the checker explain the successful exit and its HB
-    # edge. The raw loop below instead contains a proven unordered access.
     assert _verdicts(primitive, inputs)["racecheck"] == ("clean", [])
-    # Raw, the spin is an ordinary pair: a word one warp writes and another
-    # only reads, and every schedule leaves at least one of those reads
-    # unordered against the publication, so the answer does not move with the
-    # worker count the way a per-poll verdict would. Written through the
-    # primitive it disappears: the wait adjudicates no access of its own and
-    # its edge decides.
-    # This is a data race, not a separate undeclared-protocol advisory.
-    assert _verdicts(raw, inputs)["racecheck"] == (
-        "error",
-        [("error", "data_race")],
-    )
+    assert _verdicts(raw, inputs)["racecheck"] == ("clean", [])
     np.testing.assert_array_equal(outputs["observed"], np.array([7], dtype))
 
 
@@ -725,9 +711,9 @@ def _packed_payload(*, retry):
     uses and the one a separate payload buffer cannot stand in for. Both
     versions declare the word; they differ only in whether the reader waits.
 
-    A wait that retries is the protocol working. A single load is #677's "read
-    once, no retry": the reader takes whatever the word held, and declaring it
-    must not make that look correct.
+    A retry waits for the selected generation. A single strong load can read
+    the initial value without a data race; a clean report alone does not prove
+    that the intended generation was observed.
     """
 
     read = (
@@ -738,11 +724,6 @@ def _packed_payload(*, retry):
         '                "gpu", "global")'
         if retry
         else (
-            # Relaxed, not acquiring. An acquiring single read is what an
-            # acquiring spin is made of, and the checker sees accesses rather
-            # than loops, so it cannot separate the two: sparing the loop
-            # spares this. A relaxed read takes the value and no order, which
-            # is the shape the claim can name on every schedule.
             "T.ptx.ld.relaxed.gpu.global_.u64(\n"
             '                observed[0], slot.ptr_to([0]))'
         )
@@ -775,26 +756,16 @@ def _packed_payload_inputs():
 def test_a_wait_on_a_word_that_carries_its_own_payload_is_clean():
     """The protocol working, with nothing but the declared word involved.
 
-    A spin is by definition a read racing the publisher's write, so this is
-    only clean if the wait is one operation to the checker rather than a loop
-    of reads it has to adjudicate.
+    Scoped strong loads and stores of this one word are not data races.
     """
 
     racecheck(_packed_payload(retry=True), _packed_payload_inputs()).require_clean()
 
 
-def test_reading_the_word_once_is_not_made_correct_by_declaring_it():
-    """#677's example 2, declared. The declaration must not launder it.
-
-    The payload is in the word, so there is no second buffer whose read could
-    report instead: if this comes back clean, the primitive is blind to the
-    bug it was built for.
-
-    The single read is relaxed. With an acquiring one the checker cannot tell
-    this from a correct acquiring spin -- it sees accesses, not loops -- and
-    reporting it would report every hand-written acquire loop as well. What it
-    keeps is the shape where the reader took a value and no order at all.
-    """
-
-    report = racecheck(_packed_payload(retry=False), _packed_payload_inputs())
-    assert report.verdict != "clean", report.format()
+def test_strong_single_read_is_race_free_without_proving_the_expected_generation():
+    kernel = _packed_payload(retry=False)
+    module = numsim.transpile(kernel)
+    assert _declared_wait_count(module.rust_source) == 0
+    result = numsim.Engine().run(module, _packed_payload_inputs(), outputs=["sink"])
+    assert int(result.outputs["sink"][0]) in {0, 0xDEADBEEF}
+    racecheck(kernel, _packed_payload_inputs()).require_clean()

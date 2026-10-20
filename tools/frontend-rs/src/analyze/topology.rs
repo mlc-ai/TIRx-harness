@@ -310,6 +310,7 @@ pub struct LaunchTopology {
     pub clusters: i64,
     pub ctas_per_cluster: i64,
     pub warps_per_cta: i64,
+    pub threads_per_cta: i64,
     pub warps_per_warpgroup: i64,
     /// `tirx.launch_bounds_min_blocks_per_sm`, or 1. Emission caps the initial
     /// setmaxnreg count with it; it stays out of `json()` so the manifest is
@@ -323,6 +324,7 @@ impl LaunchTopology {
             ("clusters", Json::from(self.clusters)),
             ("ctas_per_cluster", Json::from(self.ctas_per_cluster)),
             ("warps_per_cta", Json::from(self.warps_per_cta)),
+            ("threads_per_cta", Json::from(self.threads_per_cta)),
             ("warps_per_warpgroup", Json::from(self.warps_per_warpgroup)),
         ])
     }
@@ -396,7 +398,10 @@ fn visit(
             constraints.constrain(constraint, i64::try_from(extent).unwrap_or(i64::MAX))?;
         } else if ffi_text(&attr.attr_key) == "tirx.launch_bounds_min_blocks_per_sm" {
             let blocks = static_int(ctx, &oref(attr.value.clone()), environment)?;
-            constraints.constrain("min blocks per sm", i64::try_from(blocks).unwrap_or(i64::MAX))?;
+            constraints.constrain(
+                "min blocks per sm",
+                i64::try_from(blocks).unwrap_or(i64::MAX),
+            )?;
         }
         return visit(ctx, &attr.body, constraints, environment);
     }
@@ -534,12 +539,7 @@ pub(crate) fn extract_topology(
         warp_candidates.push(("CTA warp extent", direct_warps));
     }
     if let Some(direct_threads) = constraints.get("threads per CTA") {
-        if direct_threads % WARP_SIZE != 0 {
-            return unsupported(format!(
-                "CTA thread extent {direct_threads} is not a whole number of warps"
-            ));
-        }
-        warp_candidates.push(("CTA thread extent", direct_threads / WARP_SIZE));
+        warp_candidates.push(("CTA thread extent", (direct_threads - 1) / WARP_SIZE + 1));
     }
     if let Some(warpgroup_count) = constraints.get("warpgroups per CTA") {
         warp_candidates.push(("warpgroup extent", warpgroup_count * warps_per_warpgroup));
@@ -565,6 +565,9 @@ pub(crate) fn extract_topology(
         clusters,
         ctas_per_cluster,
         warps_per_cta,
+        threads_per_cta: constraints
+            .get("threads per CTA")
+            .unwrap_or(warps_per_cta * WARP_SIZE),
         warps_per_warpgroup,
         min_blocks_per_sm: constraints.get("min blocks per sm").unwrap_or(1),
     })

@@ -312,6 +312,15 @@ pub(crate) trait EngineModeImpl: Send + Sync + 'static {
         ))
     }
 
+    /// Release what `before_compact_physical_access` reserved for an access
+    /// whose numeric effect failed. Other warps may be waiting on that
+    /// reservation, and no `after_compact_physical_access` will release it.
+    fn abort_compact_physical_access(
+        _state: &Self::LaunchState,
+        _batch: &CompactPhysicalAccessBatch<'_>,
+    ) {
+    }
+
     fn begin_cached_global_read(
         _state: &Self::LaunchState,
         _access: CachedGlobalReadAccess,
@@ -425,6 +434,16 @@ pub(crate) trait EngineModeImpl: Send + Sync + 'static {
         _effect: OperationEffect<'_>,
     ) -> Result<(), EngineError> {
         Ok(())
+    }
+
+    /// Release what `before_effect` reserved for a physical access whose
+    /// numeric effect failed. Other warps may be waiting on that reservation,
+    /// and no `after_effect` will release it.
+    fn abort_effect(
+        _state: &Self::LaunchState,
+        _operation: &OperationContext,
+        _effect: OperationEffect<'_>,
+    ) {
     }
 
     /// Validate one selected completion before numerical/runtime state changes.
