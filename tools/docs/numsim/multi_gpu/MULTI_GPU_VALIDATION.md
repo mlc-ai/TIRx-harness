@@ -18,7 +18,7 @@ silently to make an example clean.
 
 The current audit found:
 
-| Kernel | Fidelity status |
+| Kernel | GPU port-fidelity status |
 |---|---|
 | Two-shot all-reduce | Preserves the baseline's data layout, constexpr loop/rank, and terminal release/relaxed-CAS protocol. All 18 shapes and the independent repeat now pass bitwise equality, independent-reference precision, flag reset, and the unchanged 99% performance gate. |
 | GEMM + all-reduce | Restored baseline waits, elected leaders, and barrier sequence; removed the added exit GPU fence. All 19 shapes, both origins, three matched configurations, and the independent repeat now meet the unchanged precision/performance gate. `sys_fenced` remains a separate semantic example. |
@@ -43,6 +43,123 @@ worst ratios **1.004910 / 1.002717**. No instruction upgrade, alternative
 publication protocol, launch fusion, or port-only retuning closes this gate.
 
 ## Current evidence
+
+### Full-size NumSim matrix and mismatch investigation
+
+The October 18–19 NumSim-only run uses all **282** retained benchmark entries:
+the actual dimensions, dtypes, four ranks, and recorded configurations, not
+the smaller numerical-test fixtures. It does not run Racecheck or Synccheck.
+The runtime-rank GEMM ports retain `ordering="origin"`. All-gather executes
+the faithful per-shard GEMMs and synchronization/release helpers, with host
+copies replayed between phases; it does not substitute the copy-warp kernel.
+This is one legal serialized host schedule, not exploration of every possible
+copy/GEMM overlap. Mega MoE retains 148 SMs, the reference launch parameters,
+and statistics collection; its inputs use dense nonzero structured weights
+and token/rank-varying activations and routes, with an independent oracle.
+They are not the GPU benchmark's random tensors or a second no-statistics sweep.
+
+| Kernel source | Entries | Numerical pass | Numerical mismatch | Execution limit |
+|---|---:|---:|---:|---:|
+| CUTLASS two-shot all-reduce | 18 | 18 | 0 | 0 |
+| CUTLASS / FlashInfer GEMM + all-reduce | 114 | 56 | 58 | 0 |
+| CUTLASS all-gather GEMM | 136 | 104 | 0 | 32 |
+| DeepGEMM Mega MoE | 14 | 14 | 0 | 0 |
+| Total | 282 | 192 | 58 | 32 |
+
+The matrix is **not a NumSim correctness pass**. All 32 execution-limit rows
+exhaust the unchanged 1,000,000-iteration native-loop budget; they are
+inconclusive, not numerical mismatches or proof of GPU deadlock. One mapped
+failure is the gated GEMM's `mbarrier.try_wait` loop in
+`tools/ported/cutlass/sm100_all_gather_gemm.py:232`.
+
+Approximately 11 hours 34 minutes elapsed from manifest creation to the final
+result, including initial idle waiting, preparation, reference comparisons,
+and a change from four per-family processes to eight concurrent case processes
+with eight engine workers each. Because the shared host was busy, the sweep
+records no qualified per-case performance times. This wall time cannot be
+compared with the earlier 237-second checker/feature suite on smaller shapes.
+
+#### Numerical mismatches: two isolated ordering hazards
+
+The 58 mismatches are exactly **57 CUTLASS TMA-store configurations and one
+FlashInfer direct-store configuration**. All 56 FlashInfer TMA-store entries
+pass. Follow-up diagnostics use the unchanged `cutlass_default` benchmark
+shape (`M=N=256`, `K=512`, TF32 inputs, FP32 output, four ranks), the failing
+64-by-64 MMA tile and 2-by-2 cluster, and the same seeded inputs on CPU/GPU.
+
+1. **CUTLASS: incomplete destination writes before publication.**
+   `tools/ported/cutlass/sm100_gemm_all_reduce.py:763` calls
+   `cp.async.bulk.wait_group.read(0)` before announcing the tile. The read-only
+   wait permits reuse of shared source storage, but does not wait for the
+   global destination writes. That distinction is explicit in the
+   [PTX wait-group specification](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk-wait-group).
+   The observed partial GEMMs are all exact, but a reduction can miss a rank:
+   contributions `[-94, 20, -2, 40]` should sum to `-36`, while NumSim returns
+   `-76`, missing the last contribution. In the focused diagnostic every
+   mismatched result matches a subset of the rank contributions. Changing
+   **only this terminal wait** to full `wait_group(0)` removes the numerical
+   mismatch in all six controls (three runs each with one/eight workers).
+   No scope, alias fence, arithmetic, or work partition changes in that control.
+2. **FlashInfer: publication before other epilogue warps finish.**
+   Direct stores at `tools/ported/cutlass/sm100_gemm_all_reduce.py:744` lack
+   the epilogue join before warp 0 publishes the flag. The join condition at
+   line 759 excludes the original FlashInfer direct-store path. For example,
+   contributions `[31, 29, 47, 18]` should give `125`, but the simulator reads
+   `107` before the last writer finishes. Adding **only the 128-thread
+   epilogue join** removes the numerical mismatch in all six controls. The
+   original path passes three single-worker runs but fails all three
+   eight-worker runs, exposing the schedule dependence rather than a rounding
+   or reference-generation error.
+
+Racecheck on these exact inputs reports the causal store/reduction pairs:
+the TMA store at line 724 or direct store at line 744 versus `multimem.ld_reduce`
+at line 820. Neither run is incomplete. The existing cross-rank scope and
+alias-ordering concerns remain separate: the minimal numerical controls do
+not establish race freedom.
+
+Under a four-GPU socket lease, **all 60 unmodified comparisons pass**:
+both origins, upstream and fixed-/runtime-rank TIRx variants, ten launches
+each, exact outputs on every rank and reset flags. Thus the ordinary GPU runs
+do **not** reproduce either numerical failure. A separate diagnostic delays
+epilogue warp 3 with a 5,000,000-cycle clock loop before its direct stores,
+without changing the operands or arithmetic. FlashInfer's original protocol
+then produces 65,036 / 65,177 / 65,177 mismatched elements across four GPUs;
+the identically delayed join-only control produces zero in all three runs.
+This is a hardware reproduction under deliberately perturbed scheduling, not
+a failure of the unmodified GPU benchmark. No diagnostic wait, join, or delay
+is added to the faithful ports or used as performance-parity evidence.
+
+#### Matched NumSim / Racecheck / Synccheck timing
+
+Fresh measurements on October 19 use those same four-rank `256x256x512`
+inputs and original protocols, eight engine workers, warmed generated artifacts,
+and three timed repeats after the first call. Every timed call passes a CPU
+preflight (256 logical CPUs, at least 80% sampled idle, CPU pressure below 5%,
+one-minute load below 128). Input/reference construction, report serialization,
+and idle waiting are outside the timer; artifact-cache lookup, execution,
+and report/result construction are inside it. Calls execute serially.
+
+| Original protocol | NumSim median (s) | Racecheck median (s) | Synccheck median (s) |
+|---|---:|---:|---:|
+| CUTLASS TMA-store | 1.487 | 11.666 | 5.513 |
+| FlashInfer direct-store | 1.716 | 16.526 | 5.526 |
+
+NumSim is faster on these matched workloads; the full-size matrix versus
+small-fixture suite comparison does not establish the opposite. Racecheck
+returns `error`; Synccheck returns `review` for uninitialized-register
+advisories, with no incomplete executions. These are timings, not clean
+checker verdicts, and are not extrapolated to the entire 282-entry matrix.
+
+Raw results and diagnostics remain outside Git under the validation worker's
+`/home/tiger/tirx-gemm-validation/`: `full-numsim-per-row-20261018/summary.json`,
+`logs/full-numsim-mismatch-cpu-20261019.log`,
+`logs/full-numsim-mismatch-gpu-20261019.log`,
+`logs/full-numsim-mismatch-gpu-delayed-clock-20261019.log`, and
+`logs/matched-analysis-timing-20261019.log`. The temporary reproduction drivers
+are `tirx_full_numsim_matrix_20261018.py`, `tirx_mismatch_diagnostic.py`, and
+`tirx_matched_analysis_timing.py` in that directory.
+
+### Prior feature-validation evidence
 
 The latest Mega MoE correction is described in the
 [activation and allocation audit](lowering_optimizations.md#current-source-and-benchmark-correction).
