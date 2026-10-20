@@ -89,17 +89,18 @@ def test_constant_input_is_changed():
 
 @pytest.mark.parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
 @pytest.mark.parametrize("cached", [False, True])
-def test_float8_input_dependence(dtype, cached):
-    bound = (torch.linspace(-1, 1, 64).to(dtype),)
+def test_fp8_input_dependence(dtype, cached):
+    inputs = (torch.linspace(-1, 1, 128).to(dtype),)
 
-    def reference(value):
-        return value.float() * 2
+    def reference(x):
+        return x.float() * 2
 
-    stored = reference(*bound)
-    candidate = KernelRun(lambda value: stored if cached else reference(value), bound)
+    stored = reference(*inputs)
+    candidate = KernelRun((lambda x: stored) if cached else reference, inputs)
+    candidate.run()
     result = input_dependence_check(
         candidate_runner=candidate,
-        bound_args=bound,
+        bound_args=inputs,
         correctness_fn=reference,
         correctness_prepare=None,
         device=torch.device("cpu"),
@@ -107,8 +108,31 @@ def test_float8_input_dependence(dtype, cached):
         rtol=1e-4,
         required_matched_ratio=1.0,
         required_rms_error_ratios=None,
-        phase="float8 input dependence",
+        phase="fp8 input-dependence",
         seed=1,
     )
     assert result is not None
     assert result.ok is not cached
+    if cached:
+        assert "did not follow an in-place change" in result.note
+
+
+@pytest.mark.parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+def test_nonfinite_fp8_inputs_are_not_perturbed(dtype):
+    inputs = (torch.full((8,), float("nan")).to(dtype),)
+    candidate = KernelRun(lambda x: x.float(), inputs)
+    result = input_dependence_check(
+        candidate_runner=candidate,
+        bound_args=inputs,
+        correctness_fn=lambda x: x.float(),
+        correctness_prepare=None,
+        device=torch.device("cpu"),
+        atol=1e-4,
+        rtol=1e-4,
+        required_matched_ratio=1.0,
+        required_rms_error_ratios=None,
+        phase="nonfinite fp8 input-dependence",
+        seed=1,
+    )
+    assert result is None
+    assert torch.isnan(inputs[0].float()).all()
