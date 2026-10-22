@@ -6,15 +6,16 @@ use std::collections::HashSet;
 
 use crate::analyze::buffers::{call_op_name, BufferBindings};
 use crate::analyze::util::{
-    as_buffer, dtype_of, ffi_text, int_imm, kind, oref, same, unsupported, AResult, Json,
+    as_buffer, dtype_of, dtype_text, ffi_text, int_imm, kind, oref, same, unsupported, AResult, Json,
 };
 use crate::decode::projected_buffer;
 use tvm::analysis::Analyzer;
 use tvm::ir::StringImmObj;
-use tvm::ir::{Call, CallObj, DictAttrs, Expr, IntImm, PointerTypeObj, PrimExpr, Var};
+use tvm::ir::{Call, CallObj, DictAttrs, Expr, IntImm, Op, PointerTypeObj, PrimExpr, StringImm, Var};
 use tvm::prim::Add;
 use tvm::tirx::{
     AssertStmtObj, AttrStmtObj, BindObj, DeclBufferObj, EvaluateObj, PrimFunc, SeqStmtObj, Stmt,
+    TensorMapEncodeTiledAttrObj,
 };
 use tvm::tvm_ffi::object::ObjectRef;
 use tvm::tvm_ffi::{Any, Map, ObjectRefCast, ObjectRefCore, String as FfiString};
@@ -276,6 +277,55 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
     let Ok(call) = evaluate.value.clone().try_cast::<Call>() else {
         return Ok(None);
     };
+    if call_op_name(&call)?.as_deref() == Some("tirx.tensormap_encode_tiled") {
+        let Some(attrs) = call
+            .attrs
+            .as_ref()
+            .and_then(|attrs| attrs.as_node::<TensorMapEncodeTiledAttrObj>())
+        else {
+            return unsupported("typed TensorMap encode requires TensorMapEncodeTiledAttr");
+        };
+        if !(1..=5).contains(&attrs.rank) {
+            return unsupported(format!(
+                "host TensorMap rank must be in 1..5, got {}",
+                attrs.rank
+            ));
+        }
+        let expected = 1 + 4 * attrs.rank as usize;
+        if call.args.len() != expected {
+            return unsupported(format!(
+                "typed host TensorMap rank-{} encode has {} arguments; expected {expected}",
+                attrs.rank,
+                call.args.len()
+            ));
+        }
+        // Both public spellings use the same descriptor validation and metadata.
+        // The typed op stores dtype/rank/modes in attrs instead of packed operands.
+        let mut args: Vec<Expr> = vec![
+            StringImm::new("runtime.cuTensorMapEncodeTiled").into(),
+            call.args.get(0).expect("descriptor"),
+            StringImm::new(&dtype_text(attrs.descriptor_dtype)).into(),
+            IntImm::new("int32", attrs.rank)?.into(),
+        ];
+        args.extend(call.args.iter().skip(1));
+        for mode in [
+            attrs.interleave,
+            attrs.swizzle,
+            attrs.l2_promotion,
+            attrs.oob_fill,
+            attrs.force_cu_dtype,
+        ] {
+            args.push(IntImm::new("int32", mode)?.into());
+        }
+        return Ok(Some(Call::with_metadata(
+            call.ty.clone(),
+            Op::get("tirx.tvm_call_packed")?,
+            args,
+            None,
+            Vec::new(),
+            call.span.as_ref(),
+        )));
+    }
     if call_op_name(&call)?.as_deref() == Some("tirx.tvm_call_packed")
         && call
             .args

@@ -219,6 +219,82 @@ def prepare_native_bindings(
     )
 
 
+def _concretize_checker_shapes(
+    func: Any,
+    inputs: dict[str, Any] | None,
+) -> tuple[Any, dict[str, Any] | None, dict[str, str]]:
+    """Bind symbolic buffer dimensions before the frontend inspects layouts."""
+
+    if not isinstance(inputs, dict) or not hasattr(func, "params"):
+        return func, inputs, {}
+    buffers = {
+        str(parameter.name): parameter
+        for parameter in func.params
+        if tirx.is_buffer_var(parameter)
+        and str(parameter.name) in inputs
+        and any(isinstance(extent, tirx.Var) for extent in parameter.ty.shape)
+    }
+    if not buffers:
+        return func, inputs, {}
+    # Reuse the runtime's logical shapes, including packed float4 storage.
+    prepared = prepare_bindings(
+        {name: inputs[name] for name in buffers},
+        expected_buffer_dtypes={name: str(param.ty.dtype) for name, param in buffers.items()},
+    )
+    constraints = {}
+    for name, parameter in buffers.items():
+        ty = parameter.ty
+        shape = prepared.buffers[name].shape
+        if len(shape) != len(ty.shape):
+            raise NumSimExecutionError(
+                f"native analysis buffer {name!r} has rank {len(shape)}, expected {len(ty.shape)}"
+            )
+        # Keep non-variable dimensions and all non-shape metadata intact. TVM's
+        # specializer checks shared dimensions and remaps layouts with the shape.
+        dimensions = [
+            tirx.IntImm(str(extent.ty.dtype), size) if isinstance(extent, tirx.Var) else extent
+            for extent, size in zip(ty.shape, shape, strict=True)
+        ]
+        constraints[parameter] = tirx.decl_buffer(
+            dimensions,
+            str(ty.dtype),
+            strides=list(ty.strides),
+            elem_offset=ty.elem_offset,
+            scope=ty.storage_scope,
+            data_alignment=ty.data_alignment,
+            offset_factor=ty.offset_factor,
+        )
+    # An explicit scalar may also be a buffer dimension. Keep its supplied value
+    # as a constraint so a conflicting scalar/array pair cannot be specialized away.
+    scalar_dtypes = {
+        str(parameter.name): str(parameter.ty.dtype)
+        for parameter in func.params
+        if not tirx.is_buffer_var(parameter)
+        and not isinstance(parameter.ty, PointerType)
+        and any(parameter.same_as(extent) for buf in buffers.values() for extent in buf.ty.shape)
+        and str(parameter.name) in inputs
+    }
+    scalar_values = prepare_bindings(
+        {name: inputs[name] for name in scalar_dtypes}, expected_scalar_dtypes=scalar_dtypes
+    ).scalars
+    # Specialize buffers together so conflicting shared shape variables are rejected.
+    try:
+        specialized = func.specialize(constraints)
+    except (TypeError, ValueError) as error:
+        raise NumSimExecutionError(f"native analysis input shapes disagree: {error}") from error
+    for name, parameter in buffers.items():
+        for extent, size in zip(parameter.ty.shape, prepared.buffers[name].shape, strict=True):
+            if isinstance(extent, tirx.Var) and str(extent.name) in scalar_values:
+                if scalar_values[str(extent.name)].value != size:
+                    raise NumSimExecutionError(
+                        f"native analysis shape {str(extent.name)!r} disagrees with scalar input"
+                    )
+    execution_inputs = dict(inputs)
+    for name in scalar_dtypes:
+        execution_inputs.pop(name)
+    return specialized, execution_inputs, scalar_dtypes
+
+
 def _concretize_checker_launch(
     func: Any,
     inputs: dict[str, Any] | None,
@@ -708,9 +784,11 @@ def run_native_checker(
     from .api import Engine
 
     try:
+        shaped_func, shaped_inputs, shape_scalar_dtypes = _concretize_checker_shapes(func, inputs)
         concrete_func, execution_inputs, launch_scalar_dtypes = _concretize_checker_launch(
-            func, inputs
+            shaped_func, shaped_inputs
         )
+        launch_scalar_dtypes = {**shape_scalar_dtypes, **launch_scalar_dtypes}
         module = transpile_native_checker_artifact(checker, concrete_func, cache_dir=cache_dir)
     except UnsupportedTIRxError as error:
         return NativeCheckerRun(

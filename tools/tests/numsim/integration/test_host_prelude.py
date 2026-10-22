@@ -11,6 +11,95 @@ from tirx_harness.numsim.errors import UnsupportedTIRxError
 
 
 @T.prim_func
+def typed_host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
+    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+    T.tensormap_encode_tiled(
+        tensor_map,
+        output.data,
+        32,
+        32,
+        1,
+        descriptor_dtype="int32",
+        rank=1,
+        interleave=0,
+        swizzle=0,
+        l2_promotion=2,
+        oob_fill=0,
+        force_cu_dtype=-1,
+    )
+    T.device_entry()
+    _warp = T.warp_id([1])
+    lane = T.lane_id([32])
+    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    shared[lane] = lane
+    T.cuda.warp_sync()
+    T.ptx.fence.proxy.async_.shared__cta()
+    if lane == 0:
+        T.evaluate(
+            T.ptx["cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"](
+                T.address_of(tensor_map), 0, T.address_of(shared[0])
+            )
+        )
+        T.ptx.cp.async_.bulk.commit_group()
+        T.ptx.cp.async_.bulk.wait_group.read(0)
+
+
+def _typed_host_tensor_map_2d(swizzle=3):
+    @T.prim_func
+    def kernel(source: T.Buffer((64, 64), "bfloat16"), output: T.Buffer((32,), "int32")):
+        tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+        T.tensormap_encode_tiled(
+            tensor_map,
+            source.data,
+            64,
+            64,
+            128,
+            64,
+            64,
+            1,
+            1,
+            descriptor_dtype="bfloat16",
+            rank=2,
+            interleave=0,
+            swizzle=swizzle,
+            l2_promotion=2,
+            oob_fill=0,
+            force_cu_dtype=-1,
+        )
+        T.device_entry()
+        _warp = T.warp_id([1])
+        lane = T.lane_id([32])
+        output[lane] = 0
+
+    return kernel
+
+
+def test_typed_tensor_map_store_executes_its_descriptor(tmp_path):
+    module = numsim.transpile(typed_host_encoded_tensor_map_store, cache_dir=tmp_path)
+    result = numsim.Engine().run(module, {"output": np.zeros(32, dtype=np.int32)})
+    np.testing.assert_array_equal(result.outputs["output"], np.arange(32, dtype=np.int32))
+
+
+@pytest.mark.parametrize("checker", [synccheck, racecheck])
+def test_typed_tensor_maps_are_accepted_by_native_checkers(checker):
+    checker(
+        typed_host_encoded_tensor_map_store, {"output": np.zeros(32, dtype=np.int32)}
+    ).require_clean()
+    checker(
+        _typed_host_tensor_map_2d(),
+        {
+            "source": np.zeros((64, 64), dtype=np.uint16),
+            "output": np.zeros(32, dtype=np.int32),
+        },
+    ).require_clean()
+
+
+def test_typed_tensor_map_modes_are_validated(tmp_path):
+    with pytest.raises(UnsupportedTIRxError, match="swizzle enum value 99"):
+        numsim.transpile(_typed_host_tensor_map_2d(swizzle=99), cache_dir=tmp_path)
+
+
+@T.prim_func
 def host_encoded_tensor_map(output: T.Buffer((32,), "int32")):
     tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
     T.call_packed(
