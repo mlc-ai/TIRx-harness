@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "setuptools-scm>=8", "apache-tvm-ffi==0.1.14.post0"]
+requires = ["setuptools>=77.0.3", "setuptools-scm>=8", "apache-tvm-ffi==0.1.14.post0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "tirx-harness"
 dynamic = ["version", "dependencies"]
 description = "TIRx kernel development, inspection, and simulation tools"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.14"
 
 [project.scripts]

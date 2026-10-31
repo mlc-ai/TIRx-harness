@@ -59,3 +59,7 @@ explains the design behind the harness and walks through an optimization workflo
 - [Add a workload](https://tirxharness.mlc.ai/docs/development/add-workload.html): define a new optimization task
 - [Contribute a kernel](https://tirxharness.mlc.ai/docs/development/contribute-kernel.html): publish a kernel produced by a run
 - [Report and fix bugs](https://tirxharness.mlc.ai/docs/development/report-and-fix-bugs.html): reproduce and resolve a defect
+
+## License
+
+TIRx Harness is licensed under the [Apache License 2.0](LICENSE).
