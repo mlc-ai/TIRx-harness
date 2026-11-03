@@ -2,13 +2,12 @@
 
 use crate::analyze::util::json_object;
 use crate::tvm_compat::int_value;
-use tvm::ir::{FloatImmObj, IntImmObj, VarObj};
-use tvm::prim::{CastObj, NotObj, SelectObj};
-use tvm::tirx::{
-    AttrStmtObj, BindObj, ForKind, ForObj, IterVar, ScopeIdDefStmtObj, SeqStmtObj, Stmt,
-};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore, TypeIndex};
+use tvm_tirx::ir::{FloatImmObj, IntImmObj, VarObj};
+use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
+use tvm_tirx::ir::{BindObj, ForKind, ForObj, SeqStmtObj, Stmt};
+use tvm_tirx::tirx::{AttrStmtObj, IterVar, ScopeIdDefStmtObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, TypeIndex};
 
 use super::util::{dtype_of, ffi_text, kind, oref, repr_text, unsupported, AResult, IdMap, Json};
 use super::{topology_operands, Ctx};

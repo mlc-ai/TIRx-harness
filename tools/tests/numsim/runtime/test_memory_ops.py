@@ -9,8 +9,8 @@ from tests.numsim.support.manifest import emitted_calls, parse_kernel
 from tirx_harness import numsim, racecheck
 from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm import tirx
 from tvm.script import tirx as T
+from tvm_tirx import tirx
 
 _OBSOLETE_CP_ASYNC_BULK_SOURCE = """
 @T.prim_func
@@ -1370,7 +1370,7 @@ def test_scalar_atomic_add_has_no_s64_form_while_min_and_max_do(op_name):
 
     pointer = tirx.Var("pointer", "handle")
     wrapper = getattr(T.ptx, op_name)
-    destination = tirx.decl_buffer((1,), "int64", name="destination")
+    destination = tvm.tirx.decl_buffer((1,), "int64", name="destination")
 
     def call(operation):
         operands = (

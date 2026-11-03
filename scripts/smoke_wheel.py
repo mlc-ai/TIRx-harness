@@ -30,8 +30,6 @@ def main():
     library = native_frontend.library_path()
     assert library.is_relative_to(package), library
     assert native_frontend._library() is not None
-    for name in ("LICENSE", "NOTICE"):
-        assert (library.parent / "_thirdparty_licenses" / "tvm-rust-ext" / name).is_file()
 
     source = np.arange(32, dtype=np.float32)
     with TemporaryDirectory() as temporary:

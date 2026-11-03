@@ -2,13 +2,13 @@
 //! tile resolver shares.
 
 use crate::tvm_compat::int_value;
-use tvm::analysis::Analyzer;
-use tvm::ir::StringImmObj;
-use tvm::ir::TensorRegionObj;
-use tvm::ir::{FloatImm, FloatImmObj, IntImm, IntImmObj, PrimExpr, Range};
-use tvm::tirx::{BufferVar, TilePrimitiveCallObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore, String as FfiString, TypeIndex};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::TensorRegionObj;
+use tvm_tirx::ir::{FloatImm, FloatImmObj, IntImm, IntImmObj, PrimExpr, Range};
+use tvm_tirx::tirx::{TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString, TypeIndex};
 
 use super::super::layout::expr_any;
 use super::super::util::{
@@ -194,7 +194,7 @@ pub(super) fn literal_float(value: &Any, field: &str) -> AResult<f64> {
         AnyValue::Float(value) => return Ok(*value),
         AnyValue::Object(node) => {
             if let Ok(expr) = PrimExpr::try_from(Any::from(node.clone())) {
-                let simplified = Analyzer::new()?.simplify(&expr)?;
+                let simplified = Analyzer::new().simplify(&expr)?;
                 if let Some(imm) = simplified.as_node::<FloatImmObj>() {
                     return Ok(imm.value);
                 }
@@ -215,7 +215,7 @@ pub(super) fn literal_float(value: &Any, field: &str) -> AResult<f64> {
 // Operands and common checks.
 // ----------------------------------------------------------------------
 
-fn memory_scope(buffer: &BufferVar) -> String {
+fn memory_scope(buffer: &TensorVar) -> String {
     let scope = buffer_scope(buffer);
     if scope.starts_with("shared") {
         "shared".to_owned()
@@ -244,7 +244,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                         &extents
                     ));
                 }
-                let buffer = BufferVar::try_from(region.source.clone())?;
+                let buffer = TensorVar::try_from(region.source.clone())?;
                 return Ok(TileOperand::Region(TileRegion {
                     dtype: buffer_dtype(&buffer),
                     memory_scope: memory_scope(&buffer),
@@ -257,7 +257,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
             // typed-scalar path below.
         }
         AnyValue::Bool(value) => {
-            let expr: PrimExpr = IntImm::new(BOOL, i64::from(*value))?.into();
+            let expr: PrimExpr = IntImm::new(BOOL, i64::from(*value)).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: BOOL.to_owned(),
@@ -271,14 +271,14 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                 // Every i64 fits int64, so no uint64 literal arises here.
                 "int64"
             };
-            let expr: PrimExpr = IntImm::new(dtype, *value)?.into();
+            let expr: PrimExpr = IntImm::new(dtype, *value).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: dtype.to_owned(),
             }));
         }
         AnyValue::Float(value) => {
-            let expr: PrimExpr = FloatImm::new("float64", *value)?.into();
+            let expr: PrimExpr = FloatImm::new("float64", *value).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: "float64".to_owned(),

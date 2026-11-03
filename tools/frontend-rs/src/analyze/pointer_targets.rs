@@ -2,14 +2,15 @@
 //! keep the full seed. Runtime validation catches raw address arithmetic that
 //! escapes a candidate allocation and repeats with the complete seed.
 
-use tvm::tirx::TensorMapTypeObj;
+use tvm_tirx::tirx::TensorMapTypeObj;
 
 use std::collections::BTreeSet;
-use tvm::ir::TensorRegionObj;
-use tvm::ir::{CallObj, PointerTypeObj, TensorLoadObj};
-use tvm::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
-use tvm::tirx::{BindObj, BufferStoreObj, BufferVar};
-use tvm::tvm_ffi::{object::ObjectRef, ObjectRefCore};
+use tvm_tirx::ir::TensorRegionObj;
+use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
+use tvm_tirx::ir::{BindObj, TensorStoreObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::{object::ObjectRef, ObjectRefCore};
 
 use super::frontend::KernelPlan;
 use super::util::{
@@ -103,7 +104,7 @@ impl<'a> PointerTargets<'a> {
                     .bindings
                     .set(oref(bind.var.clone()), oref(bind.value.clone()));
             }
-            if let Some(store) = node.as_node::<BufferStoreObj>() {
+            if let Some(store) = node.as_node::<TensorStoreObj>() {
                 let key = plan.buffer_bindings.storage_key(&store.buffer)?;
                 if let Some(defs) = writes.get_mut(&key) {
                     defs.push(vec![oref(store.value.clone())]);
@@ -119,7 +120,7 @@ impl<'a> PointerTargets<'a> {
             if let Some(region) = node.as_node::<TensorRegionObj>() {
                 escaped.add(
                     plan.buffer_bindings
-                        .storage_key(&BufferVar::try_from(region.source.clone())?)?,
+                        .storage_key(&TensorVar::try_from(region.source.clone())?)?,
                 );
             }
             if let Some(call) = node.as_node::<CallObj>() {
@@ -187,7 +188,7 @@ impl<'a> PointerTargets<'a> {
         Ok(result)
     }
 
-    fn buffer(&self, buffer: &BufferVar, seen: &mut IdSet) -> AResult<Fact> {
+    fn buffer(&self, buffer: &TensorVar, seen: &mut IdSet) -> AResult<Fact> {
         let plan = self
             .plan
             .memory_plan
@@ -231,7 +232,7 @@ impl<'a> PointerTargets<'a> {
                 return self.expr(value, seen);
             }
             if let Some(index) = self.plan.func.params.iter().position(|p| same(&p, &var)) {
-                if let Some(pointer) = var.ty.as_node::<PointerTypeObj>() {
+                if let Some(pointer) = var.ty.as_node::<PtrTypeObj>() {
                     if pointer.element_type.as_node::<TensorMapTypeObj>().is_some() {
                         return Ok(Fact::Unknown);
                     }

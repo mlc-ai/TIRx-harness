@@ -8,10 +8,10 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::ir::StringImmObj;
-use tvm::ir::{CallObj, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{CallObj, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 #[derive(Default)]
 pub struct State {

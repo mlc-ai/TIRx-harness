@@ -5,17 +5,17 @@ use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::{Emitter, RustValue, Uniformity};
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 // ----------------------------------------------------------------------
 // The PTX address wrapper contract.
 // ----------------------------------------------------------------------
 
 fn is_addr_call(value: &ObjectRef) -> AResult<bool> {
-    use tvm::tvm_ffi::ObjectRefCore;
-    let Some(call) = value.as_node::<tvm::ir::CallObj>() else {
+    use tvm_tirx::tvm_ffi::ObjectRefCore;
+    let Some(call) = value.as_node::<tvm_tirx::ir::CallObj>() else {
         return Ok(false);
     };
     Ok(crate::analyze::buffers::call_op_name(call)?.as_deref() == Some("tirx.ptx.addr"))
@@ -27,8 +27,8 @@ pub fn ptx_addr_parts(
     ctx: &crate::analyze::Ctx,
     node: &ObjectRef,
 ) -> AResult<(ObjectRef, ObjectRef, i64)> {
-    use tvm::tvm_ffi::ObjectRefCore;
-    let Some(call) = node.as_node::<tvm::ir::CallObj>() else {
+    use tvm_tirx::tvm_ffi::ObjectRefCore;
+    let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
         return Err(Failure::Ffi(ffi_error(
             "PTX address wrapper expects a tirx Call",
         )));

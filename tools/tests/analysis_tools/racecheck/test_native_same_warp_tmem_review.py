@@ -8,7 +8,8 @@ import pytest
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import tmem_datapath_layout, wg_local_layout
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
 
 PTX_SAME_THREAD_REGISTER_DEPENDENCY_URL = (
     "https://docs.nvidia.com/cuda/parallel-thread-execution/"

@@ -8,11 +8,10 @@ from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm import tirx
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import tmem_datapath_layout
+from tvm_tirx import ir
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
 
 
 def collector_case(sequence, *, tmem_a=False, ws=False, slot="a", cta_group=1):
@@ -31,7 +30,7 @@ def collector_case(sequence, *, tmem_a=False, ws=False, slot="a", cta_group=1):
     )
 
     def replace_mma(node):
-        if not isinstance(node, tirx.Evaluate) or type(node.value).__name__ != "Call":
+        if not isinstance(node, ir.Evaluate) or type(node.value).__name__ != "Call":
             return node
         if not str(node.value.op.name).startswith("tirx.ptx.tcgen05_mma"):
             return node
@@ -60,11 +59,11 @@ def collector_case(sequence, *, tmem_a=False, ws=False, slot="a", cta_group=1):
             if ws:
                 operands.append(decoded.scalar_operand("zero_col_mask"))
             call = T.ptx[opcode](*operands, pred=execute)
-            instructions.append(tirx.Evaluate(call))
+            instructions.append(ir.Evaluate(call))
             enabled += execute
-        return instructions[0] if len(instructions) == 1 else tirx.SeqStmt(instructions)
+        return instructions[0] if len(instructions) == 1 else ir.SeqStmt(instructions)
 
-    kernel = kernel.with_body(structural_map(kernel.body, (tirx.Evaluate, replace_mma)))
+    kernel = kernel.with_body(structural_map(kernel.body, (ir.Evaluate, replace_mma)))
     a = np.arange(4 * m * 16).reshape(4, m, 16) % 7 - 3
     b = np.arange(b_rows * 16).reshape(b_rows, 16) % 5 - 2
     expected = (a[0].astype(np.float32) @ b[:n].astype(np.float32).T) * sum(

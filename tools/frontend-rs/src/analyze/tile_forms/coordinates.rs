@@ -1,8 +1,9 @@
 //! `int`/`PrimExpr` arithmetic and physical layout coordinates for the layout proofs.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{PrimExpr, Var};
-use tvm::tvm_ffi::{self as tvm_ffi, Any, Array, Map, String as FfiString};
+use tvm_tirx::ir::Location;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{PrimExpr, Var};
+use tvm_tirx::tvm_ffi::{self as tvm_ffi, Any, Array, Map, String as FfiString};
 
 use super::super::layout::{expr_any, int_any, op_binary};
 use super::super::util::{ffi_error, ffi_text, oref, prim, repr_text, unsupported, AResult};
@@ -11,7 +12,7 @@ use super::TileRegion;
 
 /// `Var(name, "int32")` as a primitive expression.
 pub(super) fn int32_var(name: &str) -> AResult<PrimExpr> {
-    prim(&oref(Var::new(name, "int32")?))
+    prim(&oref(Var::new(name, "int32", Location::unknown())))
 }
 
 /// TVM's `int -> PrimExpr` FFI fallback conversion (`TypeTraits<PrimExpr>`).

@@ -1,12 +1,12 @@
 //! A declared synchronization-word wait, using the raw load's decoded operands.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm::ir::{CallObj, IntImm, IntImmObj, PointerTypeObj, PrimExpr, TensorLoadObj};
-use tvm::prim::{
+use tvm_tirx::ir::{CallObj, IntImm, IntImmObj, PrimExpr, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::prim::{
     AndObj, CastObj, EQObj, GEObj, GTObj, LEObj, LTObj, NEObj, NotObj, OrObj, SelectObj,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, Any, Array, ObjectRefCore, String as FfiString};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, Any, Array, ObjectRefCore, String as FfiString};
 
 use super::memory_support::{v2_memory_space_rust, v2_memory_type_rust_ptx};
 use super::raw_memory::{decoded_load_parts, decoded_load_semantics};
@@ -42,7 +42,7 @@ fn width(suffix: &str) -> Option<u32> {
 
 fn word_suffix(pointer: &ObjectRef, requested: &ObjectRef, name: &str) -> AResult<String> {
     let ty = expr_type(pointer);
-    let Some(pointer) = ty.as_ref().and_then(|ty| ty.as_node::<PointerTypeObj>()) else {
+    let Some(pointer) = ty.as_ref().and_then(|ty| ty.as_node::<PtrTypeObj>()) else {
         return unsupported(format!("{name} ptr must point at the synchronization word"));
     };
     let dtype = prim_dtype(&pointer.element_type)
@@ -84,7 +84,7 @@ fn raw_load(spelling: &str, operands: &[ObjectRef]) -> AResult<DecodedPtx> {
 }
 
 struct FrozenBuffer {
-    source: tvm::tirx::BufferVar,
+    source: tvm_tirx::tirx::TensorVar,
     shape: Vec<i64>,
     values: Vec<Option<String>>,
 }
@@ -158,7 +158,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         Ok(false)
     }
 
-    fn destination_coordinates(&self, source: &tvm::tirx::BufferVar) -> AResult<Option<Vec<i64>>> {
+    fn destination_coordinates(&self, source: &tvm_tirx::tirx::TensorVar) -> AResult<Option<Vec<i64>>> {
         let destination = self
             .destination
             .as_node::<TensorLoadObj>()
@@ -181,7 +181,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
 
     fn capture_buffer(
         &mut self,
-        source: &tvm::tirx::BufferVar,
+        source: &tvm_tirx::tirx::TensorVar,
     ) -> AResult<(Vec<i64>, Vec<Option<String>>)> {
         if let Some(captured) = self
             .frozen_buffers

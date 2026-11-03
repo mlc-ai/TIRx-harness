@@ -1,9 +1,9 @@
 //! Exact bindings and shape substitutions for symbolic expressions.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, PrimExpr, Var};
-use tvm::tirx::{BindObj, Stmt};
-use tvm::tvm_ffi::{Any, Map, ObjectRefCore};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, PrimExpr, Var};
+use tvm_tirx::ir::{BindObj, Stmt};
+use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore};
 
 use super::buffers::BufferBindings;
 use super::shapes::{structural_equal, ShapeExpressionContext};
@@ -80,6 +80,6 @@ impl ExpressionBindings {
                 );
             }
         }
-        Ok(Analyzer::new()?.simplify(&current)?)
+        Ok(Analyzer::new().simplify(&current)?)
     }
 }

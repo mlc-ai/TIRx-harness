@@ -1,9 +1,9 @@
 //! gemm (mma.sync.m16n8k*) and gemm_async.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::PrimExpr;
-use tvm::tirx::{TileLayout, TilePrimitiveCallObj};
-use tvm::tvm_ffi::ObjectRefCast;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::PrimExpr;
+use tvm_tirx::tirx::{TileLayout, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::ObjectRefCast;
 
 use super::super::layout::{expr_any, int_any, op_binary};
 use super::super::util::{ffi_error, oref, repr_text, unsupported, AResult, Failure};
@@ -57,7 +57,7 @@ fn validate_m16n8_fragment_layout(
     mma_k: i64,
     transpose_storage: bool,
 ) -> AResult<()> {
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let Some(layout) = region.buffer.buffer_type().layout.clone() else {
         return Err(Failure::Ffi(ffi_error(
             "'NoneType' object has no attribute 'canonicalize'",
@@ -935,7 +935,7 @@ fn validate_shared_scale_ids(
     scale_a_elements_per_ki: i64,
     sf_per_mma: i64,
 ) -> AResult<()> {
-    let scale_analyzer = Analyzer::new()?;
+    let scale_analyzer = Analyzer::new();
     let mut mismatch = scale_a_ids.len() != scale_b_ids.len();
     if !mismatch {
         for (scale_a_id, scale_b_id) in scale_a_ids.iter().zip(scale_b_ids.iter()) {

@@ -4,9 +4,9 @@ import numpy as np
 
 from tirx_harness import numsim
 from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ TLane, 1 @ TCol)])
+_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.prim_func

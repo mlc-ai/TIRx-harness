@@ -13,7 +13,7 @@ from tests.support.tirx_device_surface import (
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
-from tvm import ir
+from tvm_tirx import ir
 
 _DEVICE_PREFIXES = ("tirx.cuda.", "tirx.ptx.")
 

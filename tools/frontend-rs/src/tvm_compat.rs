@@ -2,8 +2,8 @@
 
 use std::slice;
 
-use tvm::ir::IntImmObj;
-use tvm::tvm_ffi::{Any, Error, Result, VALUE_ERROR};
+use tvm_tirx::ir::IntImmObj;
+use tvm_tirx::tvm_ffi::{Any, Error, Result, VALUE_ERROR};
 
 #[repr(C)]
 struct ByteArray {

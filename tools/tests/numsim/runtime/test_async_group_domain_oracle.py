@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import evaluated_kernel, resolved_kernel
 from tirx_harness import numsim
 from tvm.script import tirx as T
@@ -48,7 +48,7 @@ def test_async_group_wait_count_rejects_negative_values(opcode):
 
 
 def test_async_group_wait_count_rejects_runtime_values():
-    pending = tvm.tirx.Var("pending", "int32")
+    pending = tvm_tirx.tirx.Var("pending", "int32")
     call = T.ptx.cp.async_.wait_group(pending)
     with pytest.raises(numsim.UnsupportedTIRxError, match="must be static"):
         resolved_kernel(evaluated_kernel(call, (pending,)))

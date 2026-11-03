@@ -35,8 +35,9 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.ir import PointerType, PrimType
+from tvm.ir import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PrimType
 
 GEN = 1
 WORD = (GEN << 32) | 0xDEADBEEF

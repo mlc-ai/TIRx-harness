@@ -24,13 +24,12 @@ correctness policy, and scoring rule fixed throughout the run.
 
 Prepare the [source-build prerequisites](installation.md#build-from-source),
 install uv, and configure your coding agent. Setup builds the harness from
-each run's worktree. Clone the repository and initialize the native
-submodule; `uv run` installs the setup tool on first use:
+each run's worktree. Clone the repository; `uv run` installs the setup tool on
+first use:
 
 ```bash
 git clone https://github.com/mlc-ai/TIRx-harness.git
 cd TIRx-harness
-git submodule update --init thirdparty/tvm-rust-ext
 ```
 
 Choose a task from {repo}`evolution/tasks` and a GPU matching its contract.

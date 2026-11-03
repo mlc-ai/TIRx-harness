@@ -10,8 +10,8 @@ from tests.numsim.support.manifest import emitted_calls, resolved_kernel
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_layout
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_layout
 
 
 @dataclass(frozen=True)

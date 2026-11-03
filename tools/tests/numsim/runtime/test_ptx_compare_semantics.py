@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_walk
 
-import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PtxCallDecodeError, decode_ptx_call
 from tvm.script import tirx as T
+from tvm_tirx import ir
 
 _FLOAT_COMPARISONS = (
     "eq",
@@ -86,30 +86,28 @@ def test_setp_bit_size_relational_comparison_remains_rejected():
         ptx_setp_bit_carriers.body,
         lambda node: (
             calls.append(node)
-            if isinstance(node, tvm.ir.Call) and str(node.op.name) == "tirx.ptx.setp"
+            if isinstance(node, ir.Call) and str(node.op.name) == "tirx.ptx.setp"
             else None
         ),
     )
     assert len(calls) == 8
     for call in calls[:6]:
         args = [
-            tvm.ir.StringImm("lt")
-            if isinstance(arg, tvm.ir.StringImm) and arg.value in {"eq", "ne"}
+            ir.StringImm("lt")
+            if isinstance(arg, ir.StringImm) and arg.value in {"eq", "ne"}
             else arg
             for arg in call.args
         ]
-        invalid = tvm.ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
+        invalid = ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
         with pytest.raises(PtxCallDecodeError, match="bit-size.*compares only with eq/ne"):
             decode_ptx_call(invalid)
     for ptx_type in ("u32", "s32", "f64"):
         call = calls[6]
         args = [
-            tvm.ir.StringImm(ptx_type)
-            if isinstance(arg, tvm.ir.StringImm) and arg.value == "f32"
-            else arg
+            ir.StringImm(ptx_type) if isinstance(arg, ir.StringImm) and arg.value == "f32" else arg
             for arg in call.args
         ]
-        invalid = tvm.ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
+        invalid = ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
         with pytest.raises(PtxCallDecodeError, match="ftz"):
             decode_ptx_call(invalid)
 

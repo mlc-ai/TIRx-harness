@@ -2,11 +2,12 @@
 //! `tmem_access_mode`, the TMEM branches of `emit_buffer_load` /
 //! `emit_store` / `logical_buffer_name`, and `physical_tmem_coordinates`.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, IntImm, PrimExpr, Range, Var};
-use tvm::tirx::{BufferStoreObj, BufferVar, ForObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, IntImm, PrimExpr, Range, Var};
+use tvm_tirx::ir::{ForObj, TensorStoreObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
 
 use super::super::analyze::expression_bindings::ExpressionBindings;
 use super::super::analyze::frontend::KernelPlan;
@@ -106,7 +107,7 @@ impl<'a> TmemNaming<'a> {
         if outer.layout.tmem_lane_span.unwrap_or(0) < inner.layout.tmem_lane_span.unwrap_or(0) {
             return Ok(false);
         }
-        let analyzer = Analyzer::new()?;
+        let analyzer = Analyzer::new();
         for (variable, minimum, extent) in &self.loop_ranges {
             let range = Range::from_complete_fields(minimum.clone(), extent.clone(), None);
             if analyzer.bind(variable, &range).is_err() {
@@ -130,7 +131,7 @@ impl<'a> TmemNaming<'a> {
 impl<'a> Emitter<'a> {
     /// The TMEM branch of `logical_buffer_name` (the cache miss is already
     /// established by the caller).
-    pub fn tmem_logical_buffer_name(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn tmem_logical_buffer_name(&mut self, buffer: &TensorVar) -> AResult<String> {
         // Whole-function facts,
         // computed once per kernel.
         if self.tmem.naming.is_none() {
@@ -208,7 +209,7 @@ impl<'a> Emitter<'a> {
     /// Layout-derived `(TLane, TCol)` coordinates in element units.
     pub fn physical_tmem_coordinates(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<(PrimExpr, PrimExpr)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -246,7 +247,7 @@ impl<'a> Emitter<'a> {
                 layout_signature(&layout)?
             ));
         }
-        let zero: PrimExpr = IntImm::new("int32", 0)?.into();
+        let zero: PrimExpr = IntImm::new("int32", 0).into();
         let axis = |wanted: &str| -> PrimExpr {
             axes.iter()
                 .find(|(axis, _)| axis == wanted)
@@ -273,7 +274,7 @@ impl<'a> Emitter<'a> {
     /// `tmem_coordinates`: `(lane, tcol, allocated_addr)` as warp `i64` values.
     pub fn tmem_coordinates(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         source_op_id: Option<i64>,
     ) -> AResult<(RustValue, RustValue, RustValue)> {
@@ -298,7 +299,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `tmem_access_mode`.
-    pub fn tmem_access_mode(&self, buffer: &BufferVar) -> AResult<String> {
+    pub fn tmem_access_mode(&self, buffer: &TensorVar) -> AResult<String> {
         let plan = self.memory_plan.resolve(buffer)?;
         if plan.space != MemorySpace::Tmem {
             return unsupported(format!(
@@ -314,7 +315,7 @@ impl<'a> Emitter<'a> {
         Ok(format!("TmemAccessMode::{mode}"))
     }
 
-    pub(super) fn tmem_access_marker(&self, buffer: &BufferVar) -> AResult<&'static str> {
+    pub(super) fn tmem_access_marker(&self, buffer: &TensorVar) -> AResult<&'static str> {
         Ok(if self.tmem_access_mode(buffer)?.ends_with("::Static") {
             "v2::tcgen05::variant::StaticTmem"
         } else {
@@ -326,7 +327,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_tmem_buffer_load(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         name: &str,
         buffer_ref: &str,
@@ -393,7 +394,7 @@ impl<'a> Emitter<'a> {
     /// The `MemorySpace.TMEM` branch of `emit_store`.
     pub fn emit_tmem_store(
         &mut self,
-        stmt: &BufferStoreObj,
+        stmt: &TensorStoreObj,
         op_id: i64,
         dtype: &str,
         value: &RustValue,

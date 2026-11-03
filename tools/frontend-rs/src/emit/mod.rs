@@ -3,10 +3,10 @@
 //! The text snapshots pin the emitted text, so temp-name counters, capture
 //! attempts and restore points keep their order.
 
-use tvm::ir::{Expr, Var};
-use tvm::tirx::{BufferVar, PrimFunc};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use tvm_tirx::ir::{Expr, Var};
+use tvm_tirx::tirx::{Function, TensorVar};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
 
 pub mod abi;
 pub mod async_copy;
@@ -247,7 +247,7 @@ pub struct Emitter<'a> {
     pub diagnostics: diagnostics::State,
     pub ctx: &'a Ctx<'a>,
     pub plan: &'a KernelPlan,
-    pub func: &'a PrimFunc,
+    pub func: &'a Function,
     pub params: Vec<Var>,
     pub consumed_address_wrappers: IdSet,
     /// Sources whose lowering may await.
@@ -271,7 +271,7 @@ pub struct Emitter<'a> {
     pub threads_per_warpgroup: i64,
     pub scalars: Vec<ScalarCode>,
     pub pointers: Vec<PointerCode>,
-    pub buffers: Vec<(BufferVar, BufferCode)>,
+    pub buffers: Vec<(TensorVar, BufferCode)>,
     pub shape_vars: Vec<ShapeVarCode>,
     pub lines: Vec<String>,
     pub indent: usize,
@@ -300,8 +300,8 @@ pub struct Emitter<'a> {
     pub outer_loop_live_split_permissions: Vec<bool>,
     pub nested_for_statement_split_permissions: Vec<bool>,
     pub capturing_for_statements: IdSet,
-    pub dynamic_buffers: Vec<(BufferVar, String)>,
-    pub logical_buffer_name_cache: Vec<(BufferVar, String)>,
+    pub dynamic_buffers: Vec<(TensorVar, String)>,
+    pub logical_buffer_name_cache: Vec<(TensorVar, String)>,
     pub loop_transfer_cache: IdMap<bool>,
     pub subtree_may_suspend_cache: IdMap<bool>,
     pub failed_inner_uniform_if_splits: IdSet,
@@ -405,7 +405,7 @@ impl<'a> Emitter<'a> {
                 dtype: entry.dtype.clone(),
             });
         }
-        let mut buffers: Vec<(BufferVar, BufferCode)> = Vec::new();
+        let mut buffers: Vec<(TensorVar, BufferCode)> = Vec::new();
         let mut next_buffer_storage_index = 0;
         for (index, plan) in memory_plan.buffers.iter().enumerate() {
             let mut shape = Vec::new();
@@ -697,7 +697,7 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    pub fn buffer_code(&self, buffer: &BufferVar) -> AResult<&BufferCode> {
+    pub fn buffer_code(&self, buffer: &TensorVar) -> AResult<&BufferCode> {
         for (candidate, code) in &self.buffers {
             if super::analyze::util::same(candidate.as_var(), buffer.as_var()) {
                 return Ok(code);
@@ -726,11 +726,11 @@ impl<'a> Emitter<'a> {
     }
 
     /// The variable scope state restored on exit.
-    pub fn scope_snapshot(&self) -> (Variables, Vec<(BufferVar, String)>) {
+    pub fn scope_snapshot(&self) -> (Variables, Vec<(TensorVar, String)>) {
         (self.variables.clone(), self.dynamic_buffers.clone())
     }
 
-    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(BufferVar, String)>)) {
+    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(TensorVar, String)>)) {
         self.variables = snapshot.0;
         self.dynamic_buffers = snapshot.1;
     }
@@ -802,7 +802,7 @@ fn validate_integer_expression(
         }
         return Ok(());
     }
-    if let Some(cast) = expression.as_node::<tvm::prim::CastObj>() {
+    if let Some(cast) = expression.as_node::<tvm_tirx::ir::prim::CastObj>() {
         return validate_integer_expression(&oref(cast.value.clone()), variable_allowed, field);
     }
     if !crate::schema::INTEGER_BINARY_NODE_KINDS.contains(&kind) {

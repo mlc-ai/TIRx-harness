@@ -5,7 +5,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 pub struct ClcQueryParts {
     /// Register destinations in operand order; `None` is a sunk lane.

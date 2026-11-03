@@ -1,10 +1,10 @@
 //! Expression emission as methods on the kernel emitter.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm::ir::{FloatImmObj, IntImmObj, PrimExpr, TensorLoadObj};
-use tvm::prim::{CastObj, LetObj, NotObj, RampObj, SelectObj, ShuffleObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{FloatImmObj, IntImmObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::prim::{CastObj, LetObj, NotObj, RampObj, SelectObj, ShuffleObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::super::analyze::util::{
     as_buffer, dtype_of, ffi_text, kind_or_bail, not_covered, oref, unsupported, AResult,

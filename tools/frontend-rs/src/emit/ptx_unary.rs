@@ -6,7 +6,7 @@ use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{Emitter, RustValue, Uniformity};
 use crate::tables::round_marker;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// The resolved unary form (`resolve_ptx_unary` tuple).
 pub struct UnaryForm {

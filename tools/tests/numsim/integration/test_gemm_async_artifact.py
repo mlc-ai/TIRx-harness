@@ -14,17 +14,10 @@ from tests.numsim.support.kernels import (
     inactive_gemm_async_is_noop,
 )
 from tirx_harness import numsim
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    ComposeLayout,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tmem_datapath_layout,
-)
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 _MMA_TF32_32B = ComposeLayout(2, 1, 3, TileLayout(S[(64,)]))
@@ -33,13 +26,31 @@ _MMA_F16_NONE_128X16 = mma_shared_layout("float16", SwizzleMode.SWIZZLE_NONE, (1
 _MMA_F16_NONE_8X16 = mma_shared_layout("float16", SwizzleMode.SWIZZLE_NONE, (8, 16))
 
 _TMEM_WRONG_F_GROUP_ORDER = TileLayout(
-    S[(2, 2, 16, 8) : (32 @ TLane, 64 @ TLane, 1 @ TLane, 1 @ TCol)]
+    S[
+        (2, 2, 16, 8) : (
+            32 @ Axis.get("TLane"),
+            64 @ Axis.get("TLane"),
+            1 @ Axis.get("TLane"),
+            1 @ Axis.get("TCol"),
+        )
+    ]
 )
 _TMEM_WRONG_B_ROW_COLUMN_GROUP = TileLayout(
-    S[(2, 32, 2, 8) : (64 @ TLane, 1 @ TLane, 32 @ TLane, 1 @ TCol)]
+    S[
+        (2, 32, 2, 8) : (
+            64 @ Axis.get("TLane"),
+            1 @ Axis.get("TLane"),
+            32 @ Axis.get("TLane"),
+            1 @ Axis.get("TCol"),
+        )
+    ]
 )
-_TMEM_WRONG_A_TRANSPOSED_AXES = TileLayout(S[(128, 16) : (1 @ TCol, 1 @ TLane)])
-_TMEM_CTA2_BANKED_A = TileLayout(S[(2, 64, 16) : (64 @ TLane, 1 @ TLane, 1 @ TCol)])
+_TMEM_WRONG_A_TRANSPOSED_AXES = TileLayout(
+    S[(128, 16) : (1 @ Axis.get("TCol"), 1 @ Axis.get("TLane"))]
+)
+_TMEM_CTA2_BANKED_A = TileLayout(
+    S[(2, 64, 16) : (64 @ Axis.get("TLane"), 1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+)
 
 
 @T.prim_func

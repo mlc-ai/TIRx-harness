@@ -8,23 +8,27 @@ import numpy as np
 
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import R, S, TCol, TileLayout, TLane
+from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
 
 # Spell out the PTX scale-factor placement instead of importing TIRx's
 # production layout helpers.  For 128 rows and four scale bytes per row, SMEM
 # exposes four M-within-lane rows across 32 lanes; TMEM packs the four bytes in
 # one column while replicating each lane's scale group to its four TMEM rows.
 _MXF4_SMEM_LAYOUT = TileLayout(S[(4, 32, 2, 2) : (4, 16, 2, 1)])
-_MXF4_TMEM_ATOM = TileLayout(S[(32, 2) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
-_MXF4_TMEM_OUTER = TileLayout(S[(4, 2) : (4 @ TCol, 2 @ TCol)])
+_MXF4_TMEM_ATOM = TileLayout(
+    S[(32, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))] + R[4 : 32 @ Axis.get("TLane")]
+)
+_MXF4_TMEM_OUTER = TileLayout(S[(4, 2) : (4 @ Axis.get("TCol"), 2 @ Axis.get("TCol"))])
 _MXF4_TMEM_LAYOUT = _MXF4_TMEM_ATOM.direct_sum(
     _MXF4_TMEM_OUTER,
     left_shape=[4, 2],
     right_shape=[32, 2],
 )
 _MIXED_SMEM_LAYOUT = TileLayout(S[(4, 32, 4) : (4, 16, 1)])
-_MIXED_TMEM_ATOM = TileLayout(S[(32, 1) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
-_MIXED_TMEM_OUTER = TileLayout(S[(4, 4) : (4 @ TCol, 1 @ TCol)])
+_MIXED_TMEM_ATOM = TileLayout(
+    S[(32, 1) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))] + R[4 : 32 @ Axis.get("TLane")]
+)
+_MIXED_TMEM_OUTER = TileLayout(S[(4, 4) : (4 @ Axis.get("TCol"), 1 @ Axis.get("TCol"))])
 _MIXED_TMEM_LAYOUT = _MIXED_TMEM_ATOM.direct_sum(
     _MIXED_TMEM_OUTER,
     left_shape=[4, 4],

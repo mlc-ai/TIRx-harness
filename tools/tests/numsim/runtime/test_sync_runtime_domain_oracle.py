@@ -4,8 +4,8 @@ import numpy as np
 
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
-from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.lang.clc import query_cancel_first_ctaid_x
 
 
 @T.prim_func

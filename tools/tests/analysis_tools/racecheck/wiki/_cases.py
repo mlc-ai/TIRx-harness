@@ -31,7 +31,7 @@ from tests.numsim.corpus.kernels.gemm import (
     prepare_nvfp4_case,
 )
 from tirx_harness.numsim.bindings import _tensor_map_base_array
-from tvm import tirx
+from tvm_tirx import tirx
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,7 @@ def _prepared_numsim_case(case) -> PreparedWikiRacecheckCase:
             expected = next(
                 buffer
                 for buffer in case.kernel.params
-                if tirx.is_buffer_var(buffer)
+                if tirx.is_tensor_var(buffer)
                 if str(buffer.name) == buffer_name
             )
             expected_shape = tuple(int(extent) for extent in expected.shape)

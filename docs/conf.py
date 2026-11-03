@@ -37,7 +37,7 @@ nitpick_ignore = [
     ("py:class", "collections.abc.Mapping"),
     ("py:class", "numpy.ndarray"),
     ("py:class", "pathlib.Path"),
-    ("py:class", "tvm.tir.PrimFunc"),
+    ("py:class", "tvm_tirx.tirx.Function"),
     ("py:class", "Finding"),
 ]
 

@@ -1,7 +1,7 @@
 //! Instruction-owned pointer flow facts consumed by generic root analysis.
 
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::ptx::DecodedPtx;
 use crate::analyze::buffers::call_op_name;
@@ -85,10 +85,10 @@ mod tests {
     use super::super::ptx::PtxOperand;
     use super::*;
     use crate::analyze::util::same;
-    use tvm::ir::{Call, Expr, IntImm, Op, PrimType};
+    use tvm_tirx::ir::{Call, Expr, IntImm, Op, PrimType};
 
     fn initialize() {
-        tvm::libinfo::load_compiler().expect("TVM compiler");
+        tvm_tirx::libinfo::load_compiler().expect("TVM compiler");
     }
 
     fn call(name: &str, args: Vec<Expr>) -> Call {

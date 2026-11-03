@@ -17,10 +17,10 @@ use crate::tables::{
     stmt_rust_scalar_by_dtype,
 };
 use crate::tvm_compat::int_value;
-use tvm::ir::StringImmObj;
-use tvm::ir::{CallObj, IntImmObj, PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{CallObj, IntImmObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 const REDUCTION_FLOATS: [&str; 4] = ["float16", "bfloat16", "float32", "float64"];
 const FETCH_REGISTERS_32: [&str; 39] = [
@@ -744,7 +744,7 @@ impl<'a> Emitter<'a> {
     /// `emit_buffer_address`.
     pub fn emit_buffer_address(
         &mut self,
-        buffer: &tvm::tirx::BufferVar,
+        buffer: &tvm_tirx::tirx::TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<RustValue> {
         if self.memory_plan.resolve(buffer)?.space == MemorySpace::Tmem {

@@ -4,9 +4,8 @@ from tvm_ffi import structural_walk
 
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness.numsim.transpiler import native_frontend
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx.ir import Expr, Stmt
 
 
 @T.prim_func

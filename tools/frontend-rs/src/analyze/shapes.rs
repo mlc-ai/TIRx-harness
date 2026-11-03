@@ -1,10 +1,11 @@
 //! Host-evaluable scalar bindings used by runtime buffer shapes.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, PrimExpr, TensorLoad, TensorLoadObj, Var};
-use tvm::tirx::{BindObj, BufferStoreObj, BufferVar, ForObj, IfThenElseObj, Stmt, WhileObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, PrimExpr, TensorLoad, TensorLoadObj, Var};
+use tvm_tirx::ir::{BindObj, ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
 
 use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
@@ -56,7 +57,7 @@ impl Scalar {
 
 pub struct ShapeExpressionContext {
     pub bindings: Vec<(Var, Expr)>,
-    pub scalar_initializers: Vec<(BufferVar, Expr)>,
+    pub scalar_initializers: Vec<(TensorVar, Expr)>,
 }
 
 impl ShapeExpressionContext {
@@ -73,21 +74,21 @@ impl ShapeExpressionContext {
         }
         let mut controlled = IdSet::default();
         for statement in statements {
-            if statement.as_node::<IfThenElseObj>().is_some()
+            if statement.as_node::<IfObj>().is_some()
                 || statement.as_node::<ForObj>().is_some()
                 || statement.as_node::<WhileObj>().is_some()
             {
                 for child in crate::walk_statements(statement.clone())?.iter() {
-                    if child.as_node::<BufferStoreObj>().is_some() {
+                    if child.as_node::<TensorStoreObj>().is_some() {
                         controlled.add(oref(child));
                     }
                 }
             }
         }
-        let stores: Vec<(ObjectRef, BufferVar, Vec<PrimExpr>, PrimExpr)> = statements
+        let stores: Vec<(ObjectRef, TensorVar, Vec<PrimExpr>, PrimExpr)> = statements
             .iter()
             .filter_map(|statement| {
-                statement.as_node::<BufferStoreObj>().map(|store| {
+                statement.as_node::<TensorStoreObj>().map(|store| {
                     (
                         oref(statement.clone()),
                         store.buffer.clone(),

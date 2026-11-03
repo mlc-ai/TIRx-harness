@@ -7,9 +7,9 @@ from tvm_ffi import structural_map, structural_walk
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim, racecheck, synccheck
-from tvm import tirx
-from tvm.ir import Call
 from tvm.script import tirx as T
+from tvm_tirx import tirx
+from tvm_tirx.ir import Call
 
 
 @T.prim_func
@@ -589,7 +589,7 @@ def mapped_st_async_case(offset_form):
         elif type(node).__name__ == "Var":
             variables[node.name] = node
 
-    from tvm.ir import Expr
+    from tvm_tirx.ir import Expr
 
     structural_walk(kernel.body, (Expr, record))
     base = loads["remote_destination"]

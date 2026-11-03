@@ -8,10 +8,10 @@ mod numeric;
 mod parse;
 mod tcgen_layout;
 
-use tvm::ir::PrimExpr;
-use tvm::tirx::{BufferVar, TilePrimitiveCallObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::ir::PrimExpr;
+use tvm_tirx::tirx::{TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 
 use super::util::{ffi_text, oref, unsupported, AResult, Failure};
 use super::Ctx;
@@ -127,7 +127,7 @@ impl TileOpKind {
 /// `TileRegion`.
 #[derive(Clone)]
 pub struct TileRegion {
-    pub buffer: BufferVar,
+    pub buffer: TensorVar,
     pub mins: Vec<PrimExpr>,
     pub extents: Vec<i64>,
     pub dtype: String,
@@ -409,7 +409,7 @@ pub fn tile_sinks_have_unknown_call(
     }
     for sink in sinks {
         for candidate in crate::post_order_nodes(sink)?.iter() {
-            let Some(call) = candidate.as_node::<tvm::ir::CallObj>() else {
+            let Some(call) = candidate.as_node::<tvm_tirx::ir::CallObj>() else {
                 continue;
             };
             if crate::decode::projected_buffer(&candidate)?.is_some() {

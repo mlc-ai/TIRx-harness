@@ -1,10 +1,11 @@
 //! TCGEN layout proofs.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{IntImm, PrimExpr, PrimType, Range, Var};
-use tvm::tirx::{ComposeLayout, Layout, TileLayout};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{
+use tvm_tirx::ir::Location;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{IntImm, PrimExpr, PrimType, Range, Var};
+use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
     String as FfiString,
 };
@@ -41,7 +42,7 @@ pub(super) fn validate_block_scale_layout(
         ));
     }
     let elements_per_ki = scale_cols / k_iters;
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let mut scale_ids: Vec<PrimExpr> = Vec::new();
     let elements_per_tmem_cell = 4;
     for ki in 0..k_iters {
@@ -195,7 +196,7 @@ pub(super) fn validate_tcgen_smem_layout(
     let mut variables: Vec<PrimExpr> = Vec::new();
     for (axis, extent) in shape_exprs.iter().enumerate() {
         if shape[axis] == 1 {
-            variables.push(IntImm::new("int32", 0)?.into());
+            variables.push(IntImm::new("int32", 0).into());
         } else {
             variables.push(prim(&oref(Var::with_type(
                 &format!("numsim_{}_{axis}", role.to_lowercase()),
@@ -209,17 +210,17 @@ pub(super) fn validate_tcgen_smem_layout(
     let col = &variables[rank - 1];
     let origin_variables = |variables: &[PrimExpr]| -> AResult<Vec<PrimExpr>> {
         let mut origin: Vec<PrimExpr> = variables[..rank - 2].to_vec();
-        origin.push(IntImm::from_dtype(row.dtype(), 0)?.into());
-        origin.push(IntImm::from_dtype(col.dtype(), 0)?.into());
+        origin.push(IntImm::from_dtype(row.dtype(), 0, Location::unknown())?.into());
+        origin.push(IntImm::from_dtype(col.dtype(), 0, Location::unknown())?.into());
         Ok(origin)
     };
     let bind_variables = |analyzer: &Analyzer| -> AResult<()> {
         for (variable, extent) in variables.iter().zip(shape.iter()) {
-            if variable.as_node::<tvm::ir::VarObj>().is_some() {
+            if variable.as_node::<tvm_tirx::ir::VarObj>().is_some() {
                 let var = variable.clone().try_cast::<Var>()?;
                 analyzer.bind(
                     &var,
-                    &Range::from_min_extent(int_expr(0)?, int_expr(*extent)?)?,
+                    &Range::from_min_extent(int_expr(0)?, int_expr(*extent)?, Location::unknown())?,
                 )?;
             }
         }
@@ -273,7 +274,7 @@ pub(super) fn validate_tcgen_smem_layout(
             )?,
             &vfloormod(&vexpr(col), &vint(elements_per_16b))?,
         )?;
-        let layout_analyzer = Analyzer::new()?;
+        let layout_analyzer = Analyzer::new();
         bind_variables(&layout_analyzer)?;
         let proven = axes_are(&origin, &["m"])
             && prove_equal(
@@ -366,7 +367,7 @@ pub(super) fn validate_tcgen_smem_layout(
                     )?,
                     &vfloormod(&vexpr(col), &vint(atom_cols))?,
                 )?;
-                let layout_analyzer = Analyzer::new()?;
+                let layout_analyzer = Analyzer::new();
                 bind_variables(&layout_analyzer)?;
                 let proven = axes_are(&origin, &["m"])
                     && prove_equal(
@@ -386,9 +387,9 @@ pub(super) fn validate_tcgen_smem_layout(
         }
     }
     let alignment_elements = 128 / bits;
-    let contiguous_min = Analyzer::new()?.simplify(region.mins.last().expect("contiguous axis"))?;
+    let contiguous_min = Analyzer::new().simplify(region.mins.last().expect("contiguous axis"))?;
     if !prove_equal(
-        &Analyzer::new()?,
+        &Analyzer::new(),
         &vfloormod(&vexpr(&contiguous_min), &vint(alignment_elements))?,
         &vint(0),
     )? {
@@ -406,7 +407,7 @@ pub(super) fn validate_tcgen_tmem_a_layout(
     rows: i64,
     cols: i64,
 ) -> AResult<()> {
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let origin = physical_layout_coordinates(region, &vint(0), &vint(0), "gemm_async")?;
     if !axes_are(&origin, &["TLane", "TCol"]) {
         return unsupported(format!(
@@ -470,7 +471,7 @@ pub(super) fn validate_ws_batched_tmem_layout(
     columns: i64,
     role: &str,
 ) -> AResult<()> {
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let origin =
         physical_layout_coordinates_at(region, &[vint(0), vint(0), vint(0)], "gemm_async")?;
     if !axes_are(&origin, &["TLane", "TCol"]) {
@@ -537,7 +538,7 @@ pub(super) fn matches_ws_packed_tmem_layout(
         return Ok(false);
     }
     let half_columns = columns / 2;
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let lane_delta = vsub(
         &vexpr(physical_get(&mapped, "TLane").expect("TLane")),
         &vexpr(physical_get(&origin, "TLane").expect("TLane")),
@@ -556,7 +557,7 @@ pub(super) fn matches_ws_packed_tmem_layout(
 }
 
 fn matches_coordinate_abi(actual: &[[Val; 4]], expected: &[[Val; 4]]) -> AResult<bool> {
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let mut bases: Option<Vec<PrimExpr>> = None;
     for (actual_coordinates, expected_coordinates) in actual.iter().zip(expected.iter()) {
         let mut offsets = Vec::new();
@@ -583,7 +584,7 @@ fn matches_symbolic_coordinate_abi(
     actual_origin: &[Val; 4],
     expected_origin: &[Val; 4],
 ) -> AResult<bool> {
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     for index in 0..4 {
         let lhs = simplify_val(&analyzer, &vsub(&actual[index], &expected[index])?)?;
         let rhs = simplify_val(
@@ -1145,7 +1146,7 @@ fn relative_physical_mapping_structure(region: &TileRegion, prefix: &str) -> ARe
             "physical layout axes change across the logical region",
         )));
     }
-    let analyzer = Analyzer::new()?;
+    let analyzer = Analyzer::new();
     let mut items: Vec<Any> = Vec::new();
     for axis in physical_axes(&mapped) {
         let delta = analyzer.simplify(&op_binary(

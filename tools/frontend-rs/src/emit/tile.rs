@@ -2,13 +2,14 @@
 //! and the per-lane load helpers the tile lowering is the only consumer of.
 
 use crate::tvm_compat::int_value;
-use tvm::analysis::Analyzer;
-use tvm::ir::{IntImm, IntImmObj, PrimExpr, PrimType, TensorLoadObj};
-use tvm::prim::Cast;
-use tvm::prim::{CastObj, NotObj, SelectObj};
-use tvm::tirx::{BufferVar, ComposeLayout, Layout, TileLayout, TilePrimitiveCallObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCast, ObjectRefCore};
+use tvm_tirx::ir::Location;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{IntImm, IntImmObj, PrimExpr, PrimType, TensorLoadObj};
+use tvm_tirx::ir::prim::Cast;
+use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
+use tvm_tirx::tirx::{ComposeLayout, Layout, TensorVar, TileLayout, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCast, ObjectRefCore};
 
 use super::super::analyze::layout::{
     axis_name, expr_any, int_any, op_binary, tile_layout_is_trivial, Extent,
@@ -220,11 +221,11 @@ fn is_owner_register_copy_min_expression(schema: &Schema, expr: &PrimExpr) -> AR
     Ok(safe)
 }
 
-fn iter_axis_name(item: &tvm::tirx::Iter) -> AResult<String> {
+fn iter_axis_name(item: &tvm_tirx::tirx::Iter) -> AResult<String> {
     axis_name(&item.axis)
 }
 
-fn tile_layout_of(buffer: &BufferVar) -> Option<TileLayout> {
+fn tile_layout_of(buffer: &TensorVar) -> Option<TileLayout> {
     buffer
         .buffer_type()
         .layout
@@ -242,11 +243,11 @@ fn canonical_tile_layout(layout: &TileLayout) -> AResult<Option<TileLayout>> {
 /// A Python `int` handed to `tirx.Cast(dtype, value)`: TVM converts it to an
 /// `int32` literal.
 fn python_int_expr(value: i64) -> AResult<PrimExpr> {
-    Ok(IntImm::new("int32", value)?.into())
+    Ok(IntImm::new("int32", value).into())
 }
 
 fn cast_to(dtype: &str, value: PrimExpr) -> AResult<PrimExpr> {
-    Ok(Cast::new(PrimType::new(dtype)?, value)?.into())
+    Ok(Cast::new(PrimType::new(dtype), value, Location::unknown())?.into())
 }
 
 fn add_expr(lhs: &PrimExpr, rhs: &PrimExpr) -> AResult<PrimExpr> {
@@ -469,7 +470,7 @@ fn layout_is_swizzle(layout: &Layout) -> AResult<bool> {
 }
 
 /// `region.buffer.shape` as primitive expressions.
-fn buffer_shape(buffer: &BufferVar) -> Vec<PrimExpr> {
+fn buffer_shape(buffer: &TensorVar) -> Vec<PrimExpr> {
     buffer.buffer_type().shape.iter().collect()
 }
 
@@ -489,7 +490,7 @@ fn space_marker(space: MemorySpace) -> Option<&'static str> {
 
 impl<'a> Emitter<'a> {
     /// The `buffers.<field>` spelling of a buffer.
-    fn tile_buffer_field(&self, buffer: &BufferVar) -> AResult<String> {
+    fn tile_buffer_field(&self, buffer: &TensorVar) -> AResult<String> {
         let code = self.buffer_code(buffer)?;
         match code.storage_index {
             Some(index) => Ok(format!("buffers.buffers[{index}]")),
@@ -923,7 +924,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `set(inspect_buffer_layout(buffer).physical_axes) - {"m"}` is non-empty.
-    fn tile_has_owner_axes(&self, buffer: &BufferVar) -> AResult<bool> {
+    fn tile_has_owner_axes(&self, buffer: &TensorVar) -> AResult<bool> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         Ok(info.physical_axes.iter().any(|axis| axis != "m"))
     }
@@ -1120,7 +1121,7 @@ impl<'a> Emitter<'a> {
         if !tile_layout_is_pure_shard(&canonical)? {
             return Ok(None);
         }
-        let shard: Vec<tvm::tirx::Iter> = canonical.shard()?.iter().collect();
+        let shard: Vec<tvm_tirx::tirx::Iter> = canonical.shard()?.iter().collect();
         if shard.len() != 2 {
             return Ok(None);
         }
@@ -1212,7 +1213,7 @@ impl<'a> Emitter<'a> {
         let Some(canonical) = canonical else {
             return Ok(false);
         };
-        let shard: Vec<tvm::tirx::Iter> = canonical.shard()?.iter().collect();
+        let shard: Vec<tvm_tirx::tirx::Iter> = canonical.shard()?.iter().collect();
         Ok(matches!(scope.as_str(), "local" | "local_scalar")
             && OWNER_DRIVEN_DTYPES.contains(&buffer_dtype(&source).as_str())
             && matches!(info.shape.as_slice(), [Extent::Static(1)])

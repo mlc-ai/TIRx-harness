@@ -12,7 +12,8 @@ from tirx_harness.numsim.transpiler.source_map import (
     flatten_source_span,
     source_span_from_tvm,
 )
-from tvm.ir import SequentialSpan, SourceName, Span
+from tvm.ir import SequentialSpan, Span
+from tvm_tirx.ir import SourceName
 
 
 class RepeatedNode:

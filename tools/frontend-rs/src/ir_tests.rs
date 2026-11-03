@@ -2,15 +2,14 @@
 
 use crate::analyze::buffers::BufferBindings;
 use crate::analyze::util::{oref, same};
-use tvm::ir::{Expr, IntImm, SourceName, Span, Var};
-use tvm::prim::{Add, AddObj};
-use tvm::tirx::{
-    AttrStmt, BufferType, DeclBuffer, Evaluate, For, IfThenElse, PrimFunc, SeqStmt, Stmt, While,
-};
-use tvm::tvm_ffi::{Any, AnyView, Array, Function, Map, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::{Expr, IntImm, Location, SourceName, Var};
+use tvm_tirx::ir::prim::{Add, AddObj};
+use tvm_tirx::ir::{Evaluate, For, If, SeqStmt, Stmt, While};
+use tvm_tirx::tirx::{AttrStmt, DeclBuffer, TensorType};
+use tvm_tirx::tvm_ffi::{Any, AnyView, Array, Function, Map, ObjectRefCore, String as FfiString};
 
 fn initialize() {
-    tvm::libinfo::load_compiler().expect("TVM compiler for native IR tests");
+    tvm_tirx::libinfo::load_compiler().expect("TVM compiler for native IR tests");
 }
 
 fn save(value: Any) -> FfiString {
@@ -25,7 +24,7 @@ fn save(value: Any) -> FfiString {
 #[test]
 fn buffer_bindings_preserve_identities_and_last_declaration() {
     initialize();
-    let ty = BufferType::new(
+    let ty = TensorType::new(
         "global",
         "int32",
         vec![Expr::from(IntImm::new("int64", 4).unwrap())],
@@ -34,16 +33,16 @@ fn buffer_bindings_preserve_identities_and_last_declaration() {
     let first = ty.new_var("same");
     let second = ty.new_var("same");
     let alias = ty.new_var("alias");
-    let scalar = Var::new("same", "int32").unwrap();
+    let scalar = Var::new("same", "int32", Location::unknown()).unwrap();
     let first_data = first.data().unwrap();
     let second_data = second.data().unwrap();
     let declarations = vec![
         Stmt::from(DeclBuffer::new(&alias, first_data.clone()).unwrap()),
         Stmt::from(DeclBuffer::new(&alias, second_data.clone()).unwrap()),
     ];
-    let func = PrimFunc::new(
+    let func = tvm_tirx::tirx::Function::new(
         vec![first.as_var().clone(), scalar, second.as_var().clone()],
-        SeqStmt::new(declarations.clone()).unwrap(),
+        SeqStmt::new(declarations.clone(), Location::unknown()).unwrap(),
     )
     .unwrap();
     let before = save(func.clone().into());
@@ -68,7 +67,7 @@ fn buffer_bindings_preserve_identities_and_last_declaration() {
 #[test]
 fn cyclic_buffer_bindings_keep_each_starting_identity() {
     initialize();
-    let ty = BufferType::new(
+    let ty = TensorType::new(
         "global",
         "int32",
         vec![Expr::from(IntImm::new("int64", 4).unwrap())],
@@ -96,10 +95,10 @@ fn cyclic_buffer_bindings_keep_each_starting_identity() {
 #[test]
 fn substitution_keeps_same_named_variables_distinct() {
     initialize();
-    let first = Var::new("same", "int32").unwrap();
-    let second = Var::new("same", "int32").unwrap();
-    let replacement = Var::new("replacement", "int32").unwrap();
-    let expression = Add::new(&first, &second).unwrap();
+    let first = Var::new("same", "int32", Location::unknown()).unwrap();
+    let second = Var::new("same", "int32", Location::unknown()).unwrap();
+    let replacement = Var::new("replacement", "int32", Location::unknown()).unwrap();
+    let expression = Add::new(&first, &second, Location::unknown()).unwrap();
     let actual = crate::substitute(
         oref(expression.clone()),
         [(first.clone(), Expr::from(replacement.clone()))]
@@ -117,21 +116,21 @@ fn substitution_keeps_same_named_variables_distinct() {
 #[test]
 fn statement_walk_preserves_occurrences_order_identity_and_spans() {
     initialize();
-    let span = Span::new(&SourceName::get("statement-order.py").unwrap(), 7, 7, 1, 9).unwrap();
+    let span = Location::new(&SourceName::get("statement-order.py").unwrap(), 7, 7, 1, 9).unwrap();
     let shared: Stmt = Evaluate::with_span(IntImm::new("int32", 1).unwrap(), Some(&span))
         .unwrap()
         .into();
-    let sequence: Stmt = SeqStmt::new(vec![shared.clone(), shared.clone()])
+    let sequence: Stmt = SeqStmt::new(vec![shared.clone(), shared.clone()], Location::unknown())
         .unwrap()
         .into();
     let condition = IntImm::new("bool", 1).unwrap();
     let while_loop: Stmt = While::new(&condition, shared.clone()).unwrap().into();
     let branch: Stmt =
-        IfThenElse::with_span(&condition, sequence.clone(), Some(while_loop.clone()), None)
+        If::with_span(&condition, sequence.clone(), Some(while_loop.clone()), None)
             .unwrap()
             .into();
     let counted: Stmt = For::new(
-        Var::new("i", "int32").unwrap(),
+        Var::new("i", "int32", Location::unknown()).unwrap(),
         IntImm::new("int32", 0).unwrap(),
         IntImm::new("int32", 2).unwrap(),
         branch.clone(),
@@ -166,14 +165,14 @@ fn statement_walk_preserves_occurrences_order_identity_and_spans() {
             AnyView::from(&empty),
             AnyView::from(&empty),
             AnyView::from(&annotations),
-            AnyView::from(&Option::<Span>::None),
+            AnyView::from(&Option::<Location>::None),
         ])
         .unwrap()
         .try_into()
         .unwrap();
     let root: Stmt = Function::get_global("s_tir.SBlockRealize")
         .unwrap()
-        .call_tuple((empty, condition, block.clone(), Option::<Span>::None))
+        .call_tuple((empty, condition, block.clone(), Option::<Location>::None))
         .unwrap()
         .try_into()
         .unwrap();

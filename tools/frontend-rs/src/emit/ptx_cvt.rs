@@ -10,7 +10,7 @@ use crate::emit::ptx_cvt_variants::{
 use crate::emit::register_call::{marker, require_register_call, table_marker, PTX_TYPE_MARKERS};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::{dtype_by_rust_type, dtype_itemsize, expr_rust_type_by_dtype};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// Canonical numeric carriers of the existing Rust conversion ABI. Legal
 /// public carriers are validated by the target table, not by this mapping.

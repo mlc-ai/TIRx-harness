@@ -8,7 +8,7 @@ use crate::emit::register_call::{
     PTX_TYPE_MARKERS,
 };
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 const SET_IDS: [&str; 4] = [
     "tirx.ptx.set",

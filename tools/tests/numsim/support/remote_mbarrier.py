@@ -1,7 +1,8 @@
 """Remote mbarrier kernels shared by NumSim and Synccheck regressions."""
 
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 
 def _mapa_u64(ptr, rank):

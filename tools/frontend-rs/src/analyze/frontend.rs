@@ -1,15 +1,14 @@
 //! `analyze_primfunc` producing the kernel manifest and its source nodes.
 
 use crate::analyze::util::{json_object, json_strings};
-use tvm::ir::StringImm;
-use tvm::ir::{CallObj, PointerTypeObj, TensorLoadObj, Var};
-use tvm::prim::{CastObj, RampObj, ShuffleObj};
-use tvm::tirx::{
-    AttrStmtObj, BufferStoreObj, BufferVar, Evaluate, ForObj, IfThenElseObj, PrimFunc, SeqStmtObj,
-    Stmt, TilePrimitiveCallObj, WhileObj,
-};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiString, WalkOrder};
+use tvm_tirx::ir::Location;
+use tvm_tirx::ir::StringImm;
+use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
+use tvm_tirx::ir::prim::{CastObj, RampObj, ShuffleObj};
+use tvm_tirx::ir::{Evaluate, ForObj, IfObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj};
+use tvm_tirx::tirx::{AttrStmtObj, Function, TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiString, WalkOrder};
 
 use super::buffers::{call_op_name, BufferBindings};
 use super::expression_bindings::ExpressionBindings;
@@ -29,7 +28,7 @@ use crate::emit::raw_tma::TensorMapParameter;
 const RAW_TENSOR_MAP_REGISTRY_REQUIREMENT: &str = "raw_tensor_map_registry";
 pub use crate::emit::sync::EXTERNAL_GRID_DEPENDENCY_REQUIREMENT;
 
-fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &BufferVar) -> bool {
+fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &TensorVar) -> bool {
     let dtype = buffer_dtype(buffer);
     if ctx.schema.is_supported_buffer_dtype_name(&dtype) {
         return true;
@@ -47,7 +46,7 @@ fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &BufferVar) -> bool {
 /// A statement header with every child statement rendered as `...`.
 fn elided_statement_text(node: &ObjectRef) -> AResult<String> {
     // Child statements have their own source entries.
-    let placeholder: Stmt = Evaluate::new(StringImm::new("..."))?.into();
+    let placeholder: Stmt = Evaluate::new(StringImm::new("...", Location::unknown()), Location::unknown()).into();
     let root = node.clone();
     let rendered: ObjectRef = structural_map(
         node.clone(),
@@ -76,7 +75,7 @@ fn node_text(node: &ObjectRef) -> AResult<String> {
     let mut text = if node.as_node::<AttrStmtObj>().is_some()
         || node.as_node::<ForObj>().is_some()
         || node.as_node::<WhileObj>().is_some()
-        || node.as_node::<IfThenElseObj>().is_some()
+        || node.as_node::<IfObj>().is_some()
     {
         elided_statement_text(node)?
     } else if let Some(text) = crate::emit::pure::source_text(node)? {
@@ -123,7 +122,7 @@ fn looks_like_address_printer(text: &str) -> bool {
 
 /// One analyzed kernel: its manifest and the facts emission borrows.
 pub struct KernelPlan {
-    pub func: PrimFunc,
+    pub func: Function,
     pub manifest: Json,
     /// Whether the manifest lists no unsupported item.
     pub supported: bool,
@@ -159,7 +158,7 @@ pub struct ParameterSpec {
     pub parameter_index: i64,
 }
 
-pub fn analyze_primfunc(ctx: &Ctx, func: &PrimFunc) -> AResult<KernelPlan> {
+pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
     let statements: Vec<Stmt> = crate::walk_statements(func.body().clone())?
         .iter()
         .collect();
@@ -384,7 +383,7 @@ fn check_node(
             unsupported.push(format!("op#{op_id}:{error}"));
         }
     }
-    if let Some(store) = node.as_node::<BufferStoreObj>() {
+    if let Some(store) = node.as_node::<TensorStoreObj>() {
         if !is_supported_buffer_dtype(ctx, &store.buffer) {
             unsupported.push(format!(
                 "op#{op_id}:BufferStore(dtype={})",
@@ -500,13 +499,13 @@ fn source_entry(node: &ObjectRef, kind: &str, op_id: i64) -> AResult<Json> {
 /// are added to `unsupported_items`.
 fn buffer_entries(
     ctx: &Ctx,
-    func: &PrimFunc,
+    func: &Function,
     unsupported_items: &mut Vec<String>,
 ) -> AResult<(Vec<Json>, Vec<String>)> {
     let mut buffers: Vec<Json> = Vec::new();
     let mut buffer_names: Vec<String> = Vec::new();
     for parameter in crate::buffer_parameters(func.clone())?.iter() {
-        let buffer = BufferVar::try_from(&parameter)?;
+        let buffer = TensorVar::try_from(&parameter)?;
         let buffer_type = buffer.buffer_type();
         let name = buffer_name(&buffer);
         buffer_names.push(name.clone());
@@ -555,10 +554,10 @@ fn scalar_and_pointer_entries(
     let mut scalar_specs: Vec<ParameterSpec> = Vec::new();
     let mut pointer_specs: Vec<ParameterSpec> = Vec::new();
     for (index, parameter) in params.iter().enumerate() {
-        if BufferVar::try_from(parameter).is_ok() {
+        if TensorVar::try_from(parameter).is_ok() {
             continue;
         }
-        if let Some(pointer) = parameter.ty.as_node::<PointerTypeObj>() {
+        if let Some(pointer) = parameter.ty.as_node::<PtrTypeObj>() {
             let Some(element) = prim_dtype(&pointer.element_type) else {
                 continue;
             };
@@ -615,7 +614,7 @@ fn scalar_and_pointer_entries(
 }
 
 /// The `global_symbol` attribute, or `main`.
-fn kernel_name(func: &PrimFunc) -> AResult<String> {
+fn kernel_name(func: &Function) -> AResult<String> {
     if let Some(symbol) = func.attrs.dict.get(&FfiString::from("global_symbol"))? {
         if let Ok(text) = FfiString::try_from(symbol) {
             return Ok(ffi_text(&text));
@@ -624,7 +623,7 @@ fn kernel_name(func: &PrimFunc) -> AResult<String> {
     Ok("main".to_owned())
 }
 
-fn structural_hash(func: &PrimFunc) -> AResult<u64> {
+fn structural_hash(func: &Function) -> AResult<u64> {
     let hash: Any = tvm_ffi::cached_global_func!("ffi.StructuralHash").call_tuple((
         Any::from(func.clone()),
         false,

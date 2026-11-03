@@ -2,8 +2,8 @@
 
 import numpy as np
 import pytest
+import tvm_ffi
 
-import tvm
 from tests.numsim.microtests.cases.ptx_cvt_scalar import (
     SCALAR_CVT_COLUMNS,
     scalar_cvt_arguments,
@@ -15,8 +15,8 @@ from tests.numsim.microtests.cases.ptx_cvt_scalar_goldens import (
 from tests.numsim.runtime.test_ptx_cvt_packed_forms import _cvt_call
 from tests.numsim.support.execution import run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.backend.cuda.ptx.table import TABLE, operand_dtypes
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import TABLE, operand_dtypes
 
 
 def scalar_predicate_case(name):
@@ -40,12 +40,12 @@ def scalar_predicate_case(name):
         carriers = [
             max(
                 operand_dtypes(slot, call.modifiers),
-                key=lambda dtype: tvm.DataType(dtype).bits,
+                key=lambda dtype: tvm_ffi.dtype(dtype).bits,
             )
             for slot in entry.typed_operands
         ]
         destination_dtype, source_dtype = carriers
-        dbytes, sbytes = (tvm.DataType(dtype).bits // 8 for dtype in carriers)
+        dbytes, sbytes = (tvm_ffi.dtype(dtype).bits // 8 for dtype in carriers)
         result_bits = np.dtype(canonical_destination).itemsize * 8
         for lane in range(32):
             raw = SCALAR_CVT_INPUTS[source_type][lane // 2]

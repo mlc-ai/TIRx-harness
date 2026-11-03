@@ -1,10 +1,10 @@
 //! copy / permute_layout / copy_async.
 
 use crate::tvm_compat::int_value;
-use tvm::ir::IntImmObj;
-use tvm::tirx::TilePrimitiveCallObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, Array, Map, ObjectRefCore};
+use tvm_tirx::ir::IntImmObj;
+use tvm_tirx::tirx::TilePrimitiveCallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, Array, Map, ObjectRefCore};
 
 use super::super::util::{unsupported, AResult};
 use super::super::Ctx;

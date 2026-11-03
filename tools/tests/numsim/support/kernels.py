@@ -4,23 +4,14 @@ from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
     sf_smem_layout,
     sf_tmem_layout,
 )
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.lang.pipeline import TCGen05Bar
-from tvm.tirx.layout import (
-    ComposeLayout,
-    R,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    laneid,
-    tcgen05_atom_layout,
-    tmem_datapath_layout,
-    wg_local_layout,
-)
+from tvm.tirx.layout import tcgen05_atom_layout, wg_local_layout
+from tvm_tirx.backend.cuda.lang.pipeline import TCGen05Bar
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.ir.type import PrimType
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, R, S, TileLayout
 
 _TEST_SWIZZLE_LAYOUT = ComposeLayout(
     3,
@@ -46,9 +37,15 @@ _TEST_MMA_PACKED_FP4_128X32_LAYOUT = mma_shared_layout(
     "uint8", SwizzleMode.SWIZZLE_32B_ATOM, (128, 32)
 )
 _TEST_MMA_PACKED_FP4_8X32_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (8, 32))
-_TEST_WARP_GEMM_D_FRAG = TileLayout(S[(2, 8, 4, 2) : (2, 4 @ laneid, 1 @ laneid, 1)])
-_TEST_WARP_GEMM_A_FRAG_K8 = TileLayout(S[(2, 8, 4, 2) : (2, 4 @ laneid, 1 @ laneid, 1)])
-_TEST_WARP_GEMM_B_FRAG_K8 = TileLayout(S[(4, 2, 8) : (1 @ laneid, 1, 4 @ laneid)])
+_TEST_WARP_GEMM_D_FRAG = TileLayout(
+    S[(2, 8, 4, 2) : (2, 4 @ Axis.get("laneid"), 1 @ Axis.get("laneid"), 1)]
+)
+_TEST_WARP_GEMM_A_FRAG_K8 = TileLayout(
+    S[(2, 8, 4, 2) : (2, 4 @ Axis.get("laneid"), 1 @ Axis.get("laneid"), 1)]
+)
+_TEST_WARP_GEMM_B_FRAG_K8 = TileLayout(
+    S[(4, 2, 8) : (1 @ Axis.get("laneid"), 1, 4 @ Axis.get("laneid"))]
+)
 _TEST_WARP_GEMM_A_FRAG = _TEST_WARP_GEMM_A_FRAG_K8.tile_to([16, 16], [16, 8])
 _TEST_WARP_GEMM_B_FRAG = _TEST_WARP_GEMM_B_FRAG_K8.tile_to([16, 8], [8, 8])
 
@@ -281,8 +278,8 @@ def tmem_packed_alias(output: T.Buffer((128,), "uint32")):
     warp = T.warp_id([4])
     lane = T.lane_id([32])
     row = T.meta_var(warp * 32 + lane)
-    packed_layout = TileLayout(S[(128, 2) : (1 @ TLane, 1 @ TCol)])
-    word_layout = TileLayout(S[(128, 2) : (1 @ TLane, 1 @ TCol)])
+    packed_layout = TileLayout(S[(128, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+    word_layout = TileLayout(S[(128, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
     low = T.decl_buffer((128, 2), "uint16", scope="tmem", layout=packed_layout, allocated_addr=5)
     word = T.decl_buffer((128, 2), "uint32", scope="tmem", layout=word_layout, allocated_addr=5)
     low[row, 0] = T.uint16(0x1122)
@@ -303,7 +300,7 @@ def tmem_dynamic_allocated_addr(output: T.Buffer((32,), "uint32")):
         (32, 2),
         "uint32",
         scope="tmem",
-        layout=TileLayout(S[(32, 2) : (1 @ TLane, 1 @ TCol)]),
+        layout=TileLayout(S[(32, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
         allocated_addr=address[0],
     )
     tmem[lane, 1] = T.cast(5000 + lane, "uint32")
@@ -319,7 +316,7 @@ def tmem_uninitialized_read(output: T.Buffer((32,), "uint32")):
         (32, 2),
         "uint32",
         scope="tmem",
-        layout=TileLayout(S[(32, 2) : (1 @ TLane, 1 @ TCol)]),
+        layout=TileLayout(S[(32, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
         allocated_addr=0,
     )
     output[lane] = tmem[lane, 0]
@@ -1505,7 +1502,10 @@ def tcgen_shared_to_tmem_replica(
         (32, 4),
         "float32",
         scope="tmem",
-        layout=TileLayout(S[(32, 4) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane]),
+        layout=TileLayout(
+            S[(32, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+            + R[4 : 32 @ Axis.get("TLane")]
+        ),
         allocated_addr=0,
     )
     physical = T.decl_buffer(
@@ -1552,7 +1552,10 @@ def tcgen_shared_to_tmem_rank3(
         (4, 32, 16),
         "uint8",
         scope="tmem",
-        layout=TileLayout(S[(4, 32, 16) : (16 @ TCol, 1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane]),
+        layout=TileLayout(
+            S[(4, 32, 16) : (16 @ Axis.get("TCol"), 1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+            + R[4 : 32 @ Axis.get("TLane")]
+        ),
         allocated_addr=0,
     )
     physical = T.decl_buffer(
@@ -1654,7 +1657,10 @@ def tcgen_float16_cta_group2(
         (32, 8),
         "float16",
         scope="tmem",
-        layout=TileLayout(S[(32, 8) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane]),
+        layout=TileLayout(
+            S[(32, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+            + R[4 : 32 @ Axis.get("TLane")]
+        ),
         allocated_addr=0,
     )
     physical = T.decl_buffer(

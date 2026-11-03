@@ -2,10 +2,10 @@
 //! destination store, pointer recovery helpers, the PTX instruction-predicate
 //! regions and the memory carrier spellings that take a PTX type.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{CallObj, PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{CallObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::super::analyze::buffers::call_op_name;
 use super::super::analyze::memory::MemorySpace;
@@ -77,7 +77,7 @@ pub struct PredicatedRegion {
 
 impl<'a> Emitter<'a> {
     /// Reuse the resolved physical view at the point its store is lowered.
-    pub fn record_global_write(&mut self, buffer: &tvm::tirx::BufferVar) -> AResult<()> {
+    pub fn record_global_write(&mut self, buffer: &tvm_tirx::tirx::TensorVar) -> AResult<()> {
         if self.written_global_buffers.is_none() {
             return Ok(());
         }

@@ -9,9 +9,10 @@ from tests.numsim.support.kernels import tmem_d_alias_per_cta
 from tests.numsim.support.manifest import emitted_module
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx.ir.type import PrimType
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_TILE = TileLayout(S[(2, 2) : (4, 1)])
 _PADDED_COMPOSE = ComposeLayout(0, 0, 0, _PADDED_TILE)

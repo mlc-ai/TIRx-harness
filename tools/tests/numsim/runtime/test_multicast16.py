@@ -17,8 +17,8 @@ from tests.numsim.support.kernels import tcgen_commit_runtime_multicast
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.ir import Call
 from tvm.script import tirx as T
+from tvm_tirx.ir import Call
 
 
 def explicit_multicast(kernel, width=16, *, mask=None, semantics=""):

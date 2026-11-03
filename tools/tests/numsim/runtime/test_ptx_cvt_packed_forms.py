@@ -9,9 +9,8 @@ from tvm_ffi import structural_walk
 import tvm
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness import numsim
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx.ir import Expr, Stmt
 
 
 def _cvt_call(spelling: str, destination_dtype: str, *arguments: str):

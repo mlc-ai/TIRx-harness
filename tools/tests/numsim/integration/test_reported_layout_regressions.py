@@ -6,22 +6,13 @@ import pytest
 from tirx_harness import numsim, racecheck, synccheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.cuda.tile_primitive.tma_utils import (
-    SwizzleMode,
-    mma_shared_layout,
-)
-from tvm.tirx.lang.pipeline import TCGen05Bar, TMABar
-from tvm.tirx.layout import (
-    R,
-    S,
-    TileLayout,
-    laneid,
-    tmem_datapath_layout,
-    wg_local_layout,
-)
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.backend.cuda.lang.pipeline import TCGen05Bar, TMABar
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
 
 LANES = 32
-_LANE_OWNER_LAYOUT = TileLayout(S[LANES : 1 @ laneid])
+_LANE_OWNER_LAYOUT = TileLayout(S[LANES : 1 @ Axis.get("laneid")])
 
 
 @T.prim_func
@@ -38,7 +29,7 @@ def lane_owner_warp_sum(
     source_tile = source_scalar.view(LANES, layout=_LANE_OWNER_LAYOUT)
     result_tile = result_scalar.view(
         1,
-        layout=TileLayout(S[1:1] + R[LANES : 1 @ laneid]),
+        layout=TileLayout(S[1:1] + R[LANES : 1 @ Axis.get("laneid")]),
     )
     Tx.warp.sum(result_tile, source_tile, thread_reduce=True)
     output[lane] = result_scalar[0]

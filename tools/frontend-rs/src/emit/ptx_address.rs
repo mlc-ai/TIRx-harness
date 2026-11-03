@@ -6,9 +6,9 @@ use crate::decode::Decoded;
 use crate::emit::memory_support::v2_memory_space_rust;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::is_integer_dtype;
-use tvm::ir::TensorLoadObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::TensorLoadObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 /// The engine address-conversion function (below `v2::`) the `cvta` lowerings call.
 pub const CVTA: &str = "addr::cvta";

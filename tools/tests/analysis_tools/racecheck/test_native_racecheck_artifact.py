@@ -12,7 +12,7 @@ from tirx_harness.numsim.checker_report import RaceReport
 from tirx_harness.numsim.checkers import _run_racecheck as internal_racecheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm_tirx.tirx.layout import S, TileLayout
 
 _RACECHECK_PERMUTED_SHARED_LAYOUT = TileLayout(S[(4, 32) : (1, 4)])
 

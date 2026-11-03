@@ -14,7 +14,7 @@ from tests.numsim.support.kernels import (
 from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm_tirx.tirx.layout import S, TileLayout
 
 _EXPLICIT_PERMUTED_LAYOUT = TileLayout(S[(4, 32) : (1, 4)])
 

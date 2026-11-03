@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_equal, structural_hash
 
+import tvm
 from tests.numsim.support.kernels import (
     bar_sync_after_full_warp_continue,
     bound_dynamic_cta_extent,
@@ -58,10 +59,10 @@ from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.source_map import flatten_source_span
-from tvm import tirx
-from tvm.ir import load_json, save_json
 from tvm.script import tirx as T
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import load_json, save_json
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_COMPOSE_LAYOUT = ComposeLayout(0, 0, 0, TileLayout(S[(2, 2) : (4, 1)]))
 
@@ -230,8 +231,8 @@ def test_codegen_rejects_a_spec_paired_with_different_primfuncs() -> None:
 
 def test_codegen_rejects_alpha_renamed_host_abi_with_the_same_structural_hash() -> None:
     def make_func(parameter_name: str):
-        buffer = tirx.decl_buffer((1,), "int32", name=parameter_name)
-        return tirx.PrimFunc([buffer], tirx.Evaluate(tirx.IntImm("int32", 0)))
+        buffer = tvm.tirx.decl_buffer((1,), "int32", name=parameter_name)
+        return tirx.Function([buffer], ir.Evaluate(ir.IntImm("int32", 0)))
 
     original = make_func("original")
     renamed = make_func("renamed")

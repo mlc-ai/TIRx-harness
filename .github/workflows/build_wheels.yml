@@ -36,19 +36,6 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Fetch pinned native build sources
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          revision=$(git rev-parse HEAD:thirdparty/tvm-rust-ext)
-          archive="$RUNNER_TEMP/tvm-rust-ext-${revision}.tar.gz"
-          gh release download v0.1.2 --pattern "tvm-rust-ext-${revision}.tar.gz" --dir "$RUNNER_TEMP"
-          echo "aef27d878f9c8510ec0070a8e5a42aa2f3c09ed8363b4449be4988bc3e4b9dd9  $archive" | sha256sum --check
-          source=tools/frontend-rs/thirdparty/tvm-rust-ext
-          mkdir -p "$source"
-          tar -xzf "$archive" -C "$source"
-          printf '%s\n' "$revision" > "$source/REVISION"
       - name: Build and check the source distribution
         run: |
           uv build --sdist --out-dir dist .

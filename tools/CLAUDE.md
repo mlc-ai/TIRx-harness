@@ -5,8 +5,8 @@ code lives under `src/tirx_harness/`. Top-level tests and the NumSim test suites
 stay outside the wheel; they may load repository fixtures directly.
 
 Keep public imports rooted at `tirx_harness`. Do not add dependencies on the
-parent repository layout. The TIRx-enabled `tvm` package is supplied by the
-runtime environment and must not be replaced with an unrelated PyPI TVM build.
+parent repository layout. The `tvm_tirx` package (`apache-tvm-tirx`) is supplied
+by the runtime environment.
 Native checker code is owned by `src/tirx_harness/numsim/` and follows that
 directory's guide.
 

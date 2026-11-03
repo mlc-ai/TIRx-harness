@@ -1,7 +1,7 @@
 //! Span-insensitive TIR graph serialization shared by normalization and caches.
 
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, Array, Map, Result, String as FfiString};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, Array, Map, Result, String as FfiString};
 
 fn replace(map: Map<FfiString, Any>, key: &str, value: Any) -> Map<FfiString, Any> {
     map.iter()
@@ -24,7 +24,7 @@ pub fn semantic_ir_json(value: ObjectRef, tvm_version: FfiString) -> Result<FfiS
         .collect();
     // Work on TVM's graph values directly. Its JSON text permits non-finite
     // floats and its text parser can reject representable f64 subnormals.
-    let graph: Map<FfiString, Any> = tvm::tvm_ffi::cached_global_func!("ffi.ToJSONGraph")
+    let graph: Map<FfiString, Any> = tvm_tirx::tvm_ffi::cached_global_func!("ffi.ToJSONGraph")
         .call_tuple((Any::from(value), &metadata))?
         .try_into()?;
     let nodes =
@@ -58,9 +58,9 @@ pub fn semantic_ir_json(value: ObjectRef, tvm_version: FfiString) -> Result<FfiS
     stripped_nodes.push(null_node.into());
     let graph = replace(graph, "nodes", Array::new(stripped_nodes).into());
     let stripped: Any =
-        tvm::tvm_ffi::cached_global_func!("ffi.FromJSONGraph").call_tuple((graph,))?;
+        tvm_tirx::tvm_ffi::cached_global_func!("ffi.FromJSONGraph").call_tuple((graph,))?;
     // Loading and saving removes Span/SourceName nodes disconnected above.
-    tvm::tvm_ffi::cached_global_func!("ffi.ToJSONGraphString")
+    tvm_tirx::tvm_ffi::cached_global_func!("ffi.ToJSONGraphString")
         .call_tuple((stripped, metadata))?
         .try_into()
 }

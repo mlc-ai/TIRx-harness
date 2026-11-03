@@ -1,10 +1,10 @@
 //! Closed vector IR form classification.
 
-use tvm::ir::{PrimExpr, TensorLoadObj};
-use tvm::prim::{RampObj, ShuffleObj};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::prim::{RampObj, ShuffleObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::util::{buffer_dtype, dtype_of, oref, static_int, unsupported, AResult};
 use super::Ctx;
@@ -54,7 +54,7 @@ pub fn classify_vector_buffer_load(
     ctx: &Ctx,
     node: &ObjectRef,
     load: &TensorLoadObj,
-    source: &BufferVar,
+    source: &TensorVar,
 ) -> AResult<Option<String>> {
     let result_dtype = dtype_of(node)?;
     let Some((element_dtype, lanes, _, _)) = ctx.schema.vector_dtype_abi(&result_dtype) else {

@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import tvm_ffi
 
-import tvm
 from tests.numsim.support.manifest import device_kernel
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
+from tvm_tirx import ir, tirx
 
 
 def _kernel(dtype):
@@ -133,9 +133,9 @@ def test_error_recovery_controls_keep_normal_emission_and_execution(body, expect
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
 def test_error_recovery_respects_expression_let_scope(dtype, tmp_path):
     output = tvm.tirx.decl_buffer((1,), "float32", name="output")
-    variable = tvm.tirx.Var("scoped", "float32")
-    bound = tvm.tirx.Let(variable, T.float32(1), T.exp(variable))
-    expression = T.exp(T.cast(bound, dtype) + T.log(tvm.tirx.FloatImm(dtype, 1)))
+    variable = tirx.Var("scoped", "float32")
+    bound = tirx.Let(variable, T.float32(1), T.exp(variable))
+    expression = T.exp(T.cast(bound, dtype) + T.log(ir.FloatImm(dtype, 1)))
     kernel = device_kernel(
         tvm.tirx.BufferStore(output, T.cast(expression, "float32"), [0]), (output,)
     )

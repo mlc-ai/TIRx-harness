@@ -1,5 +1,11 @@
 [build-system]
-requires = ["setuptools>=77.0.3", "setuptools-scm>=8", "apache-tvm-ffi==0.1.14.post0"]
+requires = [
+  "setuptools>=77.0.3",
+  "setuptools-scm>=8",
+  "apache-tvm-ffi==0.1.15.post2",
+  # The tvm-tirx crate links libtvm_tirx_compiler, found through tvm-tirx-config.
+  "apache-tvm-tirx==0.1.0a5",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,8 +30,8 @@ test = ["pytest>=8", "pytest-xdist>=3", "setuptools>=64", "pip>=25.1", "ml-dtype
 [dependency-groups]
 # Shared compiler/runtime requirements. Keep both installation groups standalone.
 common = [
-  "apache-tvm==0.27.0.post1",
-  "apache-tvm-ffi==0.1.14.post0",
+  "apache-tvm-tirx==0.1.0a5",
+  "apache-tvm-ffi==0.1.15.post2",
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
   # The TVM IKET profile checks these exact versions.
@@ -82,8 +88,8 @@ include = ["tirx_harness*"]
 [tool.pytest.ini_options]
 addopts = "--dist=loadgroup --no-loadscope-reorder"
 # Repo-relative paths added to sys.path so pytest imports the repo packages
-# without requiring the user to set PYTHONPATH each time. TIR itself
-# (`tvm.tirx`) is NOT listed here — install the compatible apache-tvm and
+# without requiring the user to set PYTHONPATH each time. TIRx itself
+# (`tvm_tirx`) is NOT listed here — install the compatible apache-tvm-tirx and
 # apache-tvm-ffi wheels pinned above.
 # Canonical kernels come from the installed tirx-kernels package.
 pythonpath = [".", "tools/src", "tools"]
@@ -132,7 +138,7 @@ unfixable = []
 "tools/tests/**/*.py" = ["E501", "F821"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tvm", "tirx_kernels", "tirx_harness", "evolution"]
+known-first-party = ["tvm", "tvm_tirx", "tirx_kernels", "tirx_harness", "evolution"]
 
 [tool.ruff.format]
 quote-style = "double"

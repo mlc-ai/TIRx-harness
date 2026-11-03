@@ -124,15 +124,15 @@ def _torch_buffer(value: PairedBuffer):
 
 
 def _logical_dtype_lanes(logical_dtype: str) -> int:
-    import tvm
+    import tvm_ffi
 
-    return int(tvm.DataType(logical_dtype).lanes)
+    return int(tvm_ffi.dtype(logical_dtype).lanes)
 
 
 def _vector_base_dtype(logical_dtype: str) -> np.dtype:
-    import tvm
+    import tvm_ffi
 
-    data_type = tvm.DataType(logical_dtype)
+    data_type = tvm_ffi.dtype(logical_dtype)
     if data_type.lanes <= 1:
         raise TypeError(f"logical dtype {logical_dtype!r} is not a vector dtype")
     suffix = f"x{data_type.lanes}"
@@ -146,12 +146,12 @@ def _vector_base_dtype(logical_dtype: str) -> np.dtype:
 
 
 def _tvm_vector_buffer(value: PairedBuffer):
-    import tvm
+    import tvm_tirx
 
     lanes = _logical_dtype_lanes(value.logical_dtype)
     base_dtype = _vector_base_dtype(value.logical_dtype)
     logical = np.ascontiguousarray(value.array).view(base_dtype).reshape(*value.array.shape, lanes)
-    device = tvm.runtime.empty(value.array.shape, value.logical_dtype, tvm.cuda())
+    device = tvm_tirx.runtime.empty(value.array.shape, value.logical_dtype, tvm_tirx.cuda())
     device.copyfrom(logical)
     return device
 
@@ -163,8 +163,7 @@ def _torch_tensor_map(
     by_value: bool = True,
 ) -> _GpuTensorMap:
     import torch
-
-    import tvm
+    import tvm_ffi
 
     logical_dtype = value.logical_dtype or value.array.dtype.name
     if base is None:
@@ -324,10 +323,10 @@ def initialize(image: T.Buffer((128,), "uint8")):
         if status:
             raise RuntimeError(f"CUDA tiled encoder failed with status {status}")
         return finish()
-    encode = tvm.get_global_func("runtime.cuTensorMapEncodeTiled")
+    encode = tvm_ffi.get_global_func("runtime.cuTensorMapEncodeTiled")
     encode_args = [
         descriptor,
-        tvm.DataType(logical_dtype),
+        tvm_ffi.dtype(logical_dtype),
         len(value.global_shape),
         ctypes.c_void_p(base.data_ptr()),
         *value.global_shape,
@@ -405,12 +404,12 @@ def _parameter_names(prim_func: Any) -> tuple[str, ...]:
 
 
 def _compile_gpu(prim_func: Any, *, arch: str) -> Any:
-    import tvm
+    import tvm_tirx
 
-    target = tvm.target.Target({"kind": "cuda", "arch": arch})
+    target = tvm_tirx.target.Target({"kind": "cuda", "arch": arch})
     with target:
-        return tvm.compile(
-            tvm.IRModule({"main": prim_func}),
+        return tvm_tirx.compile(
+            tvm_tirx.IRModule({"main": prim_func}),
             target=target,
             tir_pipeline="tirx",
         )
@@ -427,7 +426,7 @@ def run_gpu_primfunc(
 
     from tirx_harness.numsim.bindings import prepare_bindings
     from tvm.ir.type import PointerType
-    from tvm.tirx import TensorMapType
+    from tvm_tirx.tirx import TensorMapType
 
     parameter_names = _parameter_names(prim_func)
     # GPU execution must remain available for instructions NumSim cannot model.

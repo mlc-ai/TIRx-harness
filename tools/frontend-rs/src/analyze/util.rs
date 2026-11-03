@@ -2,29 +2,32 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tvm::ir::TensorRegionObj;
+use tvm_tirx::ir::TensorRegionObj;
 
 use crate::tvm_compat::int_value;
-use tvm::analysis::Analyzer;
-use tvm::ir::StringImmObj;
-use tvm::ir::{
-    CallObj, ExprObj, FloatImmObj, GlobalVarObj, IntImmObj, OpaqueExprObj, PointerTypeObj,
-    PrimExpr, PrimTypeObj, SequentialSpanObj, SpanObj, TensorLoadObj, TupleGetItemObj, TupleObj,
-    Type, Var, VarObj,
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{
+    CallObj, ExprObj, FloatImmObj, GlobalVarObj, IntImmObj, LocationObj, OpaqueExprObj, PrimExpr,
+    PrimTypeObj, PtrTypeObj, SequentialSpanObj, TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var,
+    VarObj,
 };
-use tvm::prim::{
+use tvm_tirx::ir::prim::{
     AddObj, AndObj, BitwiseAndObj, BitwiseNotObj, BitwiseOrObj, BitwiseXorObj, BroadcastObj,
-    CastObj, DivObj, EQObj, FloorDivObj, FloorModObj, GEObj, GTObj, LEObj, LShiftObj, LTObj,
-    LetObj, MaxObj, MinObj, ModObj, MulObj, NEObj, NotObj, OrObj, RShiftObj, RampObj, SelectObj,
-    ShuffleObj, SubObj,
+    CastObj, DivObj, EQObj, FloorDivObj, FloorModObj, GEObj, GTObj, LEObj, LShiftObj, LTObj, LetObj,
+    MaxObj, MinObj, ModObj, MulObj, NEObj, NotObj, OrObj, RShiftObj, RampObj, SelectObj, ShuffleObj,
+    SubObj,
 };
-use tvm::tirx::{
-    AllocBufferObj, AssertStmtObj, AttrStmtObj, BindObj, BreakObj, BufferStoreObj, BufferTypeObj,
-    BufferVar, ContinueObj, DeclBufferObj, EvaluateObj, ForObj, IfThenElseObj, ReturnObj,
-    ScopeIdDefStmtObj, SeqStmtObj, StmtObj, TilePrimitiveCallObj, WhileObj,
+use tvm_tirx::ir::{
+    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
+    SeqStmtObj, StmtObj, TensorStoreObj, WhileObj,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{
+use tvm_tirx::tirx::{
+    AllocBufferObj, AttrStmtObj, DeclBufferObj, ScopeIdDefStmtObj, TensorTypeObj, TensorVar,
+    TilePrimitiveCallObj,
+};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{
     self, Any, AnyView, DLDataType, DLDataTypeExt, Error, ObjectIdentity, ObjectRefCast,
     ObjectRefCore, String as FfiString,
 };
@@ -256,14 +259,14 @@ pub fn kind(node: &ObjectRef) -> Option<&'static str> {
         ScopeIdDefStmtObj => "ScopeIdDefStmt",
         TilePrimitiveCallObj => "TilePrimitiveCall",
         EvaluateObj => "Evaluate",
-        IfThenElseObj => "IfThenElse",
+        IfObj => "IfThenElse",
         AssertStmtObj => "AssertStmt",
         ForObj => "For",
         WhileObj => "While",
         BreakObj => "Break",
         ContinueObj => "Continue",
         ReturnObj => "Return",
-        BufferStoreObj => "BufferStore",
+        TensorStoreObj => "BufferStore",
         TensorRegionObj => "TensorRegion",
     );
     None
@@ -334,7 +337,7 @@ pub fn expr_type(node: &ObjectRef) -> Option<Type> {
 }
 
 pub fn is_pointer_type(ty: &Type) -> bool {
-    ty.as_node::<PointerTypeObj>().is_some()
+    ty.as_node::<PtrTypeObj>().is_some()
 }
 
 pub fn prim_dtype(ty: &Type) -> Option<DLDataType> {
@@ -358,7 +361,7 @@ pub fn dtype_of(node: &ObjectRef) -> AResult<String> {
     if let Some(dtype) = prim_dtype(&ty) {
         return Ok(dtype_text(dtype));
     }
-    if let Some(buffer) = ty.as_node::<BufferTypeObj>() {
+    if let Some(buffer) = ty.as_node::<TensorTypeObj>() {
         // Python renders the PrimType object itself here.
         return repr_of(&buffer.dtype);
     }
@@ -369,24 +372,24 @@ pub fn as_var(node: &ObjectRef) -> Option<Var> {
     node.clone().try_cast::<Var>().ok()
 }
 
-pub fn as_buffer(node: &ObjectRef) -> Option<BufferVar> {
+pub fn as_buffer(node: &ObjectRef) -> Option<TensorVar> {
     let var = as_var(node)?;
-    BufferVar::try_from(&var).ok()
+    TensorVar::try_from(&var).ok()
 }
 
-pub fn buffer_name(buffer: &BufferVar) -> String {
+pub fn buffer_name(buffer: &TensorVar) -> String {
     ffi_text(&buffer.as_var().name)
 }
 
-pub fn buffer_dtype(buffer: &BufferVar) -> String {
+pub fn buffer_dtype(buffer: &TensorVar) -> String {
     dtype_text(buffer.buffer_type().dtype.dtype)
 }
 
-pub fn buffer_scope(buffer: &BufferVar) -> String {
+pub fn buffer_scope(buffer: &TensorVar) -> String {
     ffi_text(&buffer.buffer_type().storage_scope)
 }
 
-pub fn buffer_ref(buffer: &BufferVar) -> ObjectRef {
+pub fn buffer_ref(buffer: &TensorVar) -> ObjectRef {
     oref(buffer.as_var().clone())
 }
 
@@ -432,7 +435,7 @@ pub fn static_string(value: &ObjectRef, field: &str) -> AResult<String> {
 }
 
 /// Source span JSON as `source_map.source_span_from_tvm` serializes it.
-pub fn span_json(span: Option<&tvm::ir::Span>) -> Option<Json> {
+pub fn span_json(span: Option<&tvm_tirx::ir::Location>) -> Option<Json> {
     let span = span?;
     if let Some(sequential) = span.as_node::<SequentialSpanObj>() {
         let mut children = Vec::new();
@@ -449,7 +452,7 @@ pub fn span_json(span: Option<&tvm::ir::Span>) -> Option<Json> {
             ("spans", Json::Array(children)),
         ]));
     }
-    let leaf = span.as_node::<SpanObj>()?;
+    let leaf = span.as_node::<LocationObj>()?;
     let source_name = ffi_text(&leaf.source_name.as_ref()?.name);
     if source_name.is_empty() {
         return None;
@@ -471,7 +474,7 @@ pub fn span_json(span: Option<&tvm::ir::Span>) -> Option<Json> {
     ]))
 }
 
-pub fn node_span(node: &ObjectRef) -> Option<tvm::ir::Span> {
+pub fn node_span(node: &ObjectRef) -> Option<tvm_tirx::ir::Location> {
     if let Some(expr) = node.as_node::<ExprObj>() {
         return expr.span.clone();
     }

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from tvm.backend.cuda.ptx.table import (
+from tvm_tirx.backend.cuda.ptx.table import (
     TABLE,
     InstructionEntry,
     lanes_of,
@@ -424,7 +424,7 @@ def register_native_ptx_decoder(payload_schema: Any) -> None:
     tvm_ffi.register_global_func(NATIVE_PTX_DECODER, decode_payload, override=True)
 
     def build_call(spelling: str, operands: Any) -> Any:
-        from tvm.backend.cuda.ptx import PTXNamespace
+        from tvm_tirx.backend.cuda.ptx import PTXNamespace
 
         try:
             call = PTXNamespace()[str(spelling)](*operands)

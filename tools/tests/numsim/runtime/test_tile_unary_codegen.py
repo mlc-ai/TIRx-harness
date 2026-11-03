@@ -7,7 +7,7 @@ from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm_tirx.tirx.layout import S, TileLayout
 
 
 @T.prim_func

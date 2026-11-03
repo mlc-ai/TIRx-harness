@@ -5,7 +5,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::{marker, require_register_call};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// Existing ABI variants, keyed by (vector element width, vector length).
 fn vector_variants(width: i64, length: usize) -> Option<(&'static str, &'static str)> {

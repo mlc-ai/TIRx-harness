@@ -13,9 +13,9 @@ from tests.numsim.support.kernels import (
 )
 from tirx_harness import numsim
 from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_DYNAMIC_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ TLane, 1 @ TCol)])
+_DYNAMIC_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.prim_func

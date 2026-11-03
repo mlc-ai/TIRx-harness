@@ -546,8 +546,8 @@ def _compiler_identity() -> dict[str, Any]:
     try:
         import tvm_ffi
 
-        import tvm
-        from tvm.base import _LOADED_LIBS
+        import tvm_tirx
+        from tvm_tirx.base import _LOADED_LIBS
     except ImportError:
         return {"tvm": None}
     libraries = {Path(tvm_ffi.LIB._name).resolve()}
@@ -563,8 +563,8 @@ def _compiler_identity() -> dict[str, Any]:
             {"path": str(path), "size": metadata.st_size, "mtime_ns": metadata.st_mtime_ns}
         )
     return {
-        "tvm_version": getattr(tvm, "__version__", None),
-        "tvm_package": str(Path(tvm.__file__).resolve()),
+        "tvm_version": getattr(tvm_tirx, "__version__", None),
+        "tvm_package": str(Path(tvm_tirx.__file__).resolve()),
         "tvm_ffi_version": getattr(tvm_ffi, "__version__", None),
         "tvm_ffi_package": str(Path(tvm_ffi.__file__).resolve()),
         "libraries": library_identity,
@@ -595,12 +595,12 @@ def _codegen_fingerprint() -> str:
 
 
 def generated_source_identity(source: Any) -> str:
-    from tvm.tirx import PrimFunc
+    from tvm_tirx.tirx import Function
 
     funcs = tuple(source) if isinstance(source, (list, tuple)) else (source,)
     if not funcs:
         raise ValueError("NumSim cannot transpile an empty kernel sequence")
-    if any(not isinstance(func, PrimFunc) for func in funcs):
+    if any(not isinstance(func, Function) for func in funcs):
         # This identity is only a pre-analysis cache probe.  Keep validation in
         # the analyzer so callers which replace the analyzer/build in tests (or
         # other tooling) retain the historical ordering contract.  Object IDs

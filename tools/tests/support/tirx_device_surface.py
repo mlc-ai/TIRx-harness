@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from tvm.backend.cuda.ptx.table import TABLE
 from tvm.script import tirx as T
 from tvm.tirx.op import _canonical_device_intrin_name
+from tvm_tirx.backend.cuda.ptx.table import TABLE
 
 TIRX_BUILDER_MODULE = type(T.cuda).__module__
 CUDA_PRIVATE_SURFACES = frozenset(

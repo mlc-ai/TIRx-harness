@@ -25,18 +25,18 @@ from tests.numsim.support.manifest import (
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.host_abi import HostAbiError, build_host_abi
 from tirx_harness.numsim.transpiler.frontend import TensorMapSpec, analyze
-from tvm import ir, tirx
-from tvm.ir import Expr
 from tvm.ir.type import PointerType
 from tvm.script import tirx as T
-from tvm.tirx import Stmt, TensorMapType, Var
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.tirx import TensorMapType, Var
 
 _HANDLE = PointerType(ir.PrimType(""))
 _ARG_NAMES = itertools.count()
 
 
 class _Form(NamedTuple):
-    func: tirx.PrimFunc
+    func: tirx.Function
     op_name: str
 
 
@@ -140,11 +140,11 @@ def kernel():
         dtype,
         value,
         ir.StringImm(operation),
-        tirx.IntImm("int32", num_warps),
+        ir.IntImm("int32", num_warps),
         public.args[3],
     )
     body = replace_call(func, public, call).body
-    return _Form(tirx.PrimFunc([value], body, func.ret_type, func.attrs), "tirx.cuda.cta_reduce")
+    return _Form(tirx.Function([value], body, func.ret_type, func.attrs), "tirx.cuda.cta_reduce")
 
 
 def _warp_reduce_call(operation: str, width: int, *, dtype: str = "float32") -> _Form:
@@ -154,7 +154,7 @@ def _warp_reduce_call(operation: str, width: int, *, dtype: str = "float32") -> 
             dtype,
             _arg(dtype),
             ir.StringImm(operation),
-            tirx.IntImm("int32", width),
+            ir.IntImm("int32", width),
         )
     )
 
@@ -164,7 +164,7 @@ def _fetch_register_call(bits: int, register: str) -> _Form:
         _call(
             "tirx.cuda.mov_sreg",
             f"int{bits}",
-            tirx.IntImm("int32", bits),
+            ir.IntImm("int32", bits),
             ir.StringImm(register),
         )
     )
@@ -435,7 +435,7 @@ def test_fetch_register_form_domain_is_the_exact_modeled_register_set():
                     _call(
                         "tirx.cuda.mov_sreg",
                         "int32",
-                        tirx.IntImm("int32", bits),
+                        ir.IntImm("int32", bits),
                         ir.StringImm("laneid"),
                     )
                 ).func
@@ -467,7 +467,7 @@ def test_mapa_and_mbarrier_static_form_domains_are_explicit():
             ]
 
     static_try_forms = {
-        tuple(_emitted_heads(_mbarrier_try_wait_call(tirx.IntImm("uint32", ticks))))
+        tuple(_emitted_heads(_mbarrier_try_wait_call(ir.IntImm("uint32", ticks))))
         for ticks in (0, 1, 0xFFFFFFFF)
     }
     dynamic_try_instructions = tuple(
@@ -478,13 +478,13 @@ def test_mapa_and_mbarrier_static_form_domains_are_explicit():
     assert dynamic_try_instructions == (
         "v2::sync::mbarrier_try_wait::<v2::sync::variant::TryWaitParity>",
     )
-    assert _emitted_heads(_mbarrier_try_wait_call(tirx.IntImm("uint32", 0), sem="relaxed")) == [
+    assert _emitted_heads(_mbarrier_try_wait_call(ir.IntImm("uint32", 0), sem="relaxed")) == [
         "v2::sync::mbarrier_try_wait::<v2::sync::variant::TryWaitParityRelaxed>"
     ]
 
 
 def test_mbarrier_ticks_are_runtime_operands_not_instruction_variants():
-    static = _mbarrier_try_wait_call(tirx.IntImm("uint32", 17))
+    static = _mbarrier_try_wait_call(ir.IntImm("uint32", 17))
     dynamic = _mbarrier_try_wait_call(tirx.Var("ticks", "uint32"))
 
     assert _emitted_heads(static) == _emitted_heads(dynamic)
@@ -492,7 +492,7 @@ def test_mbarrier_ticks_are_runtime_operands_not_instruction_variants():
 
 def test_mbarrier_try_wait_without_hint_uses_the_same_wait_parity_specialization():
     assert _emitted_heads(_mbarrier_try_wait_no_hint_call()) == _emitted_heads(
-        _mbarrier_try_wait_call(tirx.IntImm("uint32", 1), sem="")
+        _mbarrier_try_wait_call(ir.IntImm("uint32", 1), sem="")
     )
 
 
@@ -599,7 +599,7 @@ def kernel():
                 "float32",
                 _arg("float32"),
                 _arg("handle"),
-                tirx.IntImm("int32", 4),
+                ir.IntImm("int32", 4),
                 _arg("handle"),
             )
         ),
@@ -609,14 +609,14 @@ def kernel():
                 "float32",
                 _arg("float32"),
                 _arg("handle"),
-                tirx.IntImm("int32", 32),
+                ir.IntImm("int32", 32),
             )
         ),
         _form(
             _call(
                 "tirx.cuda.mov_sreg",
                 "int32",
-                tirx.IntImm("int32", 32),
+                ir.IntImm("int32", 32),
                 _arg("handle"),
             )
         ),
@@ -629,14 +629,14 @@ def test_pure_call_form_strings_must_be_compile_time_static(form: _Form):
 
 @pytest.mark.parametrize("op_name", ["tirx.break_loop", "tirx.continue_loop"])
 def test_resolver_validates_control_calls(op_name: str):
-    def looped(call: ir.Call) -> tirx.PrimFunc:
+    def looped(call: ir.Call) -> tirx.Function:
         index = Var("index", "int32")
-        loop = tirx.For(
+        loop = tvm.tirx.For(
             index,
-            tirx.IntImm("int32", 0),
-            tirx.IntImm("int32", 4),
-            tirx.ForKind.SERIAL,
-            tirx.Evaluate(call),
+            ir.IntImm("int32", 0),
+            ir.IntImm("int32", 4),
+            tvm.tirx.ForKind.SERIAL,
+            ir.Evaluate(call),
         )
         return device_kernel(loop)
 
@@ -718,7 +718,7 @@ def test_resolver_rejects_opaque_cuda_helpers_at_the_single_boundary():
 
 
 def test_resolver_remains_closed_for_unknown_calls():
-    unknown = _call("tirx.tvm_stack_alloca", "handle", ir.StringImm("x"), tirx.IntImm("int32", 1))
+    unknown = _call("tirx.tvm_stack_alloca", "handle", ir.StringImm("x"), ir.IntImm("int32", 1))
     with pytest.raises(UnsupportedTIRxError, match="unregistered raw call"):
         resolved_kernel(_form(unknown).func)
 
@@ -740,7 +740,7 @@ def test_ptx_tensormap_prefetch_requires_a_typed_owning_parameter():
 
     ordinary_handle = Var("descriptor_like_name", "handle")
     with pytest.raises(UnsupportedTIRxError, match="typed PrimFunc parameter identity"):
-        resolved_kernel(tirx.PrimFunc([ordinary_handle], func.body, func.ret_type, func.attrs))
+        resolved_kernel(tirx.Function([ordinary_handle], func.body, func.ret_type, func.attrs))
 
 
 def test_ptx_tensormap_prefetch_rejects_a_nonvoid_result():
@@ -764,7 +764,7 @@ def test_tensor_map_resolution_requires_exact_primfunc_parameter_identity():
 
     impostor = Var("same_name", PointerType(TensorMapType()))
     with pytest.raises(UnsupportedTIRxError, match="typed PrimFunc parameter identity"):
-        resolved_kernel(tirx.PrimFunc([impostor], func.body, func.ret_type, func.attrs))
+        resolved_kernel(tirx.Function([impostor], func.body, func.ret_type, func.attrs))
 
 
 def test_frontend_discovers_typed_tensor_map_parameters_from_exact_owners():
@@ -782,13 +782,13 @@ def test_host_abi_rejects_distinct_tensor_map_parameters_with_one_public_name():
     second_func, second_prefetch = _public_tensormap_prefetch("descriptor")
     first = first_func.params[0]
     second = second_func.params[0]
-    body = tirx.SeqStmt(
+    body = ir.SeqStmt(
         [
-            tirx.Evaluate(first_prefetch),
-            tirx.Evaluate(second_prefetch),
+            ir.Evaluate(first_prefetch),
+            ir.Evaluate(second_prefetch),
         ]
     )
-    spec = analyze(tirx.PrimFunc([first, second], body))
+    spec = analyze(tirx.Function([first, second], body))
     assert spec.kernels[0].tensor_maps == (
         TensorMapSpec("descriptor", 0),
         TensorMapSpec("descriptor", 1),

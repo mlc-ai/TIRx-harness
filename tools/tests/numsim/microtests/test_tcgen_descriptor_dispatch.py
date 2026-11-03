@@ -9,10 +9,9 @@ from tests.numsim.runtime.test_tcgen_collectors import collector_case
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tests.numsim.support.tcgen_descriptor import INSTR_DESC, encode_dense_instr_descriptor_fields
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm import tirx
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Expr, Stmt
 
 
 def dispatch_case(
@@ -27,7 +26,7 @@ def dispatch_case(
     kernel, inputs, expected = collector_case(("",), tmem_a=tmem_a)
     kernel = kernel.with_attr("tirx.cuda_arch", "sm_100a")
     metadata = next(parameter for parameter in kernel.params if str(parameter) == "metadata")
-    selector = tirx.BufferLoad(metadata, [0, 0, 0])
+    selector = ir.TensorLoad(metadata, [0, 0, 0])
     if multiple_issuers:
         lanes = []
         structural_walk(
@@ -38,22 +37,22 @@ def dispatch_case(
         )
         # Distinct types must not split one invalid issue into valid calls.
         selector = (
-            tirx.BufferLoad(metadata, [0, lanes[0], 0])
+            ir.TensorLoad(metadata, [0, lanes[0], 0])
             if input_descriptor
             else T.Cast("uint32", lanes[0])
         )
-    predicate = tirx.NE(tirx.BufferLoad(metadata, [0, 0, 1]), T.uint32(0))
+    predicate = tirx.NE(ir.TensorLoad(metadata, [0, 0, 1]), T.uint32(0))
     descriptor_bits = 0
 
     def replace(node):
         nonlocal descriptor_bits
-        if isinstance(node, tirx.Evaluate) and type(node.value).__name__ == "Call":
+        if isinstance(node, ir.Evaluate) and type(node.value).__name__ == "Call":
             if not str(node.value.op.name).startswith("tirx.ptx.tcgen05_mma"):
                 return node
             decoded = decode_ptx_call(node.value)
             descriptor = int(decoded.scalar_operand("idesc").value)
             descriptor_bits = descriptor
-            return tirx.Evaluate(
+            return ir.Evaluate(
                 T.ptx["tcgen05.mma.cta_group::1.kind::f16"](
                     decoded.scalar_operand("d_tmem"),
                     decoded.scalar_operand("a_tmem" if tmem_a else "a_desc"),
@@ -70,7 +69,7 @@ def dispatch_case(
                     pred=predicate,
                 )
             )
-        if isinstance(node, tirx.IfThenElse):
+        if isinstance(node, ir.If):
             mma_sites = []
             structural_walk(
                 node.then_case,
@@ -92,7 +91,7 @@ def dispatch_case(
                 return expression
 
             condition = structural_map(node.condition, select_lane)
-            return tirx.IfThenElse(condition, node.then_case, node.else_case)
+            return ir.If(condition, node.then_case, node.else_case)
         return node
 
     kernel = kernel.with_body(structural_map(kernel.body, replace))
@@ -222,7 +221,7 @@ def with_input_descriptor(kernel):
     body = structural_map(kernel.body, replace)
     assert len(values) == 1
     return (
-        tirx.PrimFunc([*kernel.params, parameter], body, kernel.ret_type, kernel.attrs),
+        tirx.Function([*kernel.params, parameter], body, kernel.ret_type, kernel.attrs),
         values.pop(),
     )
 

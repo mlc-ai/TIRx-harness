@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 
 @T.prim_func

@@ -5,7 +5,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// The engine function (below `v2::`) the lowering calls.
 pub const CVT_PACK: &str = "reg::cvt_pack";

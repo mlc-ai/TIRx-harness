@@ -7,10 +7,10 @@ use crate::analyze::util::{
 };
 use crate::analyze::Ctx;
 use crate::tvm_compat::int_value;
-use tvm::ir::{CallObj, IntImmObj};
-use tvm::tirx::PrimFunc;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, IntImmObj};
+use tvm_tirx::tirx::Function;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 pub const DESCRIPTOR_CALLS: [&str; 3] = [
     "tirx.cuda.tcgen05_encode_matrix_descriptor",
@@ -614,7 +614,7 @@ const TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH: &[(&str, &str)] = &[
 ];
 
 /// `require_tcgen_descriptor_layout`.
-pub fn require_tcgen_descriptor_layout(func: &PrimFunc) -> AResult<&'static str> {
+pub fn require_tcgen_descriptor_layout(func: &Function) -> AResult<&'static str> {
     let Some(arch) = cuda_arch(func)? else {
         return unsupported(format!(
             "TCGEN descriptors require PrimFunc attribute {:?} to select exact SM100/SM103/SM107 descriptor semantics",
@@ -642,7 +642,7 @@ pub fn require_tcgen_descriptor_layout(func: &PrimFunc) -> AResult<&'static str>
 
 /// `tcgen_descriptor_variant`: legacy non-F8-CTA2 calls retain SM100 when no
 /// architecture is authored.
-pub fn tcgen_descriptor_variant(func: &PrimFunc) -> AResult<String> {
+pub fn tcgen_descriptor_variant(func: &Function) -> AResult<String> {
     let layout = if cuda_arch(func)?.is_some() {
         require_tcgen_descriptor_layout(func)?
     } else {

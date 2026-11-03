@@ -1,4 +1,4 @@
-"""Installed, compile-time services backed by the unmodified TVM Rust extension."""
+"""Installed, compile-time services backed by the native frontend over the tvm-tirx crate."""
 
 from __future__ import annotations
 
@@ -40,6 +40,9 @@ def library_path() -> Path:
 @cache
 def _library() -> Any:
     import tvm_ffi
+
+    # Load libtvm_tirx_compiler, which the frontend links without an rpath.
+    import tvm_tirx  # noqa: F401
 
     library = tvm_ffi.load_module(str(library_path()))
     actual = str(library["numsim_frontend_identity"]())
@@ -94,15 +97,15 @@ def post_order_nodes(node: Any) -> Any:
 
 
 def normalize_host_tensor_maps(func: Any) -> Any:
-    import tvm
+    import tvm_tirx
 
-    return _call("numsim_normalize_host_tensor_maps", func, tvm.__version__)
+    return _call("numsim_normalize_host_tensor_maps", func, tvm_tirx.__version__)
 
 
 def semantic_ir_json(value: Any) -> str:
-    import tvm
+    import tvm_tirx
 
-    return str(_library()["numsim_semantic_ir_json"](value, tvm.__version__))
+    return str(_library()["numsim_semantic_ir_json"](value, tvm_tirx.__version__))
 
 
 def ptx_call_parts(call: Any, modifier_count: int) -> Any:

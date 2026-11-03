@@ -1,14 +1,16 @@
 //! Statement and buffer-access emission.
 
-use tvm::ir::{IntImmObj, PointerTypeObj, PrimExpr};
-use tvm::prim::RampObj;
-use tvm::tirx::{
-    AssertStmtObj, AttrStmtObj, BindObj, BreakObj, BufferStoreObj, BufferVar, ContinueObj,
-    DeclBufferObj, EvaluateObj, ForObj, IfThenElseObj, ReturnObj, ScopeIdDefStmtObj, SeqStmtObj,
-    Stmt, TilePrimitiveCallObj, WhileObj,
+use tvm_tirx::ir::{IntImmObj, PrimExpr, PtrTypeObj};
+use tvm_tirx::ir::prim::RampObj;
+use tvm_tirx::ir::{
+    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
+    SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::tirx::{
+    AttrStmtObj, DeclBufferObj, ScopeIdDefStmtObj, TensorVar, TilePrimitiveCallObj,
+};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
 use super::super::analyze::topology::iter_var_of;
@@ -68,7 +70,7 @@ fn warp_load_plan(dtype: &str, space: MemorySpace) -> AResult<WarpLoadPlan> {
 /// The pointee dtype of an expression's declared type.
 pub(super) fn pointer_pointee_dtype(node: &ObjectRef) -> Option<String> {
     let ty = expr_type(node)?;
-    let pointer = ty.as_node::<PointerTypeObj>()?;
+    let pointer = ty.as_node::<PtrTypeObj>()?;
     prim_dtype(&pointer.element_type).map(dtype_text)
 }
 
@@ -87,7 +89,7 @@ impl<'a> Emitter<'a> {
     // Buffer references.
     // ------------------------------------------------------------------
 
-    pub fn buffer_ref(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn buffer_ref(&mut self, buffer: &TensorVar) -> AResult<String> {
         for (candidate, reference) in self.dynamic_buffers.clone().iter().rev() {
             if same(candidate.as_var(), buffer.as_var()) {
                 self.record_dynamic_buffer_use(reference);
@@ -126,9 +128,9 @@ impl<'a> Emitter<'a> {
         )
     }
 
-    fn ordinary_logical_view_root(&self, buffer: &BufferVar) -> AResult<BufferVar> {
+    fn ordinary_logical_view_root(&self, buffer: &TensorVar) -> AResult<TensorVar> {
         let mut current = buffer.clone();
-        let mut seen: Vec<BufferVar> = Vec::new();
+        let mut seen: Vec<TensorVar> = Vec::new();
         while !seen
             .iter()
             .any(|candidate| same(candidate.as_var(), current.as_var()))
@@ -166,7 +168,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `logical_buffer_name`: one checker identity for a physical view.
-    pub fn logical_buffer_name(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn logical_buffer_name(&mut self, buffer: &TensorVar) -> AResult<String> {
         for (candidate, name) in &self.logical_buffer_name_cache {
             if same(candidate.as_var(), buffer.as_var()) {
                 return Ok(name.clone());
@@ -456,7 +458,7 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_index(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<RustValue> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -474,7 +476,7 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_access_mask(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         base_mask: &str,
     ) -> AResult<String> {
@@ -515,7 +517,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         access_mask: Option<String>,
         register_access_mask: Option<String>,
@@ -715,7 +717,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_contiguous_vector_load(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         result_dtype: &str,
         access_mask: Option<String>,
@@ -831,7 +833,7 @@ impl<'a> Emitter<'a> {
             true
         } else if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
             let value = oref(evaluate.value.clone());
-            if value.as_node::<tvm::ir::CallObj>().is_some() && projected_buffer(&value)?.is_none()
+            if value.as_node::<tvm_tirx::ir::CallObj>().is_some() && projected_buffer(&value)?.is_none()
             {
                 super::control::is_loop_transfer(&value)?
             } else {
@@ -848,7 +850,7 @@ impl<'a> Emitter<'a> {
             found
         } else if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
             self.contains_current_loop_transfer(&attr.body)?
-        } else if let Some(branch) = stmt.as_node::<IfThenElseObj>() {
+        } else if let Some(branch) = stmt.as_node::<IfObj>() {
             self.contains_current_loop_transfer(&branch.then_case)?
                 || match &branch.else_case {
                     Some(else_case) => self.contains_current_loop_transfer(else_case)?,
@@ -983,7 +985,7 @@ impl<'a> Emitter<'a> {
             if value.as_node::<IntImmObj>().is_some() {
                 return Ok(());
             }
-            if value.as_node::<tvm::ir::CallObj>().is_some() {
+            if value.as_node::<tvm_tirx::ir::CallObj>().is_some() {
                 if projected_buffer(&value)?.is_some() {
                     return Ok(());
                 }
@@ -1002,7 +1004,7 @@ impl<'a> Emitter<'a> {
             }
             return Ok(());
         }
-        if let Some(branch) = stmt.as_node::<IfThenElseObj>() {
+        if let Some(branch) = stmt.as_node::<IfObj>() {
             return self.emit_if(stmt, branch, previous_sequence_stmt);
         }
         if let Some(assertion) = stmt.as_node::<AssertStmtObj>() {
@@ -1027,7 +1029,7 @@ impl<'a> Emitter<'a> {
         if let Some(ret) = stmt.as_node::<ReturnObj>() {
             return self.emit_return(ret);
         }
-        if let Some(store) = stmt.as_node::<BufferStoreObj>() {
+        if let Some(store) = stmt.as_node::<TensorStoreObj>() {
             return self.emit_store(&node, store);
         }
         unsupported(format!(
@@ -1133,7 +1135,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_scope_id(&mut self, stmt: &ScopeIdDefStmtObj) -> AResult<()> {
         let definition = &stmt.def;
-        let variables: Vec<tvm::ir::Var> = definition
+        let variables: Vec<tvm_tirx::ir::Var> = definition
             .def_ids
             .iter()
             .map(|variable| variable.as_var().clone())
@@ -1287,7 +1289,7 @@ impl<'a> Emitter<'a> {
     fn emit_if(
         &mut self,
         stmt: &Stmt,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<()> {
         let mut condition = self.emit_expr(&oref(branch.condition.clone()))?;
@@ -1826,7 +1828,7 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    fn emit_store(&mut self, node: &ObjectRef, stmt: &BufferStoreObj) -> AResult<()> {
+    fn emit_store(&mut self, node: &ObjectRef, stmt: &TensorStoreObj) -> AResult<()> {
         self.record_global_write(&stmt.buffer)?;
         let op_id = self.static_op_id(node)?;
         let dtype = buffer_dtype(&stmt.buffer);

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_map
 
+import tvm
 from tests.numsim.support.kernels import (
     block_scaled_fp8_gemm_packed_scales,
     block_scaled_nvfp4_gemm,
@@ -16,23 +17,23 @@ from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm import tirx
 from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    ComposeLayout,
-    R,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tmem_datapath_layout,
-)
+from tvm_tirx import ir
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, R, S, TileLayout
 
 _INVALID_SCALE_ROW_STRIDE = TileLayout(
-    S[(4, 32, 2, 4) : (1 @ TCol, 1 @ TLane, 1 @ TCol, 0 @ TCol)] + R[4 : 32 @ TLane]
+    S[
+        (4, 32, 2, 4) : (
+            1 @ Axis.get("TCol"),
+            1 @ Axis.get("TLane"),
+            1 @ Axis.get("TCol"),
+            0 @ Axis.get("TCol"),
+        )
+    ]
+    + R[4 : 32 @ Axis.get("TLane")]
 )
 _FP8_MMA_128X128 = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_128B_ATOM, (128, 128))
 _FP8_MMA_8X128 = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_128B_ATOM, (8, 128))
@@ -571,9 +572,9 @@ def _duplicate_block_scaled_gemm_node(func):
         if not mode.startswith("v2::tile::variant::BlockScaled"):
             return node
         duplicated = True
-        return tirx.SeqStmt([node, node.replace()])
+        return ir.SeqStmt([node, node.replace()])
 
-    body = structural_map(func.body, (tirx.TilePrimitiveCall, rewrite))
+    body = structural_map(func.body, (tvm.tirx.TilePrimitiveCall, rewrite))
     assert duplicated
     return func.with_body(body)
 
@@ -593,9 +594,9 @@ def _append_accumulating_block_scaled_gemm(func):
             return node
         appended = True
         arguments = (*node.args[:-1], True)
-        return tirx.SeqStmt([node, node.replace(args=arguments)])
+        return ir.SeqStmt([node, node.replace(args=arguments)])
 
-    body = structural_map(func.body, (tirx.TilePrimitiveCall, rewrite))
+    body = structural_map(func.body, (tvm.tirx.TilePrimitiveCall, rewrite))
     assert appended
     return func.with_body(body)
 

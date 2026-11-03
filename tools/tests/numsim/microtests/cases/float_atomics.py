@@ -6,9 +6,9 @@ from typing import Any
 
 import ml_dtypes
 import numpy as np
+import tvm_ffi
 from tests.numsim.microtests.harness import PairedBuffer
 
-import tvm
 from tvm.script import tirx as T
 
 
@@ -293,7 +293,7 @@ def _bf16_buffer(values: np.ndarray) -> PairedBuffer:
 
 
 def _vector_buffer(values: np.ndarray, logical_dtype: str) -> PairedBuffer:
-    data_type = tvm.DataType(logical_dtype)
+    data_type = tvm_ffi.dtype(logical_dtype)
     lanes = int(data_type.lanes)
     base_dtype = np.dtype(logical_dtype[: -len(f"x{lanes}")])
     logical = np.asarray(values, dtype=base_dtype).reshape(-1, lanes)

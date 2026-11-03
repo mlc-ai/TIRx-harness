@@ -1,8 +1,9 @@
 //! Helpers shared by the tile emitters.
 
-use tvm::ir::{IntImm, PrimExpr, PrimType, Var};
-use tvm::prim::Cast;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::Location;
+use tvm_tirx::ir::{IntImm, PrimExpr, PrimType, Var};
+use tvm_tirx::ir::prim::Cast;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::super::analyze::layout::{expr_any, op_binary};
 use super::super::analyze::tile_forms::TileRegion;
@@ -41,12 +42,12 @@ pub(super) type Capture = (Vec<String>, Vec<SplitArgument>);
 
 /// `tirx.IntImm("int64", value)`.
 pub(super) fn int64_imm(value: i64) -> AResult<PrimExpr> {
-    Ok(IntImm::new("int64", value)?.into())
+    Ok(IntImm::new("int64", value).into())
 }
 
 /// `tirx.Var(name, dtype)` as a primitive expression together with its identity.
 pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, PrimExpr)> {
-    let variable = oref(Var::new(name, dtype)?);
+    let variable = oref(Var::new(name, dtype, Location::unknown()));
     let expr = prim(&variable)?;
     Ok((variable, expr))
 }
@@ -54,7 +55,7 @@ pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, PrimExpr)>
 /// `minimum + tirx.Cast(minimum.ty, coordinate)`.
 pub(super) fn offset_index(minimum: &PrimExpr, coordinate: &PrimExpr) -> AResult<PrimExpr> {
     let dtype = dtype_text(minimum.dtype());
-    let cast: PrimExpr = Cast::new(PrimType::new(&dtype)?, coordinate.clone())?.into();
+    let cast: PrimExpr = Cast::new(PrimType::new(&dtype), coordinate.clone(), Location::unknown())?.into();
     op_binary("_OpAdd", expr_any(minimum), expr_any(&cast))
 }
 

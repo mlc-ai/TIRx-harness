@@ -7,8 +7,8 @@ from tvm_ffi import structural_map
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm import tirx
 from tvm.script import tirx as T
+from tvm_tirx import ir
 
 
 def ashift_case(
@@ -39,7 +39,7 @@ def ashift_case(
     )
 
     def replace_mma(node):
-        if not isinstance(node, tirx.Evaluate) or type(node.value).__name__ != "Call":
+        if not isinstance(node, ir.Evaluate) or type(node.value).__name__ != "Call":
             return node
         if not str(node.value.op.name).startswith("tirx.ptx.tcgen05_mma"):
             return node
@@ -54,9 +54,9 @@ def ashift_case(
             T.ptx.pred(T.uint32(0)),
             pred=True,
         )
-        return tirx.SeqStmt([tirx.Evaluate(shifted), node]) if followup else tirx.Evaluate(shifted)
+        return ir.SeqStmt([ir.Evaluate(shifted), node]) if followup else ir.Evaluate(shifted)
 
-    kernel = kernel.with_body(structural_map(kernel.body, (tirx.Evaluate, replace_mma)))
+    kernel = kernel.with_body(structural_map(kernel.body, (ir.Evaluate, replace_mma)))
     a_k = 32 if kind == "f8f6f4" else 8 if kind == "tf32" else 16
     b_k = a_k * (2 if sparse else 1)
     a = (np.arange(4 * m * a_k).reshape(4, m, a_k) % 113 - 56).astype(np.float32)

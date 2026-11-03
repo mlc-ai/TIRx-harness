@@ -3,10 +3,10 @@
 //! maps; the engine owns instruction partitioning, descriptor semantics,
 //! effects, numeric execution, and completion.
 
-use tvm::ir::PrimExpr;
-use tvm::tirx::ComposeLayout;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCast};
+use tvm_tirx::ir::PrimExpr;
+use tvm_tirx::tirx::ComposeLayout;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
 
 use super::super::analyze::layout::{expr_any, int_any, op_binary, tile_layout_is_trivial};
 use super::super::analyze::shapes::structural_equal;

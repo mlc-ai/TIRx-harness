@@ -27,8 +27,9 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 _BULK_G2S_CTA = "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes"
 _BULK_G2S_CTA_IGNORE_OOB = f"{_BULK_G2S_CTA}.ignore_oob"

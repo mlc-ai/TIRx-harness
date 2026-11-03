@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from tests.numsim.support.execution import run_checked
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 
 def ws_column_mask(banks, columns=64):

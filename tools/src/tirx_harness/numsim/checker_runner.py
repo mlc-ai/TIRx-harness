@@ -13,8 +13,9 @@ from typing import Any, Literal
 
 import numpy as np
 
-from tvm import tirx
+import tvm
 from tvm.ir.type import PointerType
+from tvm_tirx import ir, tirx
 
 from .bindings import PreparedBindings, prepare_bindings
 from .errors import NumSimExecutionError, UnsupportedTIRxError
@@ -230,7 +231,7 @@ def _concretize_checker_shapes(
     buffers = {
         str(parameter.name): parameter
         for parameter in func.params
-        if tirx.is_buffer_var(parameter)
+        if tirx.is_tensor_var(parameter)
         and str(parameter.name) in inputs
         and any(isinstance(extent, tirx.Var) for extent in parameter.ty.shape)
     }
@@ -252,10 +253,10 @@ def _concretize_checker_shapes(
         # Keep non-variable dimensions and all non-shape metadata intact. TVM's
         # specializer checks shared dimensions and remaps layouts with the shape.
         dimensions = [
-            tirx.IntImm(str(extent.ty.dtype), size) if isinstance(extent, tirx.Var) else extent
+            ir.IntImm(str(extent.ty.dtype), size) if isinstance(extent, tirx.Var) else extent
             for extent, size in zip(ty.shape, shape, strict=True)
         ]
-        constraints[parameter] = tirx.decl_buffer(
+        constraints[parameter] = tvm.tirx.decl_buffer(
             dimensions,
             str(ty.dtype),
             strides=list(ty.strides),
@@ -269,7 +270,7 @@ def _concretize_checker_shapes(
     scalar_dtypes = {
         str(parameter.name): str(parameter.ty.dtype)
         for parameter in func.params
-        if not tirx.is_buffer_var(parameter)
+        if not tirx.is_tensor_var(parameter)
         and not isinstance(parameter.ty, PointerType)
         and any(parameter.same_as(extent) for buf in buffers.values() for extent in buf.ty.shape)
         and str(parameter.name) in inputs
@@ -307,7 +308,7 @@ def _concretize_checker_launch(
     scalar_parameters = {
         str(parameter.name): parameter
         for parameter in func.params
-        if not tirx.is_buffer_var(parameter) and not isinstance(parameter.ty, PointerType)
+        if not tirx.is_tensor_var(parameter) and not isinstance(parameter.ty, PointerType)
     }
     provided: dict[Any, int | float | bool] = {}
     for name, parameter in scalar_parameters.items():

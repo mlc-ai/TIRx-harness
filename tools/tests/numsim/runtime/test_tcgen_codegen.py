@@ -14,7 +14,7 @@ from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import DecodedPtxCall, decode_ptx_call
 from tvm.script import tirx as T
-from tvm.tirx.lang.pipeline import TCGen05Bar
+from tvm_tirx.backend.cuda.lang.pipeline import TCGen05Bar
 
 
 @T.prim_func

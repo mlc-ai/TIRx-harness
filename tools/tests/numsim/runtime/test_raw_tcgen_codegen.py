@@ -19,22 +19,22 @@ from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TCol, TileLayout, TLane, tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 TCGEN_DESCRIPTOR_LAYOUT = "<artifact-tcgen-descriptor-layout>"
 
-_TMEM_D_4 = TileLayout(S[(128, 4) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_8 = TileLayout(S[(128, 8) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_32 = TileLayout(S[(128, 32) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_104 = TileLayout(S[(128, 104) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ TLane, 1 @ TCol)])
-_TMEM_D_512 = TileLayout(S[(128, 512) : (1 @ TLane, 1 @ TCol)])
+_TMEM_D_4 = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_8 = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_32 = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_104 = TileLayout(S[(128, 104) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_D_512 = TileLayout(S[(128, 512) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _BF16_SMEM_64B = mma_shared_layout("bfloat16", SwizzleMode.SWIZZLE_64B_ATOM, (64, 64))
-_TMEM_NVF4_24 = TileLayout(S[(128, 24) : (1 @ TLane, 1 @ TCol)])
+_TMEM_NVF4_24 = TileLayout(S[(128, 24) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _PACKED_FP4_SMEM_128X64 = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (128, 64))
 _PACKED_FP4_SMEM_8X64 = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (8, 64))
 

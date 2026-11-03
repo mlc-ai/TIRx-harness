@@ -6,7 +6,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, Emitter, RustValue};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 pub const TCGEN_CONTROL_CALLS: [&str; 12] = [
     "tirx.ptx.tcgen05_alloc",

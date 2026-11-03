@@ -6,7 +6,7 @@ import pytest
 
 import tirx_kernels.tirx_lite as txl
 from tirx_harness import synccheck
-from tvm.backend.cuda.cpp.descriptors import encode_instr_descriptor_dense_uint32
+from tvm_tirx.backend.cuda.cpp.descriptors import encode_instr_descriptor_dense_uint32
 
 
 @txl.kernel(warps=1, arch="sm_100a", grid=1)

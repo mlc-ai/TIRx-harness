@@ -8,16 +8,9 @@ import numpy as np
 
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    R,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tcgen05_atom_layout,
-    tmem_datapath_layout,
-    wg_local_layout,
-)
+from tvm.tirx.layout import tcgen05_atom_layout, wg_local_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
 
 _CP_SHAPE_ROUTES = (
     ("4x256b", "", 4, 32),
@@ -571,7 +564,10 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
 def _make_tile_cp_kernel(dtype: str, bits: int, cta_group: int):
     elements = 128 // bits
     source_layout = TileLayout(S[(32, elements) : (elements, 1)])
-    destination_layout = TileLayout(S[(32, elements) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
+    destination_layout = TileLayout(
+        S[(32, elements) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+        + R[4 : 32 @ Axis.get("TLane")]
+    )
 
     @T.prim_func
     def kernel(

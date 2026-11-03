@@ -7,8 +7,8 @@
 //! receives the decoded operands plus the slot facts of that modifier
 //! combination. Instruction emitters consume the resulting `DecodedPtx`.
 
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, Any, Array, Map, String as FfiString};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, Any, Array, Map, String as FfiString};
 
 use crate::analyze::util::{dtype_of, ffi_error, unmodeled, unsupported, AResult, Failure, Json};
 
@@ -320,8 +320,8 @@ fn int_field(entry: &Json, key: &str) -> AResult<i64> {
 }
 
 fn argument_at(node: &ObjectRef, index: i64) -> AResult<ObjectRef> {
-    use tvm::tvm_ffi::ObjectRefCore;
-    let Some(call) = node.as_node::<tvm::ir::CallObj>() else {
+    use tvm_tirx::tvm_ffi::ObjectRefCore;
+    let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
         return Err(Failure::Ffi(ffi_error("PTX payload names a non-call node")));
     };
     let Ok(position) = usize::try_from(index) else {

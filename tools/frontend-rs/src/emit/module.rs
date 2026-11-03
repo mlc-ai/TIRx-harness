@@ -1,7 +1,7 @@
 //! `artifact_template.emit_rust_module`: the generated module around the
 //! kernel bodies (host bindings, physical allocation, launch phases).
 
-use tvm::tirx::BufferVar;
+use tvm_tirx::tirx::TensorVar;
 
 use super::super::analyze::cuda_arch::cuda_arch;
 use super::super::analyze::frontend::KernelPlan;
@@ -214,7 +214,7 @@ struct KernelItem {
 }
 
 impl<'a> Emitter<'a> {
-    fn dynamic_layout_view_byte_len(&self, buffer: &BufferVar) -> AResult<i64> {
+    fn dynamic_layout_view_byte_len(&self, buffer: &TensorVar) -> AResult<i64> {
         let plan = self.memory_plan.resolve(buffer)?;
         let name = plan.name.clone();
         if plan.layout.dynamic_layout_elem_offset.is_none() {
@@ -268,7 +268,7 @@ impl<'a> Emitter<'a> {
         setup: &mut Vec<String>,
         host_variables: &Variables,
         name: &str,
-        expression: &tvm::ir::PrimExpr,
+        expression: &tvm_tirx::ir::PrimExpr,
         field: &str,
         target_type: &str,
     ) -> AResult<()> {
@@ -479,7 +479,7 @@ fn buffer_struct_fields(emitter: &Emitter<'_>) -> Vec<(String, String)> {
 }
 
 /// The buffer-struct field of a shape variable.
-fn shape_field<'e>(emitter: &'e Emitter<'_>, variable: &tvm::ir::Var) -> Option<&'e str> {
+fn shape_field<'e>(emitter: &'e Emitter<'_>, variable: &tvm_tirx::ir::Var) -> Option<&'e str> {
     emitter
         .shape_vars
         .iter()
@@ -969,7 +969,7 @@ fn global_buffer_view(
 fn shared_buffer_view(
     emitter: &Emitter<'_>,
     backings: &BackingLayout,
-    buffer: &BufferVar,
+    buffer: &TensorVar,
     code: &BufferCode,
 ) -> AResult<String> {
     let plan = emitter.plan_of(code);

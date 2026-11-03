@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import tvm_ffi
 from ml_dtypes import bfloat16
 
-import tvm
 from tests.numsim.support.runtime_domains import (
     CUDA_ATOMIC_ADD_PACKED_GLOBAL_DTYPES,
     CUDA_ATOMIC_ADD_PACKED_SHARED_DTYPES,
@@ -103,7 +103,7 @@ atomic_full_domain = _make_atomic_full_domain()
 
 
 def _packed_float_array(dtype: str, value: int) -> np.ndarray:
-    data_type = tvm.DataType(dtype)
+    data_type = tvm_ffi.dtype(dtype)
     logical = np.full(
         (1, data_type.lanes),
         value,
@@ -115,7 +115,7 @@ def _packed_float_array(dtype: str, value: int) -> np.ndarray:
 
 
 def _physical_array(dtype: str, value: int) -> np.ndarray:
-    data_type = tvm.DataType(dtype)
+    data_type = tvm_ffi.dtype(dtype)
     if data_type.lanes == 1:
         return np.full(1, value, dtype=_SCALAR_NUMPY_DTYPES[dtype])
     if dtype in _PACKED_FLOAT_BASE:

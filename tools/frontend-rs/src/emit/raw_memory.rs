@@ -12,9 +12,9 @@ use crate::emit::memory_support::{v2_memory_space_rust, v2_memory_type_rust_ptx}
 use crate::emit::{abi, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, expr_rust_type, scope_marker};
-use tvm::ir::{CallObj, PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 pub const LDMATRIX_CALLS: [&str; 4] = [
     "tirx.ptx.ldmatrix",

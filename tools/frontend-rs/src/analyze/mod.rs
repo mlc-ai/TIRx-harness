@@ -2,10 +2,10 @@
 
 use std::cell::RefCell;
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, Var};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::Map;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, Var};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::Map;
 
 pub mod buffers;
 pub mod cuda_arch;
@@ -40,7 +40,7 @@ impl<'a> Ctx<'a> {
     pub fn new(schema: &'a Schema) -> AResult<Self> {
         Ok(Self {
             schema,
-            analyzer: Analyzer::new()?,
+            analyzer: Analyzer::new(),
             layouts: RefCell::new(IdMap::default()),
             decoding: crate::decode::Cache::default(),
             tcgen_ldst_validations: RefCell::new(Vec::new()),
@@ -49,7 +49,7 @@ impl<'a> Ctx<'a> {
 
     pub fn inspect_layout(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         bindings: &Map<Var, Expr>,
     ) -> AResult<LayoutInfo> {
         let key = buffer_ref(buffer);
@@ -64,16 +64,16 @@ impl<'a> Ctx<'a> {
 
 /// Operands of a bound binary expression node.
 pub fn topology_operands(
-    node: &tvm::tvm_ffi::object::ObjectRef,
+    node: &tvm_tirx::tvm_ffi::object::ObjectRef,
 ) -> Option<(
-    tvm::tvm_ffi::object::ObjectRef,
-    tvm::tvm_ffi::object::ObjectRef,
+    tvm_tirx::tvm_ffi::object::ObjectRef,
+    tvm_tirx::tvm_ffi::object::ObjectRef,
 )> {
-    use tvm::prim::{
-        AddObj, AndObj, DivObj, EQObj, FloorDivObj, FloorModObj, GEObj, GTObj, LEObj, LTObj,
-        MaxObj, MinObj, ModObj, MulObj, NEObj, OrObj, SubObj,
+    use tvm_tirx::ir::prim::{
+        AddObj, AndObj, DivObj, EQObj, FloorDivObj, FloorModObj, GEObj, GTObj, LEObj, LTObj, MaxObj,
+        MinObj, ModObj, MulObj, NEObj, OrObj, SubObj,
     };
-    use tvm::tvm_ffi::ObjectRefCore;
+    use tvm_tirx::tvm_ffi::ObjectRefCore;
     macro_rules! binary {
         ($($obj:ty),*) => {
             $(if let Some(binary) = node.as_node::<$obj>() {

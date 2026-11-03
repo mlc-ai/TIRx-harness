@@ -6,9 +6,9 @@ from tvm_ffi import structural_map
 
 from tests.numsim.microtests.cases.tcgen05_lifecycle_ldst import tcgen05_cp_warpx4
 from tirx_harness import numsim, racecheck, synccheck
-from tvm import tirx
-from tvm.ir import Call
 from tvm.script import tirx as T
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Call
 
 
 @T.prim_func
@@ -18,7 +18,7 @@ def _publish_shared():
 
 def descriptor_choice_case(form):
     kernel = tcgen05_cp_warpx4
-    source = next(parameter for parameter in kernel.params if tirx.is_buffer_var(parameter))
+    source = next(parameter for parameter in kernel.params if tirx.is_tensor_var(parameter))
     condition = source[0, 0] != tirx.const(0, "uint32")
 
     def replace(call):
@@ -45,11 +45,11 @@ def descriptor_choice_case(form):
     def publish(stmt):
         if str(stmt.value.op.name) == "tirx.ptx.fence_mbarrier_init":
             # This fixture adds checker coverage to the GPU-only CP probe.
-            return tirx.SeqStmt([_publish_shared.body, stmt])
+            return ir.SeqStmt([_publish_shared.body, stmt])
         return stmt
 
     body = structural_map(kernel.body, (Call, replace))
-    return kernel.with_body(structural_map(body, (tirx.Evaluate, publish)))
+    return kernel.with_body(structural_map(body, (ir.Evaluate, publish)))
 
 
 @pytest.mark.parametrize("form", ["select", "compose"])

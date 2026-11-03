@@ -7,8 +7,9 @@ import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 
 @T.prim_func

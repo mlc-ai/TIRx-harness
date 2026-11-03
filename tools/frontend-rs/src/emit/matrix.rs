@@ -14,10 +14,10 @@ use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, v2_memory_type_rust, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, VarObj};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, VarObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 /// The engine functions (below `v2::`) the MMA lowerings call.
 pub const MMA_SYNC: &str = "matrix::mma_sync";
@@ -895,10 +895,10 @@ impl<'a> Emitter<'a> {
     }
 
     /// `kernel.emit_buffer_address(buffer, zeros)`.
-    fn matrix_buffer_base_address(&mut self, buffer: &BufferVar) -> AResult<String> {
+    fn matrix_buffer_base_address(&mut self, buffer: &TensorVar) -> AResult<String> {
         let mut zeros: Vec<PrimExpr> = Vec::new();
         for _ in buffer.buffer_type().shape.iter() {
-            zeros.push(IntImm::new("int32", 0)?.into());
+            zeros.push(IntImm::new("int32", 0).into());
         }
         Ok(self.emit_buffer_address(buffer, &zeros)?.code)
     }

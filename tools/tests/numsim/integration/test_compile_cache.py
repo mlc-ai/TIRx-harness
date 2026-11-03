@@ -19,8 +19,8 @@ from tirx_harness.numsim.transpiler.frontend import (
 )
 from tirx_harness.numsim.transpiler.native_frontend import post_order_nodes
 from tirx_harness.numsim.transpiler.source_map import flatten_source_span
-from tvm import tirx
-from tvm.ir import load_json, save_json
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import load_json, save_json
 
 _PLAIN = {"analysis_capable": False, "analysis_checker": None}
 
@@ -55,7 +55,7 @@ def test_source_nodes_preserve_distinct_identities_and_shared_children():
     x = tirx.Var("x", "int32")
     shared = x + 1
     distinct = x + 1
-    body = tirx.SeqStmt([tirx.Evaluate(shared), tirx.Evaluate(shared + distinct)])
+    body = ir.SeqStmt([ir.Evaluate(shared), ir.Evaluate(shared + distinct)])
     nodes = post_order_nodes(body)
     ids = [Object.__hash__(node) for node in nodes]
     assert len(ids) == len(set(ids))

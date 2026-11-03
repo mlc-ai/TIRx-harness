@@ -5,11 +5,12 @@ import numpy as np
 from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout, tid_in_wg, wg_local_layout
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 
 def _transposed_warpgroup_layout() -> TileLayout:
-    return TileLayout(S[(32, 4, 2) : (1 @ tid_in_wg, 32 @ tid_in_wg, 1)])
+    return TileLayout(S[(32, 4, 2) : (1 @ Axis.get("tid_in_wg"), 32 @ Axis.get("tid_in_wg"), 1)])
 
 
 @T.prim_func

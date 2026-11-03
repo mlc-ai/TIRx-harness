@@ -6,8 +6,9 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 _FLASHKDA_ACQUIRE_SOURCE = r"""__device__ __forceinline__ void flashkda_tensormap_acquire(const void *tmap_ptr) {
     asm volatile(

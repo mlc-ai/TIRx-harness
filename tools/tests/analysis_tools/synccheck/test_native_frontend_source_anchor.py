@@ -14,11 +14,12 @@ import pathlib
 import numpy as np
 import pytest
 
-import tvm.tirx as tirx
+import tvm_tirx.tirx as tirx
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tvm.script import tirx as T
-from tvm.tirx.layout import S, TileLayout, laneid
+from tvm_tirx import ir
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _SOURCE_LINES = pathlib.Path(__file__).read_text().splitlines()
 
@@ -39,7 +40,7 @@ def _line_containing(needle: str) -> int:
 
 # The layout on this buffer is what NumSim rejects; keep the alloc on one line
 # so the expected anchor line is unambiguous.
-_OFFENDING_LAYOUT = TileLayout(S[(1, 1) : (1, 1)] + 1 @ laneid)
+_OFFENDING_LAYOUT = TileLayout(S[(1, 1) : (1, 1)] + 1 @ Axis.get("laneid"))
 
 
 @T.prim_func
@@ -58,8 +59,8 @@ _ALLOC_LINE = _line_containing('local = T.alloc_buffer((1, 1), "int32"')
 def _kernel_with_rebuilt_root():
     """Same PrimFunc, root statement recomposed the way a caller's pass would."""
 
-    rebuilt = tirx.SeqStmt(
-        [unsupported_local_layout.body, tirx.Evaluate(tirx.const(0, "int32"))],
+    rebuilt = ir.SeqStmt(
+        [unsupported_local_layout.body, ir.Evaluate(tirx.const(0, "int32"))],
         span=None,
     )
     return unsupported_local_layout.with_body(rebuilt, span=None)

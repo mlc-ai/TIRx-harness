@@ -2,10 +2,10 @@
 
 use std::cell::RefCell;
 
-use tvm::ir::{CallObj, Var};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, Var};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use crate::analyze::buffers::call_op_name;
 pub mod ptx;
@@ -132,12 +132,12 @@ pub struct Cache(RefCell<IdMap<PtxDecode>>);
 impl Cache {
     /// The Python decode outcome of one `tirx.ptx.*` call node (`None` for
     /// any other node); decoded on first use and kept for this analysis.
-    pub fn ptx_decode(&self, node: &tvm::tvm_ffi::object::ObjectRef) -> AResult<Option<PtxDecode>> {
-        use tvm::tvm_ffi::ObjectRefCore;
+    pub fn ptx_decode(&self, node: &tvm_tirx::tvm_ffi::object::ObjectRef) -> AResult<Option<PtxDecode>> {
+        use tvm_tirx::tvm_ffi::ObjectRefCore;
         if let Some(decode) = self.0.borrow().get(node) {
             return Ok(Some(decode.clone()));
         }
-        let Some(call) = node.as_node::<tvm::ir::CallObj>() else {
+        let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
             return Ok(None);
         };
         let is_table_call = call_op_name(call)?
@@ -151,7 +151,7 @@ impl Cache {
     }
 
     /// The decoded call, or Python's decode rejection.
-    pub fn ptx_decoded(&self, node: &tvm::tvm_ffi::object::ObjectRef) -> AResult<DecodedPtx> {
+    pub fn ptx_decoded(&self, node: &tvm_tirx::tvm_ffi::object::ObjectRef) -> AResult<DecodedPtx> {
         match self.ptx_decode(node)? {
             Some(decode) => decode.decoded().cloned(),
             None => Err(Failure::Ffi(ffi_error("PTX call has no decode payload"))),
@@ -160,7 +160,7 @@ impl Cache {
 }
 
 /// The typed buffer behind `tirx.buffer_data`.
-pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<BufferVar>> {
+pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<TensorVar>> {
     let Some(call) = node.as_node::<CallObj>() else {
         return Ok(None);
     };

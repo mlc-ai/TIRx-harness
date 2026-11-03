@@ -6,7 +6,7 @@ import pytest
 
 from tirx_harness import numsim
 from tvm.script import tirx as T
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_LAYOUT = ComposeLayout(0, 0, 0, TileLayout(S[(2, 2) : (4, 1)]))
 

@@ -19,10 +19,10 @@ use crate::emit::tcgen_descriptor::{
 use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::MEM_ST;
 use crate::tvm_compat::int_value;
-use tvm::ir::{IntImmObj, PrimExpr, TensorLoadObj};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{IntImmObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 #[derive(Clone, Default)]
 pub struct State {
@@ -1299,7 +1299,7 @@ impl<'a> Emitter<'a> {
         let mut logical_name: Option<String> = None;
         let mut has_dynamic_address = self.tmem.dynamic_lifecycle;
         let mut backing_indices: Vec<usize> = Vec::new();
-        let candidates: Vec<(BufferVar, Option<usize>, bool)> = self
+        let candidates: Vec<(TensorVar, Option<usize>, bool)> = self
             .buffers
             .iter()
             .filter_map(|(buffer, code)| {
@@ -1359,7 +1359,7 @@ impl<'a> Emitter<'a> {
     /// Persistent candidates share one descriptor
     /// domain field per storage-index set.
     fn raw_tcgen_shared_candidates(&mut self) -> AResult<String> {
-        let mut selected: Vec<((usize, i64, i64), BufferVar)> = Vec::new();
+        let mut selected: Vec<((usize, i64, i64), TensorVar)> = Vec::new();
         for (buffer, code) in &self.buffers {
             let plan = self.plan_of(code);
             if plan.space != MemorySpace::Shared || plan.dynamic_data_var.is_some() {

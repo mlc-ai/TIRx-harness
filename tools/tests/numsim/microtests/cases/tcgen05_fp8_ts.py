@@ -5,7 +5,7 @@ from tests.numsim.microtests.cases.tcgen05_mma_forms import _F8_BYTES_B16_SMEM_L
 
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm_tirx.tirx.layout import S, TileLayout
 
 
 def fp8_ts_kernel(m=64, d_f16=False, publish=True):

@@ -5,11 +5,11 @@ import numpy as np
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM_8 = TileLayout(S[(128, 8) : (1 @ TLane, 1 @ TCol)])
-_TMEM_16 = TileLayout(S[(128, 16) : (1 @ TLane, 1 @ TCol)])
-_TMEM_32 = TileLayout(S[(128, 32) : (1 @ TLane, 1 @ TCol)])
+_TMEM_8 = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_TMEM_32 = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.prim_func

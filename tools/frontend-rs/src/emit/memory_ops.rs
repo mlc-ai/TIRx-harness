@@ -16,10 +16,10 @@ use crate::tables::is_integer_dtype;
 use crate::tables::{
     dtype_by_rust_type, dtype_byte_len, expr_rust_type, json_string, v2_memory_type_rust, MEM_LD,
 };
-use tvm::ir::CallObj;
-use tvm::ir::StringImmObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 /// The engine functions (below `v2::`) this family's lowerings call.
 pub const CP_ASYNC: &str = "async_copy::cp_async";

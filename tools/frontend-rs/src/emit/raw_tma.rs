@@ -1,6 +1,6 @@
 //! Validation and emission of the raw_tma instruction family.
 
-use tvm::tirx::TensorMapTypeObj;
+use tvm_tirx::tirx::TensorMapTypeObj;
 
 pub mod host_prelude;
 
@@ -20,11 +20,11 @@ use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, ControlProvenance, Emitter, RustValue, Uniformity, Variables};
 use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, phase_binding_name};
-use tvm::ir::{Call, CallObj, Expr, Op, PointerTypeObj, PrimType, Var};
-use tvm::prim::SelectObj;
-use tvm::tirx::{BufferVar, PrimFunc};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::{Call, CallObj, Expr, Op, PrimType, PtrTypeObj, Var};
+use tvm_tirx::ir::prim::SelectObj;
+use tvm_tirx::tirx::{Function, TensorVar};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString};
 
 pub struct TensorMapCode {
     pub variable: Var,
@@ -391,7 +391,7 @@ fn is_s2g(name: &str) -> bool {
 fn is_typed_tensor_map_var(variable: &Var) -> bool {
     variable
         .ty
-        .as_node::<PointerTypeObj>()
+        .as_node::<PtrTypeObj>()
         .is_some_and(|pointer| pointer.element_type.as_node::<TensorMapTypeObj>().is_some())
 }
 
@@ -1221,7 +1221,7 @@ const EXPRESSION_FIELDS: [&str; 5] = [
 ];
 
 /// Read and validate metadata produced by native host-prelude normalization.
-pub fn implicit_tensor_map_metadata(func: &PrimFunc) -> AResult<Vec<Json>> {
+pub fn implicit_tensor_map_metadata(func: &Function) -> AResult<Vec<Json>> {
     let Some(attribute) = func
         .attrs
         .dict
@@ -1338,12 +1338,12 @@ pub fn tensor_map_specs(
 }
 
 /// The scalar PrimFunc parameters (`not is_buffer_var and not PointerType`).
-pub fn scalar_parameters(func: &PrimFunc) -> Vec<Var> {
+pub fn scalar_parameters(func: &Function) -> Vec<Var> {
     func.params
         .iter()
         .filter(|parameter| {
-            BufferVar::try_from(parameter).is_err()
-                && parameter.ty.as_node::<PointerTypeObj>().is_none()
+            TensorVar::try_from(parameter).is_err()
+                && parameter.ty.as_node::<PtrTypeObj>().is_none()
         })
         .collect()
 }
@@ -1351,7 +1351,7 @@ pub fn scalar_parameters(func: &PrimFunc) -> Vec<Var> {
 /// Deserialize an integer expression and rebind its parameters. The caller
 /// applies `validate_integer_expression` with its own variable policy.
 pub fn deserialize_integer_expr(
-    func: &PrimFunc,
+    func: &Function,
     payload: &Json,
     field: &str,
 ) -> AResult<ObjectRef> {
@@ -1369,8 +1369,8 @@ pub fn deserialize_integer_expr(
             }
         ));
     };
-    let loaded: Result<tvm::tvm_ffi::Any, _> =
-        tvm::tvm_ffi::cached_global_func!("ffi.FromJSONGraphString")
+    let loaded: Result<tvm_tirx::tvm_ffi::Any, _> =
+        tvm_tirx::tvm_ffi::cached_global_func!("ffi.FromJSONGraphString")
             .call_tuple((FfiString::from(text.as_str()),));
     let expression = match loaded.and_then(ObjectRef::try_from) {
         Ok(expression) => expression,
@@ -1381,7 +1381,7 @@ pub fn deserialize_integer_expr(
         }
     };
     let scalars = scalar_parameters(func);
-    let mut replacements: Vec<(Var, tvm::ir::Expr)> = Vec::new();
+    let mut replacements: Vec<(Var, tvm_tirx::ir::Expr)> = Vec::new();
     for node in crate::post_order_nodes(expression.clone())?.iter() {
         let Some(variable) = as_var(&node) else {
             continue;
@@ -1508,7 +1508,7 @@ pub(super) fn reinterpret(dtype: &str, value: &ObjectRef) -> AResult<ObjectRef> 
         return Ok(value.clone());
     }
     let call = Call::new(
-        PrimType::new(dtype)?,
+        PrimType::new(dtype),
         Op::get("tirx.reinterpret")?,
         vec![Expr::try_from(Any::from(value.clone()))?],
     );
@@ -2905,7 +2905,7 @@ fn is_tensor_map_parameter(node: &ObjectRef, params: Option<&[Var]>) -> bool {
     let Some(variable) = as_var(node) else {
         return false;
     };
-    let Some(pointer) = variable.ty.as_node::<PointerTypeObj>() else {
+    let Some(pointer) = variable.ty.as_node::<PtrTypeObj>() else {
         return false;
     };
     if pointer.element_type.as_node::<TensorMapTypeObj>().is_none() {

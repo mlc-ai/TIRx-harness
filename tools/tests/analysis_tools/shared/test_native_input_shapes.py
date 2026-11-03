@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tirx_kernels.tirx_lite as txl
-from tvm import tirx
-from tvm.script import tirx as T
 
+import tirx_kernels.tirx_lite as txl
 from tirx_harness.numsim import checkers
 from tirx_harness.numsim.errors import NumSimExecutionError
+from tvm.script import tirx as T
+from tvm_tirx import tirx
 
 
 def symbolic_state(state_in, state_out):

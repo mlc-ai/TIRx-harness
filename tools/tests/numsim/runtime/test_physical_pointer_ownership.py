@@ -16,8 +16,8 @@ import numpy as np
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.lang.clc import query_cancel_first_ctaid_x
 
 _PREFETCH_L2_SOURCE = r"""
 __forceinline__ __device__ void tirx_prefetch_l2(const void* p) {

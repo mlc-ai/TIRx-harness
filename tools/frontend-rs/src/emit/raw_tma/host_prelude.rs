@@ -1,6 +1,7 @@
 //! Promote canonical host-created TensorMaps to implicit device parameters.
 
-use tvm::tirx::TensorMapTypeObj;
+use tvm_tirx::ir::Location;
+use tvm_tirx::tirx::TensorMapTypeObj;
 
 use std::collections::HashSet;
 
@@ -9,21 +10,22 @@ use crate::analyze::util::{
     as_buffer, dtype_of, dtype_text, ffi_text, int_imm, kind, oref, same, unsupported, AResult, Json,
 };
 use crate::decode::projected_buffer;
-use tvm::analysis::Analyzer;
-use tvm::ir::StringImmObj;
-use tvm::ir::{Call, CallObj, DictAttrs, Expr, IntImm, Op, PointerTypeObj, PrimExpr, StringImm, Var};
-use tvm::prim::Add;
-use tvm::tirx::{
-    AssertStmtObj, AttrStmtObj, BindObj, DeclBufferObj, EvaluateObj, PrimFunc, SeqStmtObj, Stmt,
-    TensorMapEncodeTiledAttrObj,
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{
+    Call, CallObj, DictAttrs, Expr, IntImm, Op, PrimExpr, PtrTypeObj, StringImm, Var,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, Map, ObjectRefCast, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::prim::Add;
+use tvm_tirx::backend::cuda::TensorMapEncodeTiledAttrObj;
+use tvm_tirx::ir::{AssertStmtObj, BindObj, EvaluateObj, SeqStmtObj, Stmt};
+use tvm_tirx::tirx::{AttrStmtObj, DeclBufferObj, Function};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCast, ObjectRefCore, String as FfiString};
 
 use super::{implicit_tensor_map_metadata, scalar_parameters, IMPLICIT_TENSOR_MAP_ATTR};
 
 struct Context<'a> {
-    func: &'a PrimFunc,
+    func: &'a Function,
     analyzer: Analyzer,
     scalars: Vec<Var>,
     tvm_version: FfiString,
@@ -103,7 +105,7 @@ impl Context<'_> {
         if !bind
             .var
             .ty
-            .as_node::<PointerTypeObj>()
+            .as_node::<PtrTypeObj>()
             .is_some_and(|pointer| pointer.element_type.as_node::<TensorMapTypeObj>().is_some())
         {
             return unsupported(
@@ -144,11 +146,11 @@ impl Context<'_> {
         let byte_offset = match offsets.next() {
             Some(mut value) => {
                 for offset in offsets {
-                    value = Add::new(value, offset)?.into();
+                    value = Add::new(value, offset, Location::unknown())?.into();
                 }
                 oref(value)
             }
-            None => oref(IntImm::new("int64", 0)?),
+            None => oref(IntImm::new("int64", 0)),
         };
         let serialized = self.serialize_integer(&byte_offset, "global address byte offset")?;
         if self
@@ -302,10 +304,10 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         // Both public spellings use the same descriptor validation and metadata.
         // The typed op stores dtype/rank/modes in attrs instead of packed operands.
         let mut args: Vec<Expr> = vec![
-            StringImm::new("runtime.cuTensorMapEncodeTiled").into(),
+            StringImm::new("runtime.cuTensorMapEncodeTiled", Location::unknown()).into(),
             call.args.get(0).expect("descriptor"),
-            StringImm::new(&dtype_text(attrs.descriptor_dtype)).into(),
-            IntImm::new("int32", attrs.rank)?.into(),
+            StringImm::new(&dtype_text(attrs.descriptor_dtype), Location::unknown()).into(),
+            IntImm::new("int32", attrs.rank).into(),
         ];
         args.extend(call.args.iter().skip(1));
         for mode in [
@@ -315,7 +317,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
             attrs.oob_fill,
             attrs.force_cu_dtype,
         ] {
-            args.push(IntImm::new("int32", mode)?.into());
+            args.push(IntImm::new("int32", mode).into());
         }
         return Ok(Some(Call::with_metadata(
             call.ty.clone(),
@@ -341,7 +343,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
     }
 }
 
-pub fn normalize(func: PrimFunc, tvm_version: FfiString) -> AResult<PrimFunc> {
+pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
     if func
         .attrs
         .dict
@@ -374,7 +376,7 @@ pub fn normalize(func: PrimFunc, tvm_version: FfiString) -> AResult<PrimFunc> {
     }
     let context = Context {
         func: &func,
-        analyzer: Analyzer::new()?,
+        analyzer: Analyzer::new(),
         scalars: scalar_parameters(&func),
         tvm_version,
     };
@@ -544,7 +546,7 @@ pub fn normalize(func: PrimFunc, tvm_version: FfiString) -> AResult<PrimFunc> {
         FfiString::from(IMPLICIT_TENSOR_MAP_ATTR),
         FfiString::from(Json::Array(metadata).to_string()).into(),
     ));
-    Ok(PrimFunc::with_metadata(
+    Ok(Function::with_metadata(
         params,
         entry.try_cast::<Stmt>()?,
         func.ret_type.clone(),

@@ -2,11 +2,12 @@
 
 use crate::decode::projected_buffer;
 use std::cell::RefCell;
-use tvm::ir::{CallObj, Expr, Op};
-use tvm::tirx::{BufferVar, DeclBufferObj, Stmt};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::{CallObj, Expr, Op};
+use tvm_tirx::ir::Stmt;
+use tvm_tirx::tirx::{DeclBufferObj, TensorVar};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
-use tvm::tvm_ffi::{ObjectRefCast, ObjectRefCore};
+use tvm_tirx::tvm_ffi::{ObjectRefCast, ObjectRefCore};
 
 use super::util::{as_buffer, buffer_ref, ffi_text, oref, same, AResult, IdMap};
 
@@ -20,7 +21,7 @@ pub fn call_op_name(call: &CallObj) -> AResult<Option<String>> {
 
 pub struct BufferBindings {
     /// `(buffer, data)` in declaration order.
-    pub declarations: Vec<(BufferVar, Expr)>,
+    pub declarations: Vec<(TensorVar, Expr)>,
     storage_keys: RefCell<IdMap<ObjectRef>>,
 }
 
@@ -39,7 +40,7 @@ impl BufferBindings {
     }
 
     /// The last declaration wins.
-    pub fn declared_data(&self, buffer: &BufferVar) -> Option<Expr> {
+    pub fn declared_data(&self, buffer: &TensorVar) -> Option<Expr> {
         self.declarations
             .iter()
             .rev()
@@ -48,7 +49,7 @@ impl BufferBindings {
     }
 
     /// Typed allocation root (a buffer `Var`) or external pointer expression.
-    pub fn storage_key(&self, buffer: &BufferVar) -> AResult<ObjectRef> {
+    pub fn storage_key(&self, buffer: &TensorVar) -> AResult<ObjectRef> {
         let mut current = buffer_ref(buffer);
         let mut seen: Vec<ObjectRef> = Vec::new();
         let mut cycle = false;
@@ -83,14 +84,14 @@ impl BufferBindings {
         Ok(current)
     }
 
-    pub fn same_storage(&self, lhs: &BufferVar, rhs: &BufferVar) -> AResult<bool> {
+    pub fn same_storage(&self, lhs: &TensorVar, rhs: &TensorVar) -> AResult<bool> {
         let left = self.storage_key(lhs)?;
         let right = self.storage_key(rhs)?;
         Ok(same(&left, &right))
     }
 }
 
-pub fn same_buffer(bindings: &BufferBindings, lhs: &BufferVar, rhs: &BufferVar) -> AResult<bool> {
+pub fn same_buffer(bindings: &BufferBindings, lhs: &TensorVar, rhs: &TensorVar) -> AResult<bool> {
     if same(lhs.as_var(), rhs.as_var()) {
         return Ok(true);
     }

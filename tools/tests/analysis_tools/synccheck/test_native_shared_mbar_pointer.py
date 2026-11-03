@@ -11,18 +11,15 @@ from __future__ import annotations
 
 import ml_dtypes
 import numpy as np
+import tvm_ffi
 
-import tvm
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.backend.cuda.tile_primitive.tma_utils import (
-    SwizzleMode,
-    mma_shared_layout,
-)
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.lang.pipeline import PipelineState, TMABar
+from tvm_tirx.backend.cuda.lang.pipeline import PipelineState, TMABar
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
 
-bf16 = tvm.DataType("bfloat16")
+bf16 = tvm_ffi.dtype("bfloat16")
 LAYOUT = mma_shared_layout(bf16, SwizzleMode.SWIZZLE_128B_ATOM, (64, 128))
 
 

@@ -1,11 +1,10 @@
 //! Artifact split of large regions into private helpers.  Capture attempts,
 //! thresholds and restore points decide the emitted text.
 
-use tvm::tirx::{
-    AttrStmtObj, BindObj, ForObj, IfThenElseObj, ScopeIdDefStmtObj, SeqStmtObj, Stmt, WhileObj,
-};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::{BindObj, ForObj, IfObj, SeqStmtObj, Stmt, WhileObj};
+use tvm_tirx::tirx::{AttrStmtObj, ScopeIdDefStmtObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
 
 use super::super::analyze::util::{ffi_error, ffi_text, ident, int_imm, oref, AResult, Failure};
 use super::{Emitter, RustValue, SplitArgument, SplitEffects, SplitHelper, Uniformity, Variables};
@@ -30,7 +29,7 @@ macro_rules! split_thresholds {
             pub fn unsplit() -> Self { Self { $($field: $unsplit,)* } }
 
             /// One definition owns fields, defaults, and the Python override names.
-            pub fn defaults() -> tvm::tvm_ffi::Result<Map<FfiString, i64>> {
+            pub fn defaults() -> tvm_tirx::tvm_ffi::Result<Map<FfiString, i64>> {
                 Ok([$(
                     (FfiString::from(format!("_{}", stringify!($field).to_ascii_uppercase())), $default),
                 )*].into_iter().collect())
@@ -118,7 +117,7 @@ pub struct Checkpoint {
     raw_tcgen: super::raw_tcgen::State,
     variables: Variables,
     dynamic_buffers_len: usize,
-    dynamic_buffers: Vec<(tvm::tirx::BufferVar, String)>,
+    dynamic_buffers: Vec<(tvm_tirx::tirx::TensorVar, String)>,
     split_effects: Vec<SplitEffects>,
     recorded_store_count: usize,
 }
@@ -1018,7 +1017,7 @@ impl<'a> Emitter<'a> {
 
     fn try_capture_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         initial_stmt: Option<&Stmt>,
         kind: IfSplitKind,
     ) -> AResult<Option<(SplitHelper, Option<SplitHelper>)>> {
@@ -1094,7 +1093,7 @@ impl<'a> Emitter<'a> {
 
     pub fn try_emit_root_uniform_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<bool> {
@@ -1113,7 +1112,7 @@ impl<'a> Emitter<'a> {
     pub fn try_emit_inner_uniform_if_split(
         &mut self,
         stmt: &Stmt,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<bool> {
@@ -1136,7 +1135,7 @@ impl<'a> Emitter<'a> {
 
     pub fn try_capture_inner_varying_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         _condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<Option<(SplitHelper, Option<SplitHelper>)>> {

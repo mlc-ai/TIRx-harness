@@ -6,10 +6,9 @@ import tvm
 from tests.numsim.support.manifest import emitted_calls, emitted_module
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME, decode_ptx_call
-from tvm.backend.cuda.ptx.table import mods
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx.backend.cuda.ptx.table import mods
+from tvm_tirx.ir import Expr, Stmt
 
 _TENSOR_OVERRIDE_SUFFIXES = (
     "override_address",

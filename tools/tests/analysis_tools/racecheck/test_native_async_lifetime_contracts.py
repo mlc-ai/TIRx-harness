@@ -8,7 +8,8 @@ import pytest
 from tirx_harness import racecheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import tmem_datapath_layout, wg_local_layout
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
 
 
 @T.prim_func

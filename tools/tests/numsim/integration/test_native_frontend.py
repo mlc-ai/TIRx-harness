@@ -3,10 +3,10 @@
 import pytest
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.errors import NumSimBuildError
 from tirx_harness.numsim.transpiler import native_frontend
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 
 def test_native_frontend_rejects_a_mismatched_build(monkeypatch):
@@ -92,6 +92,6 @@ def test_linear_mapping_and_full_domain_span_preserve_physical_coordinates(
     repeat_stride,
 ):
     expected = [offset + repeat * repeat_stride for repeat in range(3) for offset in atom_offsets]
-    before = tvm.ir.save_json(layout)
+    before = tvm_tirx.ir.save_json(layout)
     assert list(map(int, native_frontend.layout_linear_offsets(layout, len(expected)))) == expected
-    assert tvm.ir.save_json(layout) == before
+    assert tvm_tirx.ir.save_json(layout) == before

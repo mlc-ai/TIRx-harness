@@ -1,10 +1,11 @@
 //! cast / unary / elementwise / reduction.
 
-use tvm::ir::TensorRegionObj;
-use tvm::ir::{FloatImmObj, PrimExpr, PrimType};
-use tvm::prim::Cast;
-use tvm::tirx::{Layout, TileLayout, TilePrimitiveCallObj};
-use tvm::tvm_ffi::{
+use tvm_tirx::ir::Location;
+use tvm_tirx::ir::TensorRegionObj;
+use tvm_tirx::ir::{FloatImmObj, PrimExpr, PrimType};
+use tvm_tirx::ir::prim::Cast;
+use tvm_tirx::tirx::{Layout, TileLayout, TilePrimitiveCallObj};
+use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
 };
 
@@ -171,7 +172,7 @@ pub(super) fn resolve_unary_elementwise(
         }
         if value.dtype != destination.dtype {
             let expr = PrimExpr::try_from(value.expr.clone())?;
-            let cast: PrimExpr = Cast::new(PrimType::new(&destination.dtype)?, expr)?.into();
+            let cast: PrimExpr = Cast::new(PrimType::new(&destination.dtype), expr, Location::unknown())?.into();
             value = TileScalar {
                 expr: expr_any(&cast),
                 dtype: destination.dtype.clone(),

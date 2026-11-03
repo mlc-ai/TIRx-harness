@@ -13,7 +13,7 @@ from typing import Any
 
 from tvm_ffi import structural_hash
 
-from tvm.tirx import PrimFunc
+from tvm_tirx.tirx import Function
 
 from ..errors import NumSimBuildError, UnsupportedTIRxError
 from . import native_frontend
@@ -318,7 +318,7 @@ def attach_source_nodes(
     return attached
 
 
-def source_kernels(func: Any) -> tuple[PrimFunc, ...]:
+def source_kernels(func: Any) -> tuple[Function, ...]:
     """The normalized PrimFunc sequence of one module."""
 
     funcs = tuple(func) if isinstance(func, (list, tuple)) else (func,)
@@ -326,14 +326,14 @@ def source_kernels(func: Any) -> tuple[PrimFunc, ...]:
         raise ValueError("NumSim cannot transpile an empty kernel sequence")
     kernels = []
     for item in funcs:
-        if not isinstance(item, PrimFunc):
-            raise TypeError(f"NumSim expects tvm.tirx.PrimFunc, got {type(item).__name__}")
+        if not isinstance(item, Function):
+            raise TypeError(f"NumSim expects tvm_tirx.tirx.Function, got {type(item).__name__}")
         kernels.append(normalize_host_tensor_map_prelude(item))
     return tuple(kernels)
 
 
 def native_module_spec(
-    funcs: tuple[PrimFunc, ...],
+    funcs: tuple[Function, ...],
     manifest: dict[str, Any],
     nodes: list[list[Any]],
     host_abi: dict[str, Any],
@@ -377,7 +377,7 @@ def native_manifest_mismatch(manifest: dict[str, Any], spec: ModuleSpec) -> int 
 
 
 def _extract_topology(
-    func: PrimFunc,
+    func: Function,
     environment: dict[Any, int | float | bool] | None = None,
 ) -> LaunchTopology:
     """The launch topology of ``func`` under concrete scalar parameter values."""
@@ -386,7 +386,7 @@ def _extract_topology(
 
 
 def analyze(
-    func: PrimFunc | list[PrimFunc] | tuple[PrimFunc, ...],
+    func: Function | list[Function] | tuple[Function, ...],
     *,
     _render_script: bool = True,
 ) -> ModuleSpec:

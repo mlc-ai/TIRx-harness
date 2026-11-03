@@ -5,7 +5,7 @@
 use crate::analyze::util::{json_object, json_strings};
 use std::collections::{HashMap, HashSet};
 
-use tvm::tvm_ffi::{Any, Array, Map, Result, String as FfiString};
+use tvm_tirx::tvm_ffi::{Any, Array, Map, Result, String as FfiString};
 
 use crate::analyze::util::{ffi_error, Json};
 use crate::registry::{self, OpRow};

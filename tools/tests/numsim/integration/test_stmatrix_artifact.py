@@ -6,8 +6,8 @@ import pytest
 import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm import tirx
 from tvm.script import tirx as T
+from tvm_tirx import ir, tirx
 
 
 @T.prim_func
@@ -131,7 +131,7 @@ def test_stmatrix_analyze_rejects_a_pointer_without_backing():
     pointer = tirx.Var("pointer", "handle")
     value = tirx.Var("value", "uint32")
     call = T.ptx.stmatrix.sync.aligned.m8n8.x1.shared.b16(pointer, value)
-    spec = analyze(tirx.PrimFunc([pointer, value], tirx.Evaluate(call)))
+    spec = analyze(tirx.Function([pointer, value], ir.Evaluate(call)))
     assert any("Unbound TIRx variable" in reason for reason in spec.unsupported)
     with pytest.raises(numsim.UnsupportedTIRxError, match="Unbound TIRx variable"):
         verify(spec)

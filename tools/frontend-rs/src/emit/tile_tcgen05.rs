@@ -1,10 +1,11 @@
 //! Typed TCGEN transfers as one whole-tile v2
 //! instruction call.
 
-use tvm::ir::{PrimExpr, PrimType};
-use tvm::prim::Cast;
-use tvm::tirx::{BufferVar, TileLayout};
-use tvm::tvm_ffi::{Any, ObjectRefCast};
+use tvm_tirx::ir::Location;
+use tvm_tirx::ir::{PrimExpr, PrimType};
+use tvm_tirx::ir::prim::Cast;
+use tvm_tirx::tirx::{TensorVar, TileLayout};
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
 
 use super::super::analyze::layout::{axis_name, expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::super::analyze::memory::MemorySpace;
@@ -174,7 +175,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
             .collect()
     }
 
-    fn replica_offsets(&self, buffer: &BufferVar) -> AResult<Vec<(i64, i64)>> {
+    fn replica_offsets(&self, buffer: &TensorVar) -> AResult<Vec<(i64, i64)>> {
         let Some(layout) = buffer.buffer_type().layout.clone() else {
             return super::super::analyze::util::not_covered("buffer without a layout");
         };
@@ -333,7 +334,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
                     .map(|(minimum, coordinate)| offset_index(minimum, coordinate))
                     .collect()
             };
-            let analyzer = tvm::analysis::Analyzer::new()?;
+            let analyzer = tvm_tirx::sym::Analyzer::new();
             let register_indices = indices(register)?;
             let owners = self
                 .kernel
@@ -347,7 +348,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
                 .kernel
                 .physical_element_offset(&register.buffer, &register_indices)?;
             let cast_to = |target: &PrimExpr, value: &PrimExpr| -> AResult<PrimExpr> {
-                Ok(Cast::new(PrimType::new(&dtype_text(target.dtype()))?, value.clone())?.into())
+                Ok(Cast::new(PrimType::new(&dtype_text(target.dtype())), value.clone(), Location::unknown())?.into())
             };
             if !analyzer.can_prove_equal(thread, &cast_to(thread, &row)?)?
                 || !analyzer
@@ -416,7 +417,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
                     .kernel
                     .ctx
                     .inspect_layout(&region.buffer, &self.kernel.bindings)?;
-                let mut matches: Vec<BufferVar> = Vec::new();
+                let mut matches: Vec<TensorVar> = Vec::new();
                 for (candidate, code) in &self.kernel.buffers {
                     let plan = self.kernel.plan_of(code);
                     if plan.space == MemorySpace::Tmem

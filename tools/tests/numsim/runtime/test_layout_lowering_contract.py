@@ -5,7 +5,7 @@ import numpy as np
 from tirx_harness import numsim, racecheck, synccheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import ComposeLayout, S, TCol, TileLayout, TLane, laneid
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, S, TileLayout
 
 _PADDED_TILE = TileLayout(S[(2, 4) : (8, 1)])
 _SMALL_SWIZZLE = ComposeLayout(0, 1, 2, TileLayout(S[(8,)]))
@@ -16,9 +16,9 @@ _PADDED_COMPOSE = ComposeLayout(
     2,
     TileLayout(S[(2, 4) : (1, 4)]),
 )
-_TMEM_LANE_COLUMN = TileLayout(S[(2, 2) : (64 @ TLane, 3 @ TCol)])
-_TMEM_PHYSICAL = TileLayout(S[(128, 4) : (1 @ TLane, 1 @ TCol)])
-_LOCAL_WITH_GAPS = TileLayout(S[(32, 2) : (1 @ laneid, 2)] + 3)
+_TMEM_LANE_COLUMN = TileLayout(S[(2, 2) : (64 @ Axis.get("TLane"), 3 @ Axis.get("TCol"))])
+_TMEM_PHYSICAL = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+_LOCAL_WITH_GAPS = TileLayout(S[(32, 2) : (1 @ Axis.get("laneid"), 2)] + 3)
 
 
 @T.prim_func
@@ -74,7 +74,7 @@ def test_physical_buffers_preserve_coordinates_aliases_and_lane_private_storage(
 
 def _offset_tmem_layout(layout, col_offset):
     offset = dict(layout.offset)
-    offset[TCol] = offset.get(TCol, 0) + col_offset
+    offset[Axis.get("TCol")] = offset.get(Axis.get("TCol"), 0) + col_offset
     return TileLayout.from_iters(layout.shard, layout.replica, offset)
 
 
@@ -229,7 +229,7 @@ def runtime_tmem_layout_base(output: T.Buffer((32, 2), "uint32")):
         (32, 8),
         "uint32",
         scope="tmem",
-        layout=TileLayout(S[(32, 8) : (1 @ TLane, 1 @ TCol)]),
+        layout=TileLayout(S[(32, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
         allocated_addr=10,
     )
     for phase in T.serial(2):
@@ -237,7 +237,9 @@ def runtime_tmem_layout_base(output: T.Buffer((32, 2), "uint32")):
             (32, 4),
             "uint32",
             scope="tmem",
-            layout=_offset_tmem_layout(TileLayout(S[(32, 4) : (1 @ TLane, 1 @ TCol)]), phase * 4),
+            layout=_offset_tmem_layout(
+                TileLayout(S[(32, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]), phase * 4
+            ),
             allocated_addr=10,
         )
         view[lane, 0] = T.cast(1000 * phase + lane, "uint32")

@@ -10,8 +10,8 @@ import pytest
 import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
-from tvm.backend.cuda.ptx.table import canonical_dtypes, mods, variants
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import canonical_dtypes, mods, variants
 
 COPYSIGN = "tirx.ptx.copysign"
 MAD_F = "tirx.ptx.mad_f"

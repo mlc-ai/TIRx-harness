@@ -28,17 +28,13 @@ import pytest
 from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    ComposeLayout,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tmem_datapath_layout,
-)
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
-_TMEM_A_CTA2_M128_BANKED_F16 = TileLayout(S[(2, 64, 16) : (64 @ TLane, 1 @ TLane, 1 @ TCol)])
+_TMEM_A_CTA2_M128_BANKED_F16 = TileLayout(
+    S[(2, 64, 16) : (64 @ Axis.get("TLane"), 1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+)
 
 
 @T.prim_func

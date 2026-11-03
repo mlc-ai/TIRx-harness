@@ -6,8 +6,9 @@ import pytest
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.ir.type import PointerType, PrimType
+from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir.type import PrimType
 
 
 @T.prim_func

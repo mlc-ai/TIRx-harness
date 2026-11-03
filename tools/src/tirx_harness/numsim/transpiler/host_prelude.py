@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from tvm.tirx import PrimFunc
+from tvm_tirx.tirx import Function
 
 from .native_frontend import normalize_host_tensor_maps
 
 
-def normalize_host_tensor_map_prelude(func: PrimFunc) -> PrimFunc:
+def normalize_host_tensor_map_prelude(func: Function) -> Function:
     """Promote the host TensorMap prelude to implicit typed parameters."""
-    if not isinstance(func, PrimFunc):
-        raise TypeError(f"expected tvm.tirx.PrimFunc, got {type(func).__name__}")
+    if not isinstance(func, Function):
+        raise TypeError(f"expected tvm_tirx.tirx.Function, got {type(func).__name__}")
     return normalize_host_tensor_maps(func)
 
 

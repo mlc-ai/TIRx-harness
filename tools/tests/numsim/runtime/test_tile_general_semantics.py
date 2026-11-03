@@ -5,10 +5,9 @@ import pytest
 
 from tirx_harness import numsim
 from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import sf_tmem_layout
-from tvm.backend.cuda.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
 
 
 @T.prim_func

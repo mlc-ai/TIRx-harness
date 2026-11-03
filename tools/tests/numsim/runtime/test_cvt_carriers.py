@@ -2,11 +2,11 @@
 
 import numpy as np
 import pytest
+import tvm_ffi
 
-import tvm
 from tests.numsim.support.execution import run_checked
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
 from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
 
 
 def cvt_carrier_case(ptx_type):
@@ -19,7 +19,7 @@ def cvt_carrier_case(ptx_type):
     # against the canonical carrier instead of multiplying their combinations.
     forms = [(dst, source_carriers[0]) for dst in destination_carriers]
     forms += [(destination_carriers[0], src) for src in source_carriers[1:]]
-    bits = tvm.DataType(source_carriers[0]).bits
+    bits = tvm_ffi.dtype(source_carriers[0]).bits
     patterns = [
         0,
         1,
@@ -48,8 +48,8 @@ def cvt_carrier_case(ptx_type):
     lines = []
     for form_index, (destination_dtype, source_dtype) in enumerate(forms):
         dst, src = f"dst_{form_index}", f"src_{form_index}"
-        dbytes = tvm.DataType(destination_dtype).bits // 8
-        sbytes = tvm.DataType(source_dtype).bits // 8
+        dbytes = tvm_ffi.dtype(destination_dtype).bits // 8
+        sbytes = tvm_ffi.dtype(source_dtype).bits // 8
         lines += [
             f'    storage_{form_index} = T.alloc_local((1,), "{destination_dtype}")',
             f'    {dst} = storage_{form_index}.view("{destination_dtype}")',

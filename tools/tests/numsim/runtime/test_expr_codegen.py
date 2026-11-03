@@ -6,12 +6,13 @@ import subprocess
 import numpy as np
 import pytest
 
+import tvm
 from tests.numsim.support.kernels import fixed_width_integer_expression_mix
 from tests.numsim.support.manifest import device_kernel, emitted_module, parse_kernel
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.cache import rust_tool
-from tvm import tirx
 from tvm.script import tirx as T
+from tvm_tirx import ir
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
@@ -46,10 +47,10 @@ def test_float_immediates_preserve_bits_through_native_rust_literals(tmp_path, d
     expected = np.concatenate([edges, random[np.isfinite(random)]])
 
     def kernel(values):
-        output = tirx.decl_buffer((len(values),), dtype, name="output")
-        body = tirx.SeqStmt(
+        output = tvm.tirx.decl_buffer((len(values),), dtype, name="output")
+        body = ir.SeqStmt(
             [
-                tirx.BufferStore(output, tirx.FloatImm(dtype, float(value)), [index])
+                tvm.tirx.BufferStore(output, ir.FloatImm(dtype, float(value)), [index])
                 for index, value in enumerate(values)
             ]
         )

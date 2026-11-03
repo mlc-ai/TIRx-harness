@@ -13,10 +13,9 @@ from tirx_harness.numsim.transpiler.ptx_dialect import (
     PtxCallDecodeError,
     decode_ptx_call,
 )
-from tvm import ir
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx import ir
+from tvm_tirx.ir import Expr, Stmt
 
 
 def _parse(source: str):
@@ -191,7 +190,7 @@ def kernel():
     assert len(decoded.operand("a")) == 1
 
     reparsed = tvm.script.from_source(func.script(), {"T": T})
-    tvm.ir.assert_structural_equal(func, reparsed)
+    ir.assert_structural_equal(func, reparsed)
     reparsed_call = next(iter(_calls(reparsed, "tirx.ptx.")))
     assert decode_ptx_call(reparsed_call).operand("d")[0] is PTX_SINK
 

@@ -4,12 +4,13 @@
 
 use std::mem;
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{CallObj, IntImm, PrimExpr, PrimType, TensorLoadObj};
-use tvm::prim::{And, Cast, CastObj, LetObj, NotObj, Select, SelectObj};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::ir::Location;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{CallObj, IntImm, PrimExpr, PrimType, TensorLoadObj};
+use tvm_tirx::ir::prim::{And, Cast, CastObj, LetObj, NotObj, Select, SelectObj};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 
 use super::super::analyze::layout::{expr_any, op_binary};
 use super::super::analyze::memory::MemorySpace;
@@ -71,7 +72,7 @@ fn v2_reduction(name: &str) -> Option<&'static str> {
 impl<'a> Emitter<'a> {
     pub fn implicit_source_op_id(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         source_op_id: i64,
     ) -> AResult<Option<i64>> {
         let space = self.memory_plan.resolve(buffer)?.space;
@@ -301,7 +302,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load_at_lane(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         execution_lane: &str,
         access_mask: Option<String>,
@@ -344,7 +345,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn physical_index_at_lane(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -368,7 +369,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn physical_access_predicate_at_lane(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -398,7 +399,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn tmem_coordinates_at_lane(
         &mut self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
         execution_lane: &str,
         source_op_id: Option<i64>,
@@ -555,7 +556,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
             }
             let row_dtype = dtype_text(region.mins[0].dtype());
             return Ok(vec![
-                Cast::new(PrimType::new(&row_dtype)?, selected)?.into(),
+                Cast::new(PrimType::new(&row_dtype), selected, Location::unknown())?.into(),
                 offset_index(&region.mins[1], &coordinates[1])?,
             ]);
         }
@@ -580,14 +581,14 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
             let minimum = proofs.resolve_expression(minimum)?;
             let buffer_extent = proofs.resolve_expression(buffer_extent)?;
             let dtype = dtype_text(minimum.dtype());
-            let zero: PrimExpr = IntImm::new(&dtype, 0)?.into();
-            let extent: PrimExpr = IntImm::new(&dtype, region_extent)?.into();
+            let zero: PrimExpr = IntImm::new(&dtype, 0).into();
+            let extent: PrimExpr = IntImm::new(&dtype, region_extent).into();
             let lower = op_binary("_OpGE", expr_any(&minimum), expr_any(&zero))?;
             if !analyzer.can_prove(&lower)? {
                 return Ok(false);
             }
             let end = op_binary("_OpAdd", expr_any(&minimum), expr_any(&extent))?;
-            let bound: PrimExpr = Cast::new(PrimType::new(&dtype)?, buffer_extent)?.into();
+            let bound: PrimExpr = Cast::new(PrimType::new(&dtype), buffer_extent, Location::unknown())?.into();
             let upper = op_binary("_OpLE", expr_any(&end), expr_any(&bound))?;
             analyzer.can_prove(&upper).map_err(Into::into)
         };
@@ -600,7 +601,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         indices: &[PrimExpr],
         force_all_axes: bool,
     ) -> AResult<PrimExpr> {
-        let analyzer = Analyzer::new()?;
+        let analyzer = Analyzer::new();
         let buffer_shape: Vec<PrimExpr> = region.buffer.buffer_type().shape.iter().collect();
         let mut predicate: Option<PrimExpr> = None;
         for axis in 0..region.mins.len() {
@@ -614,20 +615,20 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
                 continue;
             }
             let index_dtype = dtype_text(index.dtype());
-            let zero: PrimExpr = IntImm::new(&index_dtype, 0)?.into();
+            let zero: PrimExpr = IntImm::new(&index_dtype, 0).into();
             let lower = op_binary("_OpGE", expr_any(index), expr_any(&zero))?;
             let bound: PrimExpr =
-                Cast::new(PrimType::new(&index_dtype)?, buffer_extent.clone())?.into();
+                Cast::new(PrimType::new(&index_dtype), buffer_extent.clone(), Location::unknown())?.into();
             let upper = op_binary("_OpLT", expr_any(index), expr_any(&bound))?;
-            let condition = prim(&oref(And::new(lower, upper)?))?;
+            let condition = prim(&oref(And::new(lower, upper, Location::unknown())?))?;
             predicate = Some(match predicate {
                 None => condition,
-                Some(previous) => prim(&oref(And::new(previous, condition)?))?,
+                Some(previous) => prim(&oref(And::new(previous, condition, Location::unknown())?))?,
             });
         }
         match predicate {
             Some(predicate) => Ok(predicate),
-            None => Ok(IntImm::new("bool", 1)?.into()),
+            None => Ok(IntImm::new("bool", 1).into()),
         }
     }
 

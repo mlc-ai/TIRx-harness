@@ -8,19 +8,14 @@ import pytest
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    ComposeLayout,
-    R,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tmem_datapath_layout,
-    wg_local_layout,
-)
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, ComposeLayout, R, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
-_REPLICATED_CP_LAYOUT = TileLayout(S[(32, 4) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
+_REPLICATED_CP_LAYOUT = TileLayout(
+    S[(32, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))] + R[4 : 32 @ Axis.get("TLane")]
+)
 
 
 @T.prim_func

@@ -1,9 +1,9 @@
 //! Static buffer layout inspection.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{IntImm, PrimExpr, Var};
-use tvm::tirx::{Axis, BufferVar, ComposeLayout, Iter, Layout, TileLayout};
-use tvm::tvm_ffi::{
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{IntImm, PrimExpr, Var};
+use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TensorVar, TileLayout};
+use tvm_tirx::tvm_ffi::{
     self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
 };
 
@@ -34,21 +34,21 @@ pub fn int_any(value: i64) -> Any {
 
 /// Physical buffers have compact memory coordinates, with no thread mapping.
 /// Explicit strides and element offsets are handled by the ordinary buffer rules.
-pub fn buffer_layout(buffer: &BufferVar) -> AResult<Layout> {
+pub fn buffer_layout(buffer: &TensorVar) -> AResult<Layout> {
     let ty = buffer.buffer_type();
     if let Some(layout) = &ty.layout {
         return Ok(layout.clone());
     }
-    let one: PrimExpr = IntImm::new("int64", 1)?.into();
+    let one: PrimExpr = IntImm::new("int64", 1).into();
     let mut size = one.clone();
     for extent in ty.shape.iter() {
         size = op_binary("_OpMul", expr_any(&size), expr_any(&extent))?;
     }
     Ok(TileLayout::new(
-        vec![Iter::new(size, one, Axis::get("m")?)?],
+        vec![Iter::new(size, one, Axis::get("m")?)],
         Vec::new(),
         Map::new(),
-    )?
+    )
     .into())
 }
 
@@ -114,7 +114,7 @@ fn shape_extent(
     analyzer: &Analyzer,
     value: &PrimExpr,
     field: &str,
-    shape_bindings: &Map<Var, tvm::ir::Expr>,
+    shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
 ) -> AResult<Extent> {
     let value = if shape_bindings.is_empty() {
         value.clone()
@@ -149,11 +149,11 @@ fn prove_equal(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr, field: &str)
     Ok(())
 }
 
-pub fn axis_name(axis: &tvm::tirx::Axis) -> AResult<String> {
+pub fn axis_name(axis: &tvm_tirx::tirx::Axis) -> AResult<String> {
     Ok(ffi_text(&axis.name()?))
 }
 
-fn iter_signature(items: &Array<tvm::tirx::Iter>) -> AResult<String> {
+fn iter_signature(items: &Array<tvm_tirx::tirx::Iter>) -> AResult<String> {
     let mut parts = Vec::new();
     for item in items.iter() {
         parts.push(format!(
@@ -194,7 +194,7 @@ fn validate_static_tile_mapping(
     layout: &TileLayout,
     name: &str,
 ) -> AResult<()> {
-    let shard: Vec<tvm::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
     for index in (1..shard.len()).rev() {
         let extent = static_int(
             analyzer,
@@ -232,7 +232,7 @@ fn validate_static_tile_mapping(
 }
 
 fn tile_repeat_stride(analyzer: &Analyzer, layout: &TileLayout, name: &str) -> AResult<i64> {
-    let shard: Vec<tvm::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
     if shard.is_empty() || axis_name(&shard[0].axis)? != "m" {
         return Ok(0);
     }
@@ -359,8 +359,8 @@ fn map_get(map: &Map<FfiString, PrimExpr>, key: &str) -> AResult<Option<PrimExpr
 pub fn inspect_buffer_layout(
     schema: &Schema,
     analyzer: &Analyzer,
-    buffer: &BufferVar,
-    shape_bindings: &Map<Var, tvm::ir::Expr>,
+    buffer: &TensorVar,
+    shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     let name = buffer_name(buffer);
     let buffer_type = buffer.buffer_type();
@@ -558,7 +558,7 @@ pub fn inspect_buffer_layout(
                 set_axis(
                     &mut mapped,
                     "m",
-                    IntImm::new("int64", static_m_zero)?.into(),
+                    IntImm::new("int64", static_m_zero).into(),
                 );
             } else {
                 dynamic_layout_elem_offset = Some(base_m_zero);
@@ -643,8 +643,8 @@ pub fn inspect_buffer_layout(
     let physical_elements: Option<i64>;
     if let Ok(_tile) = layout.clone().try_cast::<TileLayout>() {
         let canonical_tile = canonical.clone().try_cast::<TileLayout>()?;
-        let shard: Vec<tvm::tirx::Iter> = canonical_tile.shard()?.iter().collect();
-        let replica: Vec<tvm::tirx::Iter> = canonical_tile.replica()?.iter().collect();
+        let shard: Vec<tvm_tirx::tirx::Iter> = canonical_tile.shard()?.iter().collect();
+        let replica: Vec<tvm_tirx::tirx::Iter> = canonical_tile.replica()?.iter().collect();
         if !owner_axes.is_empty() {
             if explicit_strides.is_some() {
                 return unsupported(format!(
@@ -853,7 +853,7 @@ fn set_axis(mapped: &mut Vec<(String, PrimExpr)>, axis: &str, value: PrimExpr) {
 #[allow(clippy::too_many_arguments)]
 fn inspect_tmem(
     analyzer: &Analyzer,
-    buffer: &BufferVar,
+    buffer: &TensorVar,
     name: &str,
     shape: Vec<Extent>,
     dtype: String,

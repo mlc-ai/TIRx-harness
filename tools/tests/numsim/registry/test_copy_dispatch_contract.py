@@ -7,7 +7,8 @@ from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout, laneid, wg_local_layout
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 
 @T.prim_func
@@ -241,9 +242,11 @@ def _same_warp_owner_remap(
     lane = T.lane_id([32])
     source_storage: T.f32[32]
     destination_storage: T.f32[32]
-    source_view = source_storage.view(32, 32, layout=TileLayout(S[(32, 32) : (1 @ laneid, 1)]))
+    source_view = source_storage.view(
+        32, 32, layout=TileLayout(S[(32, 32) : (1 @ Axis.get("laneid"), 1)])
+    )
     destination_view = destination_storage.view(
-        32, 32, layout=TileLayout(S[(32, 32) : (1, 1 @ laneid)])
+        32, 32, layout=TileLayout(S[(32, 32) : (1, 1 @ Axis.get("laneid"))])
     )
     for column in T.serial(32):
         source_view[lane, column] = source[lane, column]

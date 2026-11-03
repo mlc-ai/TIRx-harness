@@ -11,7 +11,8 @@ from tirx_harness import numsim
 from tirx_harness.numsim.dtype_abi import vector_dtype_abi
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TCol, TileLayout, TLane, laneid, wg_local_layout, wid_in_wg
+from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _NUMPY_SCALAR_DTYPES = {
     "float16": np.float16,
@@ -100,10 +101,28 @@ ORDERING_COMPLETE_RUNTIME_DOMAIN = _make_complete_ordering_runtime_kernel()
 
 
 _SNAPSHOT_TRANSPOSED_LDSTMATRIX_LAYOUT = TileLayout(
-    S[(4, 2, 4, 2, 2, 8) : (1 @ laneid, 1, 1 @ wid_in_wg, 4, 2, 4 @ laneid)]
+    S[
+        (4, 2, 4, 2, 2, 8) : (
+            1 @ Axis.get("laneid"),
+            1,
+            1 @ Axis.get("wid_in_wg"),
+            4,
+            2,
+            4 @ Axis.get("laneid"),
+        )
+    ]
 )
 _SNAPSHOT_BOUND_LDSTMATRIX_LAYOUT = TileLayout(
-    S[(4, 2, 8, 1, 4, 2) : (1 @ wid_in_wg, 2, 4 @ laneid, 4, 1 @ laneid, 1)]
+    S[
+        (4, 2, 8, 1, 4, 2) : (
+            1 @ Axis.get("wid_in_wg"),
+            2,
+            4 @ Axis.get("laneid"),
+            4,
+            1 @ Axis.get("laneid"),
+            1,
+        )
+    ]
 )
 
 
@@ -199,7 +218,7 @@ def snapshot_copy_bound_ldstmatrix_runtime_domain(
             output[thread, column] = shared[thread, column]
 
 
-_RAW_TCGEN_LDST_LAYOUT = TileLayout(S[(128, 512) : (1 @ TLane, 1 @ TCol)])
+_RAW_TCGEN_LDST_LAYOUT = TileLayout(S[(128, 512) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 _RAW_TCGEN_LDST_DOMAINS = {

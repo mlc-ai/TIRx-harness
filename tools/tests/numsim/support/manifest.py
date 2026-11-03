@@ -20,31 +20,30 @@ import tvm
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import PrimFuncSpec, analyze, verify
 from tirx_harness.numsim.transpiler.host_prelude import normalize_host_tensor_map_prelude
-from tvm import tirx
-from tvm.ir import Expr
 from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Expr, Stmt
 
 DEVICE_ENTRY_ATTR = "tirx.device_entry"
 
 
-def parse_kernel(source: str) -> tirx.PrimFunc:
+def parse_kernel(source: str) -> tirx.Function:
     """Parse one TVMScript kernel source."""
 
     return tvm.script.from_source(source, {"T": T})
 
 
-def device_kernel(body: Stmt, params: Sequence[tirx.Var] = ()) -> tirx.PrimFunc:
+def device_kernel(body: Stmt, params: Sequence[tirx.Var] = ()) -> tirx.Function:
     """A device-entry PrimFunc around ``body`` (what ``T.device_entry()`` parses to)."""
 
-    entry = tirx.AttrStmt(0, DEVICE_ENTRY_ATTR, tirx.IntImm("bool", 1), body)
-    return tirx.PrimFunc(list(params), entry)
+    entry = tvm.tirx.AttrStmt(0, DEVICE_ENTRY_ATTR, ir.IntImm("bool", 1), body)
+    return tirx.Function(list(params), entry)
 
 
-def evaluated_kernel(call: Any, params: Sequence[tirx.Var] = ()) -> tirx.PrimFunc:
+def evaluated_kernel(call: Any, params: Sequence[tirx.Var] = ()) -> tirx.Function:
     """A device-entry PrimFunc whose only statement evaluates ``call``."""
 
-    return device_kernel(tirx.Evaluate(call), params)
+    return device_kernel(ir.Evaluate(call), params)
 
 
 def _matcher(matches: str | Callable[[str], bool]) -> Callable[[str], bool]:
@@ -53,14 +52,14 @@ def _matcher(matches: str | Callable[[str], bool]) -> Callable[[str], bool]:
     return matches
 
 
-def replace_call(func: tirx.PrimFunc, original: Any, replacement: Any) -> tirx.PrimFunc:
+def replace_call(func: tirx.Function, original: Any, replacement: Any) -> tirx.Function:
     """``func`` with the exact ``original`` call node replaced by ``replacement``."""
 
     body = structural_map(
         func.body,
         ((Expr, Stmt), lambda node: replacement if node.same_as(original) else node),
     )
-    return tirx.PrimFunc(func.params, body, func.ret_type, func.attrs)
+    return tirx.Function(func.params, body, func.ret_type, func.attrs)
 
 
 def kernel_manifest(func: Any) -> PrimFuncSpec:
@@ -125,7 +124,7 @@ def _enclosing_call(text: str, index: int) -> EmittedCall:
 
 
 def emitted_calls(
-    func: tirx.PrimFunc, matches: str | Callable[[str], bool] | Any
+    func: tirx.Function, matches: str | Callable[[str], bool] | Any
 ) -> list[EmittedCall]:
     """The ``v2::`` instructions emitted at the calls ``matches`` selects.
 
@@ -154,7 +153,7 @@ def emitted_calls(
     return calls
 
 
-def emitted_module(func: tirx.PrimFunc) -> str:
+def emitted_module(func: tirx.Function) -> str:
     """The complete native plain-mode module containing one kernel."""
 
     func = normalize_host_tensor_map_prelude(func)

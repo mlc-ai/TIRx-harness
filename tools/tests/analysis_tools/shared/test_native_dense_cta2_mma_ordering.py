@@ -21,7 +21,8 @@ from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import ComposeLayout, S, TileLayout, tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 

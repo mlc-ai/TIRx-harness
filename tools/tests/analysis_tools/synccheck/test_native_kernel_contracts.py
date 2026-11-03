@@ -11,7 +11,7 @@ from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.lang.pipeline import TMABar
+from tvm_tirx.backend.cuda.lang.pipeline import TMABar
 
 
 @T.prim_func

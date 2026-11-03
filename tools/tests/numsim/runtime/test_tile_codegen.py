@@ -31,7 +31,7 @@ from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout
+from tvm_tirx.tirx.layout import S, TileLayout
 
 
 def _typed_tma_reduce_kernel(dtype: str, reduction: str):

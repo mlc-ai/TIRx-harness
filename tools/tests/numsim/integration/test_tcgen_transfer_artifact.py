@@ -25,20 +25,14 @@ from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
 )
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import (
-    R,
-    S,
-    TCol,
-    TileLayout,
-    TLane,
-    tcgen05_atom_layout,
-    tmem_datapath_layout,
-    wg_local_layout,
-)
+from tvm.tirx.layout import tcgen05_atom_layout, wg_local_layout
+from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
 
-_WRONG_M64_TMEM_IDENTITY = TileLayout(S[(64, 8) : (1 @ TLane, 1 @ TCol)])
+_WRONG_M64_TMEM_IDENTITY = TileLayout(S[(64, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _WRONG_CP_LANE_PERMUTATION = TileLayout(
-    S[(2, 16, 4) : (1 @ TLane, 2 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane]
+    S[(2, 16, 4) : (1 @ Axis.get("TLane"), 2 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+    + R[4 : 32 @ Axis.get("TLane")]
 )
 
 
@@ -169,7 +163,9 @@ def _tmem_dtype_view_roundtrip(
         (64, 128),
         "float32",
         scope="tmem",
-        layout=TileLayout(S[(64, 2, 64) : (1 @ TLane, 64 @ TLane, 1 @ TCol)]),
+        layout=TileLayout(
+            S[(64, 2, 64) : (1 @ Axis.get("TLane"), 64 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+        ),
         allocated_addr=0,
     )
     for column in T.serial(64):
@@ -313,7 +309,10 @@ def _tcgen_cp_wrong_declared_shape():
         (32, 4),
         "float32",
         scope="tmem",
-        layout=TileLayout(S[(32, 4) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane]),
+        layout=TileLayout(
+            S[(32, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
+            + R[4 : 32 @ Axis.get("TLane")]
+        ),
         allocated_addr=0,
     )
     if lane == 0:

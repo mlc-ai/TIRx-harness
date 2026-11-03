@@ -1,9 +1,9 @@
 //! Generation-side layout helpers: physical element offsets and owner
 //! coordinates.
 
-use tvm::ir::{IntImm, PrimExpr};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::{Array, Map, String as FfiString};
+use tvm_tirx::ir::{IntImm, PrimExpr};
+use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
 
 use super::super::analyze::layout::{buffer_layout, expr_any, int_any, layout_signature, op_binary};
 use super::super::analyze::util::{buffer_name, ffi_text, unsupported, AResult};
@@ -12,7 +12,7 @@ use super::Emitter;
 impl<'a> Emitter<'a> {
     fn mapped_axes(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<Vec<(String, PrimExpr)>> {
         let layout = buffer_layout(buffer)?;
@@ -28,7 +28,7 @@ impl<'a> Emitter<'a> {
         Ok(axes)
     }
 
-    fn check_index_count(&self, buffer: &BufferVar, indices: &[PrimExpr]) -> AResult<()> {
+    fn check_index_count(&self, buffer: &TensorVar, indices: &[PrimExpr]) -> AResult<()> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         if indices.len() != info.shape.len() {
             return unsupported(format!(
@@ -44,14 +44,14 @@ impl<'a> Emitter<'a> {
     /// `physical_element_offset`.
     pub fn physical_element_offset(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<PrimExpr> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         self.check_index_count(buffer, indices)?;
         let mut offset: PrimExpr;
         if let Some(strides) = &info.explicit_strides {
-            offset = IntImm::new("int64", 0)?.into();
+            offset = IntImm::new("int64", 0).into();
             for (index, stride) in indices.iter().zip(strides.iter()) {
                 let product = op_binary("_OpMul", expr_any(index), int_any(*stride))?;
                 offset = op_binary("_OpAdd", expr_any(&offset), expr_any(&product))?;
@@ -73,7 +73,7 @@ impl<'a> Emitter<'a> {
             }
             offset = match mapped.iter().find(|(axis, _)| axis == "m") {
                 Some((_, value)) => value.clone(),
-                None => IntImm::new("int32", 0)?.into(),
+                None => IntImm::new("int32", 0).into(),
             };
             if info.packed_nibble_offset != 0 {
                 offset = op_binary(
@@ -92,7 +92,7 @@ impl<'a> Emitter<'a> {
     /// `physical_owner_coordinates`: `(axis, expression)` sorted by axis.
     pub fn physical_owner_coordinates(
         &self,
-        buffer: &BufferVar,
+        buffer: &TensorVar,
         indices: &[PrimExpr],
     ) -> AResult<Vec<(String, PrimExpr)>> {
         self.check_index_count(buffer, indices)?;

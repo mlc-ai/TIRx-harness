@@ -10,9 +10,9 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::ir::{PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::ir::{PrimExpr, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 
 /// `resolve_ptx_spdecompress` result: the register groups and the variant.
 pub struct SpDecompressForm {

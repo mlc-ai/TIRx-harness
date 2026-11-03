@@ -15,11 +15,13 @@ from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import S, TileLayout, laneid
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 # This layout swaps the high-M and high-K physical register groups while
 # retaining the same logical shape, lane ownership, and per-lane span.
-_WRONG_WARP_GEMM_A_FRAG = TileLayout(S[(2, 8, 2, 4, 2) : (4, 4 @ laneid, 2, 1 @ laneid, 1)])
+_WRONG_WARP_GEMM_A_FRAG = TileLayout(
+    S[(2, 8, 2, 4, 2) : (4, 4 @ Axis.get("laneid"), 2, 1 @ Axis.get("laneid"), 1)]
+)
 
 
 @T.prim_func

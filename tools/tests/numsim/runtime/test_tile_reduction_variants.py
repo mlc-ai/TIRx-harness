@@ -7,7 +7,7 @@ import pytest
 from tirx_harness import numsim
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import R, S, TileLayout, laneid
+from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
 
 
 @T.prim_func
@@ -86,8 +86,10 @@ def warp_collective_reductions(
     result_local: T.f32[2]
     for column in T.serial(2):
         source_local[column] = source[lane, column]
-    source_view = source_local.view(32, 2, layout=TileLayout(S[(32, 2) : (1 @ laneid, 1)]))
-    result_view = result_local.view(2, layout=TileLayout(S[2:1] + R[32 : 1 @ laneid]))
+    source_view = source_local.view(
+        32, 2, layout=TileLayout(S[(32, 2) : (1 @ Axis.get("laneid"), 1)])
+    )
+    result_view = result_local.view(2, layout=TileLayout(S[2:1] + R[32 : 1 @ Axis.get("laneid")]))
     Tx.warp.sum(result_view, source_view, axes=[0], dispatch="local")
     for column in T.serial(2):
         output[0, lane, column] = result_local[column]
@@ -111,8 +113,12 @@ def _make_partial_warp_sum(reduce_width: int):
         result_local: T.f32[2]
         for column in T.serial(2):
             source_local[column] = source[lane, column]
-        source_view = source_local.view(32, 2, layout=TileLayout(S[(32, 2) : (1 @ laneid, 1)]))
-        result_view = result_local.view(2, layout=TileLayout(S[2:1] + R[reduce_width : 1 @ laneid]))
+        source_view = source_local.view(
+            32, 2, layout=TileLayout(S[(32, 2) : (1 @ Axis.get("laneid"), 1)])
+        )
+        result_view = result_local.view(
+            2, layout=TileLayout(S[2:1] + R[reduce_width : 1 @ Axis.get("laneid")])
+        )
         Tx.warp.sum(result_view, source_view, axes=[0], dispatch="local")
         for column in T.serial(2):
             output[lane, column] = result_local[column]

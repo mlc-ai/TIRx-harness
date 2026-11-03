@@ -10,7 +10,8 @@ from tests.numsim.support.manifest import (
 from tirx_harness.numsim.dtype_abi import dtype_itemsize, vector_dtype_abi
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm.backend.cuda.op import cuda_atomic_cas
-from tvm.tirx import Cast, Var, decl_buffer
+from tvm.tirx import decl_buffer
+from tvm_tirx.tirx import Cast, Var
 
 
 def test_storage_width_does_not_grant_scalar_cast_support():

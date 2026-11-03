@@ -3,8 +3,8 @@
 use crate::analyze::util::{dtype_of, oref, unsupported, AResult};
 use crate::analyze::Ctx;
 use crate::decode::Decoded;
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::{ControlProvenance, Emitter, RustValue, Uniformity};
 
