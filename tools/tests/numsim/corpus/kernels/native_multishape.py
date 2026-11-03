@@ -116,7 +116,7 @@ def _prepare(name, config, launch=None):
         stack.enter_context(patch.object(tvm_tirx, "compile", compile_kernel))
         stack.enter_context(
             patch.object(
-                tvm_tirx,
+                tvm_ffi,
                 "get_global_func",
                 lambda name, *a, **k: encode
                 if name == "runtime.cuTensorMapEncodeTiled"

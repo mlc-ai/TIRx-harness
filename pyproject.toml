@@ -37,9 +37,10 @@ common = [
   # The TVM IKET profile checks these exact versions.
   "nvidia-cuda-nvrtc==13.2.78",
   "nvidia-cuda-nvdisasm==13.3.73",
-  # No tvm-tirx based release is on PyPI yet. This commit imports TIRx-lite
-  # and builds its canonical kernels as far as any public tvm-tirx does.
-  "tirx-kernels @ git+https://github.com/mlc-ai/tirx-kernels@9d7fa012b22b9aff9835e7d715995287f65c7204",
+  # No tvm-tirx based release is on PyPI yet, so this pins its main branch.
+  # With apache-tvm-tirx 0.1.0a5 it imports TIRx-lite; kernels that need newer
+  # TIRx builders fail to build.
+  "tirx-kernels @ git+https://github.com/mlc-ai/tirx-kernels@103af834ed8bdc04920781e2d8da6e36986721b4",
   "kcoral>=0.1.0",
 ]
 # setup.py also publishes this group as the package's default dependencies.

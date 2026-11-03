@@ -1303,7 +1303,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "setuptools", marker = "extra == 'test'", specifier = ">=64" },
     { name = "threadpoolctl", specifier = ">=3.6,<4" },
-    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204" },
+    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4" },
 ]
 provides-extras = ["test"]
 
@@ -1325,7 +1325,7 @@ benchmark = [
     { name = "nvidia-cuda-nvrtc", specifier = "==13.2.78" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "safetensors", specifier = "==0.8.0" },
-    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204" },
+    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4" },
     { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" },
     { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" },
     { name = "torch-c-dlpack-ext", specifier = "==0.1.5" },
@@ -1339,7 +1339,7 @@ common = [
     { name = "nvidia-cuda-nvdisasm", specifier = "==13.3.73" },
     { name = "nvidia-cuda-nvrtc", specifier = "==13.2.78" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
-    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204" },
+    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4" },
 ]
 harness = [
     { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
@@ -1352,7 +1352,7 @@ harness = [
     { name = "pypandoc-binary", specifier = ">=1.17" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "threadpoolctl", specifier = ">=3.6,<4" },
-    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204" },
+    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4" },
 ]
 server = [
     { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
@@ -1372,7 +1372,7 @@ server = [
     { name = "nvidia-cuda-nvrtc", specifier = "==13.2.78" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "safetensors", specifier = "==0.8.0" },
-    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204" },
+    { name = "tirx-kernels", git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4" },
     { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" },
     { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" },
     { name = "torch-c-dlpack-ext", specifier = "==0.1.5" },
@@ -1381,8 +1381,8 @@ server = [
 
 [[package]]
 name = "tirx-kernels"
-version = "0.1.2.post2.dev12+g9d7fa012b"
-source = { git = "https://github.com/mlc-ai/tirx-kernels?rev=9d7fa012b22b9aff9835e7d715995287f65c7204#9d7fa012b22b9aff9835e7d715995287f65c7204" }
+version = "0.1.2.post2.dev13+g103af834e"
+source = { git = "https://github.com/mlc-ai/tirx-kernels?rev=103af834ed8bdc04920781e2d8da6e36986721b4#103af834ed8bdc04920781e2d8da6e36986721b4" }
 dependencies = [
     { name = "kcoral" },
     { name = "packaging" },
