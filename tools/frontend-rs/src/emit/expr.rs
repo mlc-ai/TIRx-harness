@@ -1,7 +1,7 @@
 //! Expression emission as methods on the kernel emitter.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm_tirx::ir::{FloatImmObj, IntImmObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::{Expr, FloatImmObj, IntImmObj, TensorLoadObj};
 use tvm_tirx::ir::prim::{CastObj, LetObj, NotObj, RampObj, SelectObj, ShuffleObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -1138,7 +1138,7 @@ impl<'a> Emitter<'a> {
             return not_covered("TensorLoad source is not a typed buffer");
         };
         let result_dtype = classify_vector_buffer_load(self.ctx, expr, load, &source)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let register_access_mask = self.register_access_mask.clone();
         // `self.buffer_load(expr.source, indices, source_node=expr, ...)`: the
         // kernel emitter swaps the loader around tile and TMEM lowerings.

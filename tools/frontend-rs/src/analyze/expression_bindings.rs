@@ -1,7 +1,7 @@
 //! Exact bindings and shape substitutions for symbolic expressions.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{Expr, PrimExpr, Var};
+use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::ir::{BindObj, Stmt};
 use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore};
 
@@ -48,16 +48,16 @@ impl ExpressionBindings {
     }
 
     /// Transitively substitute exact Bind definitions, leaving runtime vars symbolic.
-    pub fn resolve_expression(&self, expression: &PrimExpr) -> AResult<PrimExpr> {
+    pub fn resolve_expression(&self, expression: &Expr) -> AResult<Expr> {
         self.resolve_expression_with(expression, &self.shape_expressions.substitutions())
     }
 
     /// Reuse a substitution map across a sequence of symbolic expressions.
     pub fn resolve_expression_with(
         &self,
-        expression: &PrimExpr,
+        expression: &Expr,
         substitutions: &Map<Var, Expr>,
-    ) -> AResult<PrimExpr> {
+    ) -> AResult<Expr> {
         let mut current = expression.clone();
         if !self.bindings.is_empty() {
             let mut resolved_once = false;

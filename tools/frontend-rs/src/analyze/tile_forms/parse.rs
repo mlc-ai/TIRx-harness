@@ -5,11 +5,11 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::TensorRegionObj;
-use tvm_tirx::ir::{FloatImm, FloatImmObj, IntImm, IntImmObj, PrimExpr, Range, Var};
+use tvm_tirx::ir::{Expr, FloatImm, FloatImmObj, IntImm, IntImmObj, Range, Var};
 use tvm_tirx::tirx::TilePrimitiveCallObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString, TypeIndex};
-use crate::analyze::util::{oref, tensor_var};
+use crate::analyze::util::{oref, prim_expr, tensor_var};
 
 use super::super::layout::expr_any;
 use super::super::util::{
@@ -110,7 +110,7 @@ pub(super) fn static_int_any(analyzer: &Analyzer, value: &Any, field: &str) -> A
     let expr = match &decoded {
         AnyValue::Int(value) => return Ok(*value),
         AnyValue::Bool(value) => return Ok(i64::from(*value)),
-        AnyValue::Object(node) => PrimExpr::try_from(Any::from(node.clone())).ok(),
+        AnyValue::Object(node) => prim_expr(Any::from(node.clone())).ok(),
         _ => None,
     };
     if let Some(expr) = expr {
@@ -125,7 +125,7 @@ pub(super) fn static_int_any(analyzer: &Analyzer, value: &Any, field: &str) -> A
     ))
 }
 
-pub(super) fn static_int_expr(analyzer: &Analyzer, value: &PrimExpr, field: &str) -> AResult<i64> {
+pub(super) fn static_int_expr(analyzer: &Analyzer, value: &Expr, field: &str) -> AResult<i64> {
     static_int_any(analyzer, &expr_any(value), field)
 }
 
@@ -194,7 +194,7 @@ pub(super) fn literal_float(value: &Any, field: &str) -> AResult<f64> {
         AnyValue::Int(value) => return Ok(*value as f64),
         AnyValue::Float(value) => return Ok(*value),
         AnyValue::Object(node) => {
-            if let Ok(expr) = PrimExpr::try_from(Any::from(node.clone())) {
+            if let Ok(expr) = prim_expr(Any::from(node.clone())) {
                 let simplified = Analyzer::new().simplify(&expr)?;
                 if let Some(imm) = simplified.as_node::<FloatImmObj>() {
                     return Ok(imm.value);
@@ -258,7 +258,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
             // typed-scalar path below.
         }
         AnyValue::Bool(value) => {
-            let expr: PrimExpr = IntImm::new(BOOL, i64::from(*value)).into();
+            let expr: Expr = IntImm::new(BOOL, i64::from(*value)).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: BOOL.to_owned(),
@@ -272,14 +272,14 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                 // Every i64 fits int64, so no uint64 literal arises here.
                 "int64"
             };
-            let expr: PrimExpr = IntImm::new(dtype, *value).into();
+            let expr: Expr = IntImm::new(dtype, *value).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: dtype.to_owned(),
             }));
         }
         AnyValue::Float(value) => {
-            let expr: PrimExpr = FloatImm::new("float64", *value).into();
+            let expr: Expr = FloatImm::new("float64", *value).into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: "float64".to_owned(),

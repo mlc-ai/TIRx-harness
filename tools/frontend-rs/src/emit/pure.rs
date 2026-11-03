@@ -18,7 +18,7 @@ use crate::tables::{
 };
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{CallObj, IntImmObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, Expr, IntImmObj, TensorLoadObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -724,7 +724,7 @@ impl<'a> Emitter<'a> {
         let Some(source) = as_buffer(&oref(load.source.clone())) else {
             return not_covered("address_of source is not a typed buffer");
         };
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let pointer = self.emit_buffer_address(&source, &indices)?;
         let scope = buffer_scope(&source);
         if matches!(
@@ -745,7 +745,7 @@ impl<'a> Emitter<'a> {
     pub fn emit_buffer_address(
         &mut self,
         buffer: &tvm_tirx::ir::Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
     ) -> AResult<RustValue> {
         if self.memory_plan.resolve(buffer)?.space == MemorySpace::Tmem {
             return unsupported(format!(

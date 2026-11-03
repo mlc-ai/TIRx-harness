@@ -1,6 +1,6 @@
 //! Statement and buffer-access emission.
 
-use tvm_tirx::ir::{IntImmObj, PrimExpr, PtrTypeObj, Var};
+use tvm_tirx::ir::{Expr, IntImmObj, PtrTypeObj, Var};
 use tvm_tirx::ir::prim::RampObj;
 use tvm_tirx::ir::{
     AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
@@ -14,6 +14,7 @@ use tvm_tirx::tirx::{
 };
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::prim_expr;
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
 use super::super::analyze::topology::iter_var_of;
@@ -462,7 +463,7 @@ impl<'a> Emitter<'a> {
     pub fn physical_index(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
     ) -> AResult<RustValue> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         if !info.physical_axes.iter().any(|axis| axis == "m") {
@@ -480,7 +481,7 @@ impl<'a> Emitter<'a> {
     pub fn physical_access_mask(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         base_mask: &str,
     ) -> AResult<String> {
         let owners = self.physical_owner_coordinates(buffer, indices)?;
@@ -521,7 +522,7 @@ impl<'a> Emitter<'a> {
     pub fn emit_buffer_load(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         access_mask: Option<String>,
         register_access_mask: Option<String>,
         zero_fill_invalid: bool,
@@ -721,7 +722,7 @@ impl<'a> Emitter<'a> {
     fn emit_contiguous_vector_load(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         result_dtype: &str,
         access_mask: Option<String>,
         zero_fill_invalid: bool,
@@ -766,7 +767,7 @@ impl<'a> Emitter<'a> {
                 space.value()
             ));
         }
-        let base: PrimExpr = PrimExpr::try_from(Any::from(base))?;
+        let base: Expr = prim_expr(Any::from(base))?;
         let mut components = Vec::new();
         for component in 0..lanes {
             let component_index = if component == 0 {
@@ -778,7 +779,7 @@ impl<'a> Emitter<'a> {
                     super::super::analyze::layout::int_any(component),
                 )?
             };
-            let mut component_indices: Vec<PrimExpr> = indices[..indices.len() - 1].to_vec();
+            let mut component_indices: Vec<Expr> = indices[..indices.len() - 1].to_vec();
             component_indices.push(component_index);
             components.push(self.emit_buffer_load(
                 buffer,
@@ -1880,7 +1881,7 @@ impl<'a> Emitter<'a> {
                 "float4 BufferStore requires an explicit packed-byte frontend lowering",
             );
         }
-        let indices: Vec<PrimExpr> = stmt.indices.iter().collect();
+        let indices: Vec<Expr> = stmt.indices.iter().collect();
         let index = self.physical_index(&stmt.buffer, &indices)?;
         let access_mask = self.physical_access_mask(&stmt.buffer, &indices, "ctx.active_mask()")?;
         let space_marker = if dynamic {

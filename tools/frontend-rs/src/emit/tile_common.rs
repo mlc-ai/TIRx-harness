@@ -1,9 +1,10 @@
 //! Helpers shared by the tile emitters.
 
 use tvm_tirx::ir::Location;
-use tvm_tirx::ir::{IntImm, PrimExpr, PrimType, Var};
+use tvm_tirx::ir::{Expr, IntImm, PrimType, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
+use crate::analyze::util::PrimExprExt;
 
 use super::super::analyze::layout::{expr_any, op_binary};
 use super::super::analyze::tile_forms::TileRegion;
@@ -41,26 +42,26 @@ impl LoadFactory {
 pub(super) type Capture = (Vec<String>, Vec<SplitArgument>);
 
 /// `tirx.IntImm("int64", value)`.
-pub(super) fn int64_imm(value: i64) -> AResult<PrimExpr> {
+pub(super) fn int64_imm(value: i64) -> AResult<Expr> {
     Ok(IntImm::new("int64", value).into())
 }
 
 /// `tirx.Var(name, dtype)` as a primitive expression together with its identity.
-pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, PrimExpr)> {
+pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, Expr)> {
     let variable = oref(Var::new(name, dtype, Location::unknown()));
     let expr = prim(&variable)?;
     Ok((variable, expr))
 }
 
 /// `minimum + tirx.Cast(minimum.ty, coordinate)`.
-pub(super) fn offset_index(minimum: &PrimExpr, coordinate: &PrimExpr) -> AResult<PrimExpr> {
+pub(super) fn offset_index(minimum: &Expr, coordinate: &Expr) -> AResult<Expr> {
     let dtype = dtype_text(minimum.dtype());
-    let cast: PrimExpr = Cast::new(PrimType::new(&dtype), coordinate.clone(), Location::unknown())?.into();
+    let cast: Expr = Cast::new(PrimType::new(&dtype), coordinate.clone(), Location::unknown())?.into();
     op_binary("_OpAdd", expr_any(minimum), expr_any(&cast))
 }
 
 /// The pure TIR coordinates of one linear element index.
-pub(super) fn linear_coordinates(linear: &PrimExpr, extents: &[i64]) -> AResult<Vec<PrimExpr>> {
+pub(super) fn linear_coordinates(linear: &Expr, extents: &[i64]) -> AResult<Vec<Expr>> {
     let mut coordinates = Vec::new();
     for (axis, extent) in extents.iter().enumerate() {
         let stride: i64 = extents[axis + 1..].iter().product();
@@ -87,7 +88,7 @@ pub(super) fn linear_coordinates(linear: &PrimExpr, extents: &[i64]) -> AResult<
 }
 
 /// `str(var.name)` of a TIR variable expression.
-pub(super) fn var_name(expr: &PrimExpr) -> AResult<String> {
+pub(super) fn var_name(expr: &Expr) -> AResult<String> {
     match as_var(&oref(expr.clone())) {
         Some(var) => Ok(ffi_text(&var.name)),
         None => Err(Failure::Ffi(ffi_error(
@@ -98,8 +99,8 @@ pub(super) fn var_name(expr: &PrimExpr) -> AResult<String> {
 
 pub(super) fn tile_logical_region_indices(
     region: &TileRegion,
-    logical_coordinates: &[PrimExpr],
-) -> AResult<Vec<PrimExpr>> {
+    logical_coordinates: &[Expr],
+) -> AResult<Vec<Expr>> {
     let expected = region.extents.iter().filter(|extent| **extent != 1).count();
     if logical_coordinates.len() != expected {
         return unsupported(format!(

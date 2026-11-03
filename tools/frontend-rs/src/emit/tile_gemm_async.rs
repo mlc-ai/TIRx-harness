@@ -3,10 +3,10 @@
 //! maps; the engine owns instruction partitioning, descriptor semantics,
 //! effects, numeric execution, and completion.
 
-use tvm_tirx::ir::PrimExpr;
 use tvm_tirx::tirx::ComposeLayout;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
+use tvm_tirx::ir::Expr;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{expr_any, int_any, op_binary, tile_layout_is_trivial};
@@ -52,9 +52,9 @@ impl<'a> Emitter<'a> {
     /// One bound uniform `i64` coordinate per axis of `extents`.
     pub(super) fn tile_coordinates(
         &mut self,
-        linear: &PrimExpr,
+        linear: &Expr,
         extents: &[i64],
-    ) -> AResult<Vec<PrimExpr>> {
+    ) -> AResult<Vec<Expr>> {
         let linear_name = var_name(linear)?;
         let mut coordinates = Vec::new();
         for (axis, extent) in extents.iter().enumerate() {
@@ -160,7 +160,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
         {
             return Ok(None);
         }
-        let shape: Vec<PrimExpr> = region.buffer.tensor_type().shape.iter().collect();
+        let shape: Vec<Expr> = region.buffer.tensor_type().shape.iter().collect();
         if shape.len() != 2 || shape.iter().any(|value| int_imm_expr(value).is_none()) {
             return Ok(None);
         }
@@ -318,7 +318,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
         )))
     }
 
-    fn slot(&mut self, linear: &PrimExpr, lane: &str, role: &str) -> AResult<String> {
+    fn slot(&mut self, linear: &Expr, lane: &str, role: &str) -> AResult<String> {
         let linear_usize = self.kernel.control_name(&format!("gemm_{role}_linear"));
         self.kernel.emit_line(&format!(
             "let {linear_usize} = usize::try_from({}).map_err(|_| EngineError::message(\"negative GEMM logical index\"))?;",
@@ -330,7 +330,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
     fn regular_ref(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         role: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -389,7 +389,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
     fn tmem_ref(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         role: &str,
         normalize_scale_cell: bool,
@@ -434,7 +434,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
     fn reference(
         &mut self,
         reference: &GemmReference<'_>,
-        coordinates: &[PrimExpr],
+        coordinates: &[Expr],
         lane: &str,
         factory: &LoadFactory,
     ) -> AResult<String> {

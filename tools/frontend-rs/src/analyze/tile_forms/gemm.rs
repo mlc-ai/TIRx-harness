@@ -1,9 +1,10 @@
 //! gemm (mma.sync.m16n8k*) and gemm_async.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::PrimExpr;
+
 use tvm_tirx::tirx::{TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::ObjectRefCast;
+use tvm_tirx::ir::Expr;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary};
@@ -75,7 +76,7 @@ fn validate_m16n8_fragment_layout(
             "TilePrimitiveCall(gemm): {role} fragment layout has replica axes, which mma.sync.m16n8k{mma_k} does not support"
         ));
     }
-    let mut register_bases: Vec<((i64, i64), PrimExpr)> = Vec::new();
+    let mut register_bases: Vec<((i64, i64), Expr)> = Vec::new();
     for row in 0..rows {
         for col in 0..cols {
             let (storage_row, storage_col) = if transpose_storage {
@@ -931,8 +932,8 @@ fn dense_gemm_async_instruction(
 /// Without an explicit descI, the typed tcgen05 descriptor carries one scale ID
 /// sequence for both SFA and SFB.
 fn validate_shared_scale_ids(
-    scale_a_ids: &[PrimExpr],
-    scale_b_ids: &[PrimExpr],
+    scale_a_ids: &[Expr],
+    scale_b_ids: &[Expr],
     scale_a_elements_per_ki: i64,
     sf_per_mma: i64,
 ) -> AResult<()> {
@@ -947,7 +948,7 @@ fn validate_shared_scale_ids(
         }
     }
     if mismatch {
-        let render = |ids: &[PrimExpr]| -> AResult<String> {
+        let render = |ids: &[Expr]| -> AResult<String> {
             let items = ids
                 .iter()
                 .map(|id| repr_text(&oref(id.clone())))

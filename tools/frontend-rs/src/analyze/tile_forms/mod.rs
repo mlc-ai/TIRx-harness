@@ -8,10 +8,11 @@ mod numeric;
 mod parse;
 mod tcgen_layout;
 
-use tvm_tirx::ir::{PrimExpr, Var};
+use tvm_tirx::ir::Var;
 use tvm_tirx::tirx::TilePrimitiveCallObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::ir::Expr;
 
 use super::util::{ffi_text, oref, unsupported, AResult, Failure};
 use super::Ctx;
@@ -128,7 +129,7 @@ impl TileOpKind {
 #[derive(Clone)]
 pub struct TileRegion {
     pub buffer: Var,
-    pub mins: Vec<PrimExpr>,
+    pub mins: Vec<Expr>,
     pub extents: Vec<i64>,
     pub dtype: String,
     pub memory_scope: String,

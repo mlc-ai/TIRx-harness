@@ -267,7 +267,7 @@ impl<'a> Emitter<'a> {
         setup: &mut Vec<String>,
         host_variables: &Variables,
         name: &str,
-        expression: &tvm_tirx::ir::PrimExpr,
+        expression: &tvm_tirx::ir::Expr,
         field: &str,
         target_type: &str,
     ) -> AResult<()> {

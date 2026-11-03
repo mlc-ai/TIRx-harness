@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{Call, Expr, IntImm, Op, PrimExpr, Var};
+use tvm_tirx::ir::{Call, Expr, IntImm, Op, Var};
 use tvm_tirx::ir::Stmt;
 use tvm_tirx::tirx::{AttrStmtObj, Function, Layout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -37,7 +37,7 @@ fn identity() -> Result<String> {
     .into())
 }
 
-pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<PrimExpr>> {
+pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<Expr>> {
     let analyzer = Analyzer::new();
     let mut offsets = Vec::new();
     for index in 0..count {

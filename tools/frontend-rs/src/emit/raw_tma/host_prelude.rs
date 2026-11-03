@@ -14,7 +14,15 @@ use crate::decode::projected_buffer;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
-    Call, CallObj, DictAttrs, Expr, IntImm, Op, PrimExpr, PtrTypeObj, StringImm, Var,
+    Call,
+    CallObj,
+    DictAttrs,
+    Expr,
+    IntImm,
+    Op,
+    PtrTypeObj,
+    StringImm,
+    Var,
 };
 use tvm_tirx::ir::prim::Add;
 use tvm_tirx::backend::cuda::TensorMapEncodeTiledAttrObj;
@@ -33,7 +41,7 @@ struct Context<'a> {
 }
 
 impl Context<'_> {
-    fn simplify(&self, value: &ObjectRef) -> AResult<PrimExpr> {
+    fn simplify(&self, value: &ObjectRef) -> AResult<Expr> {
         Ok(self.analyzer.simplify(&value.clone().try_cast()?)?)
     }
 

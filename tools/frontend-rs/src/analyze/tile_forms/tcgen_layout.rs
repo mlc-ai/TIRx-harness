@@ -2,13 +2,14 @@
 
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{IntImm, PrimExpr, PrimType, Range, Var};
+use tvm_tirx::ir::{Expr, IntImm, PrimType, Range, Var};
 use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
     String as FfiString,
 };
+use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary, tile_layout_is_trivial};
@@ -30,7 +31,7 @@ pub(super) fn validate_block_scale_layout(
     rows: i64,
     k_iters: i64,
     sf_per_mma: i64,
-) -> AResult<(i64, Vec<PrimExpr>)> {
+) -> AResult<(i64, Vec<Expr>)> {
     if k_iters <= 0 {
         return unsupported(
             "TilePrimitiveCall(gemm_async): block-scale K must contain at least one MMA step",
@@ -44,7 +45,7 @@ pub(super) fn validate_block_scale_layout(
     }
     let elements_per_ki = scale_cols / k_iters;
     let analyzer = Analyzer::new();
-    let mut scale_ids: Vec<PrimExpr> = Vec::new();
+    let mut scale_ids: Vec<Expr> = Vec::new();
     let elements_per_tmem_cell = 4;
     for ki in 0..k_iters {
         let base_col = ki * elements_per_ki;
@@ -151,8 +152,8 @@ fn layout_kind_name(layout: &Option<Layout>) -> &'static str {
 /// `layout.apply(*variables, shape=list(buffer.shape))`.
 fn apply_layout(
     layout: &Layout,
-    variables: &[PrimExpr],
-    shape: &Array<PrimExpr>,
+    variables: &[Expr],
+    shape: &Array<Expr>,
 ) -> Result<Physical, String> {
     match layout.apply_with_shape(&Array::new(variables.to_vec()), shape) {
         Ok(map) => Ok(map
@@ -170,7 +171,7 @@ pub(super) fn validate_tcgen_smem_layout(
 ) -> AResult<()> {
     let buffer = &region.buffer;
     let buffer_type = buffer.tensor_type();
-    let shape_exprs: Vec<PrimExpr> = buffer_type.shape.iter().collect();
+    let shape_exprs: Vec<Expr> = buffer_type.shape.iter().collect();
     let mut shape = Vec::new();
     for (axis, extent) in shape_exprs.iter().enumerate() {
         shape.push(static_int_expr(
@@ -194,7 +195,7 @@ pub(super) fn validate_tcgen_smem_layout(
             region.dtype
         ));
     }
-    let mut variables: Vec<PrimExpr> = Vec::new();
+    let mut variables: Vec<Expr> = Vec::new();
     for (axis, extent) in shape_exprs.iter().enumerate() {
         if shape[axis] == 1 {
             variables.push(IntImm::new("int32", 0).into());
@@ -209,8 +210,8 @@ pub(super) fn validate_tcgen_smem_layout(
     let (rows, cols) = (shape[rank - 2], shape[rank - 1]);
     let row = &variables[rank - 2];
     let col = &variables[rank - 1];
-    let origin_variables = |variables: &[PrimExpr]| -> AResult<Vec<PrimExpr>> {
-        let mut origin: Vec<PrimExpr> = variables[..rank - 2].to_vec();
+    let origin_variables = |variables: &[Expr]| -> AResult<Vec<Expr>> {
+        let mut origin: Vec<Expr> = variables[..rank - 2].to_vec();
         origin.push(IntImm::from_dtype(row.dtype(), 0, Location::unknown())?.into());
         origin.push(IntImm::from_dtype(col.dtype(), 0, Location::unknown())?.into());
         Ok(origin)
@@ -418,8 +419,8 @@ pub(super) fn validate_tcgen_tmem_a_layout(
     }
     let origin_lane = physical_get(&origin, "TLane").expect("TLane").clone();
     let origin_tcol = physical_get(&origin, "TCol").expect("TCol").clone();
-    let symbolic_row: PrimExpr = int32_var("numsim_tmem_a_row")?;
-    let symbolic_col: PrimExpr = int32_var("numsim_tmem_a_col")?;
+    let symbolic_row: Expr = int32_var("numsim_tmem_a_row")?;
+    let symbolic_col: Expr = int32_var("numsim_tmem_a_col")?;
     let symbolic = physical_layout_coordinates_at(
         region,
         &[vexpr(&symbolic_row), vexpr(&symbolic_col)],
@@ -522,8 +523,8 @@ pub(super) fn matches_ws_packed_tmem_layout(
     if rows != 64 || columns <= 0 || columns % 2 != 0 {
         return Ok(false);
     }
-    let row: PrimExpr = int32_var("numsim_ws_packed_row")?;
-    let column: PrimExpr = int32_var("numsim_ws_packed_column")?;
+    let row: Expr = int32_var("numsim_ws_packed_row")?;
+    let column: Expr = int32_var("numsim_ws_packed_column")?;
     let coordinates = (|| -> AResult<(Physical, Physical)> {
         let origin = physical_layout_coordinates_at(region, &[vint(0), vint(0)], "gemm_async")?;
         let mapped =
@@ -559,7 +560,7 @@ pub(super) fn matches_ws_packed_tmem_layout(
 
 fn matches_coordinate_abi(actual: &[[Val; 4]], expected: &[[Val; 4]]) -> AResult<bool> {
     let analyzer = Analyzer::new();
-    let mut bases: Option<Vec<PrimExpr>> = None;
+    let mut bases: Option<Vec<Expr>> = None;
     for (actual_coordinates, expected_coordinates) in actual.iter().zip(expected.iter()) {
         let mut offsets = Vec::new();
         for (value, expected_value) in actual_coordinates.iter().zip(expected_coordinates.iter()) {

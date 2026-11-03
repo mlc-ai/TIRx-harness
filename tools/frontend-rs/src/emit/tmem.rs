@@ -3,7 +3,7 @@
 //! `emit_store` / `logical_buffer_name`, and `physical_tmem_coordinates`.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{Expr, IntImm, PrimExpr, Range, Var};
+use tvm_tirx::ir::{Expr, IntImm, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -43,7 +43,7 @@ impl State<'_> {
 struct TmemNaming<'a> {
     bindings: &'a ExpressionBindings,
     substitutions: Map<Var, Expr>,
-    loop_ranges: Vec<(Var, PrimExpr, PrimExpr)>,
+    loop_ranges: Vec<(Var, Expr, Expr)>,
 }
 
 impl<'a> TmemNaming<'a> {
@@ -68,7 +68,7 @@ impl<'a> TmemNaming<'a> {
     }
 
     /// `(start, end, width)` in TMEM bit units.
-    fn interval_bits(&self, plan: &BufferPlan) -> AResult<Option<(PrimExpr, PrimExpr, i64)>> {
+    fn interval_bits(&self, plan: &BufferPlan) -> AResult<Option<(Expr, Expr, i64)>> {
         let info = &plan.layout;
         let (Some(allocated_addr), Some(tcol_base), Some(tcol_span)) = (
             &info.allocated_addr,
@@ -211,8 +211,8 @@ impl<'a> Emitter<'a> {
     pub fn physical_tmem_coordinates(
         &self,
         buffer: &Var,
-        indices: &[PrimExpr],
-    ) -> AResult<(PrimExpr, PrimExpr)> {
+        indices: &[Expr],
+    ) -> AResult<(Expr, Expr)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         let name = buffer_name(buffer);
         if info.physical_axes != ["TCol", "TLane"] {
@@ -229,10 +229,10 @@ impl<'a> Emitter<'a> {
             return not_covered("buffer without a layout");
         };
         let coordinates = Array::new(indices.to_vec());
-        let mapped: Map<FfiString, PrimExpr> = layout
+        let mapped: Map<FfiString, Expr> = layout
             .canonicalize()?
             .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
-        let mut axes: Vec<(String, PrimExpr)> = mapped
+        let mut axes: Vec<(String, Expr)> = mapped
             .iter()
             .map(|(axis, value)| (ffi_text(&axis), value))
             .collect();
@@ -248,8 +248,8 @@ impl<'a> Emitter<'a> {
                 layout_signature(&layout)?
             ));
         }
-        let zero: PrimExpr = IntImm::new("int32", 0).into();
-        let axis = |wanted: &str| -> PrimExpr {
+        let zero: Expr = IntImm::new("int32", 0).into();
+        let axis = |wanted: &str| -> Expr {
             axes.iter()
                 .find(|(axis, _)| axis == wanted)
                 .map_or_else(|| zero.clone(), |(_, value)| value.clone())
@@ -276,7 +276,7 @@ impl<'a> Emitter<'a> {
     pub fn tmem_coordinates(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         source_op_id: Option<i64>,
     ) -> AResult<(RustValue, RustValue, RustValue)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -329,7 +329,7 @@ impl<'a> Emitter<'a> {
     pub fn emit_tmem_buffer_load(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         name: &str,
         buffer_ref: &str,
         requested_mask: &str,
@@ -401,7 +401,7 @@ impl<'a> Emitter<'a> {
         value: &RustValue,
         buffer_ref: &str,
     ) -> AResult<()> {
-        let indices: Vec<PrimExpr> = stmt.indices.iter().collect();
+        let indices: Vec<Expr> = stmt.indices.iter().collect();
         let (lane, tcol, allocated_addr) =
             self.tmem_coordinates(&stmt.buffer, &indices, Some(op_id))?;
         let access_marker = self.tmem_access_marker(&stmt.buffer)?;

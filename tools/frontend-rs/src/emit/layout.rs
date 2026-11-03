@@ -1,7 +1,7 @@
 //! Generation-side layout helpers: physical element offsets and owner
 //! coordinates.
 
-use tvm_tirx::ir::{IntImm, PrimExpr, Var};
+use tvm_tirx::ir::{Expr, IntImm, Var};
 
 use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
 use crate::analyze::util::TensorVarExt;
@@ -14,14 +14,14 @@ impl<'a> Emitter<'a> {
     fn mapped_axes(
         &self,
         buffer: &Var,
-        indices: &[PrimExpr],
-    ) -> AResult<Vec<(String, PrimExpr)>> {
+        indices: &[Expr],
+    ) -> AResult<Vec<(String, Expr)>> {
         let layout = buffer_layout(buffer)?;
         let coordinates = Array::new(indices.to_vec());
-        let mapped: Map<FfiString, PrimExpr> = layout
+        let mapped: Map<FfiString, Expr> = layout
             .canonicalize()?
             .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
-        let mut axes: Vec<(String, PrimExpr)> = mapped
+        let mut axes: Vec<(String, Expr)> = mapped
             .iter()
             .map(|(axis, value)| (ffi_text(&axis), value))
             .collect();
@@ -29,7 +29,7 @@ impl<'a> Emitter<'a> {
         Ok(axes)
     }
 
-    fn check_index_count(&self, buffer: &Var, indices: &[PrimExpr]) -> AResult<()> {
+    fn check_index_count(&self, buffer: &Var, indices: &[Expr]) -> AResult<()> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         if indices.len() != info.shape.len() {
             return unsupported(format!(
@@ -46,11 +46,11 @@ impl<'a> Emitter<'a> {
     pub fn physical_element_offset(
         &self,
         buffer: &Var,
-        indices: &[PrimExpr],
-    ) -> AResult<PrimExpr> {
+        indices: &[Expr],
+    ) -> AResult<Expr> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         self.check_index_count(buffer, indices)?;
-        let mut offset: PrimExpr;
+        let mut offset: Expr;
         if let Some(strides) = &info.explicit_strides {
             offset = IntImm::new("int64", 0).into();
             for (index, stride) in indices.iter().zip(strides.iter()) {
@@ -94,8 +94,8 @@ impl<'a> Emitter<'a> {
     pub fn physical_owner_coordinates(
         &self,
         buffer: &Var,
-        indices: &[PrimExpr],
-    ) -> AResult<Vec<(String, PrimExpr)>> {
+        indices: &[Expr],
+    ) -> AResult<Vec<(String, Expr)>> {
         self.check_index_count(buffer, indices)?;
         let mapped = self.mapped_axes(buffer, indices)?;
         let unsupported_axes: Vec<String> = mapped

@@ -3,7 +3,7 @@
 //! regions and the memory carrier spellings that take a PTX type.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{CallObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -355,7 +355,7 @@ impl<'a> Emitter<'a> {
             );
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let code = self.buffer_code(&buffer)?;
         let plan = self.plan_of(&code);
         let plan_name = plan.name.clone();

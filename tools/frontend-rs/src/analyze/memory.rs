@@ -1,7 +1,7 @@
 //! Physical allocation/view planning.
 
 use tvm_tirx::ir::TensorRegionObj;
-use tvm_tirx::ir::{CallObj, Expr, PrimExpr, TensorLoadObj, Var};
+use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj, Var};
 use tvm_tirx::ir::{BindObj, Stmt, TensorStoreObj};
 use tvm_tirx::tirx::{AllocBufferObj, AttrStmtObj, DeclBufferObj, Function};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -11,8 +11,8 @@ use super::buffers::BufferBindings;
 use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
 use super::util::{
-    buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, same, unsupported, AResult,
-    IdSet, TensorVarExt,
+    AResult, IdSet, TensorVarExt, buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref,
+    prim_expr, same, unsupported,
 };
 use super::Ctx;
 use crate::decode::projected_buffer;
@@ -179,7 +179,7 @@ pub fn shape_product(buffer: &Var) -> AResult<Scalar> {
     for extent in buffer.tensor_type().shape.iter() {
         product = expr_any(&op_binary("_OpMul", product, expr_any(&extent))?);
     }
-    Ok(Scalar::Expr(PrimExpr::try_from(product)?))
+    Ok(Scalar::Expr(prim_expr(product)?))
 }
 
 fn buffer_byte_end_expression(buffer: &Var, info: &LayoutInfo) -> AResult<Scalar> {

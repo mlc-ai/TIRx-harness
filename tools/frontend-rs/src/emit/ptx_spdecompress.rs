@@ -3,16 +3,17 @@
 use crate::analyze::layout::{expr_any, int_any, op_binary};
 use crate::analyze::shapes::structural_equal;
 use crate::analyze::util::{
-    as_buffer, dtype_of, ffi_error, not_covered, oref, same, simplify, unsupported, AResult,
-    Failure,
+    AResult, Failure, as_buffer, dtype_of, ffi_error, not_covered, oref, prim_expr, same, simplify,
+    unsupported,
 };
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm_tirx::ir::{PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::TensorLoadObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::ir::Expr;
 
 /// `resolve_ptx_spdecompress` result: the register groups and the variant.
 pub struct SpDecompressForm {
@@ -156,15 +157,15 @@ pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>>
 
 struct RegisterLocation {
     backing: usize,
-    start: PrimExpr,
-    end: PrimExpr,
-    owners: Vec<(String, PrimExpr)>,
+    start: Expr,
+    end: Expr,
+    owners: Vec<(String, Expr)>,
 }
 
 impl<'a> Emitter<'a> {
     /// `ExpressionBindings.resolve_expression` over this kernel's exact Bind
     /// definitions (`Emitter.bindings` holds the same `Bind` map).
-    fn spdecompress_resolve_expression(&self, expression: &PrimExpr) -> AResult<PrimExpr> {
+    fn spdecompress_resolve_expression(&self, expression: &Expr) -> AResult<Expr> {
         let substitutions = self.bindings.clone();
         let count = substitutions.iter().count();
         let substituted = if count == 0 {
@@ -185,7 +186,7 @@ impl<'a> Emitter<'a> {
                     "compile-time expression proof encountered cyclic Bind definitions",
                 );
             };
-            PrimExpr::try_from(Any::from(resolved))?
+            prim_expr(Any::from(resolved))?
         };
         simplify(&self.ctx.analyzer, &substituted)
     }
@@ -206,7 +207,7 @@ impl<'a> Emitter<'a> {
         };
         let itemsize = plan.layout.itemsize;
         let elem_offset = plan.layout.elem_offset;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let offset = self.physical_element_offset(&buffer, &indices)?;
         let shifted = op_binary("_OpAdd", expr_any(&offset), int_any(elem_offset))?;
         let scaled = op_binary("_OpMul", expr_any(&shifted), int_any(itemsize))?;
@@ -239,7 +240,7 @@ impl<'a> Emitter<'a> {
             return Ok("disjoint");
         }
         let analyzer = &self.ctx.analyzer;
-        let prove = |name: &str, lhs: &PrimExpr, rhs: &PrimExpr| -> AResult<bool> {
+        let prove = |name: &str, lhs: &Expr, rhs: &Expr| -> AResult<bool> {
             Ok(analyzer.can_prove(&op_binary(name, expr_any(lhs), expr_any(rhs))?)?)
         };
         if prove("_OpLE", &left.end, &right.start)? || prove("_OpLE", &right.end, &left.start)? {

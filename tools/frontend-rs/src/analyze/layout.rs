@@ -1,30 +1,31 @@
 //! Static buffer layout inspection.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{IntImm, PrimExpr, Var};
+use tvm_tirx::ir::{Expr, IntImm, Var};
 use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TileLayout};
 use tvm_tirx::tvm_ffi::{
     self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
 };
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_imm_expr, not_covered, oref, prim,
-    repr_of, simplify, static_int as shared_static_int, unsupported, AResult, Failure, TensorVarExt,
+    AResult, Failure, PrimExprExt, TensorVarExt, buffer_dtype, buffer_name, buffer_scope, ffi_text,
+    int_imm_expr, not_covered, oref, prim, prim_expr, repr_of, simplify,
+    static_int as shared_static_int, unsupported,
 };
 use crate::schema::Schema;
 
 const MAX_PARTIAL_ATOM_ENUMERATION: i64 = 1_000_000;
 
 /// Shared primitive operators used by the Python expression constructors.
-pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<PrimExpr> {
+pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<Expr> {
     let operator = name.strip_prefix("_Op").expect("primitive constructor prefix");
     let full = format!("prim._Op{operator}");
     let function = tvm_ffi::Function::get_global(&full)?;
     let result: Any = function.call_tuple((lhs, rhs, Any::new()))?;
-    Ok(PrimExpr::try_from(result)?)
+    Ok(prim_expr(result)?)
 }
 
-pub fn expr_any(expr: &PrimExpr) -> Any {
+pub fn expr_any(expr: &Expr) -> Any {
     Any::from(expr.clone())
 }
 
@@ -39,7 +40,7 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
     if let Some(layout) = &ty.layout {
         return Ok(layout.clone());
     }
-    let one: PrimExpr = IntImm::new("int64", 1).into();
+    let one: Expr = IntImm::new("int64", 1).into();
     let mut size = one.clone();
     for extent in ty.shape.iter() {
         size = op_binary("_OpMul", expr_any(&size), expr_any(&extent))?;
@@ -62,7 +63,7 @@ pub fn tile_layout_is_trivial(layout: &TileLayout) -> AResult<bool> {
 #[derive(Clone)]
 pub enum Extent {
     Static(i64),
-    Dynamic(PrimExpr),
+    Dynamic(Expr),
 }
 
 #[derive(Clone)]
@@ -71,14 +72,14 @@ pub struct LayoutInfo {
     pub dtype: String,
     pub itemsize: i64,
     pub elem_offset: i64,
-    pub dynamic_elem_offset: Option<PrimExpr>,
+    pub dynamic_elem_offset: Option<Expr>,
     pub element_count: Option<i64>,
     pub signature: String,
     pub physical_axes: Vec<String>,
     pub explicit_strides: Option<Vec<i64>>,
-    pub dynamic_layout_elem_offset: Option<PrimExpr>,
+    pub dynamic_layout_elem_offset: Option<Expr>,
     pub packed_nibble_offset: i64,
-    pub allocated_addr: Option<PrimExpr>,
+    pub allocated_addr: Option<Expr>,
     pub allocated_addr_static: Option<i64>,
     pub tmem_lane_span: Option<i64>,
     pub tmem_tcol_span_elements: Option<i64>,
@@ -101,7 +102,7 @@ impl LayoutInfo {
     }
 }
 
-fn static_int(analyzer: &Analyzer, value: &PrimExpr, field: &str) -> AResult<i64> {
+fn static_int(analyzer: &Analyzer, value: &Expr, field: &str) -> AResult<i64> {
     shared_static_int(
         analyzer,
         value,
@@ -112,7 +113,7 @@ fn static_int(analyzer: &Analyzer, value: &PrimExpr, field: &str) -> AResult<i64
 
 fn shape_extent(
     analyzer: &Analyzer,
-    value: &PrimExpr,
+    value: &Expr,
     field: &str,
     shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
 ) -> AResult<Extent> {
@@ -120,7 +121,7 @@ fn shape_extent(
         value.clone()
     } else {
         let substituted = crate::substitute(oref(value.clone()), shape_bindings.clone())?;
-        PrimExpr::try_from(Any::from(substituted))?
+        prim_expr(Any::from(substituted))?
     };
     let simplified = simplify(analyzer, &value)?;
     if let Some(extent) = int_imm_expr(&simplified) {
@@ -136,7 +137,7 @@ fn shape_extent(
     ))
 }
 
-fn prove_equal(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr, field: &str) -> AResult<()> {
+fn prove_equal(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr, field: &str) -> AResult<()> {
     let difference = op_binary("_OpSub", expr_any(lhs), expr_any(rhs))?;
     let simplified = simplify(analyzer, &difference)?;
     if int_imm_expr(&simplified) != Some(0) {
@@ -224,7 +225,7 @@ fn validate_static_tile_mapping(
     }
     for (axis, offset) in layout.offset()?.iter() {
         if axis_name(&axis)? == "m" {
-            let offset = PrimExpr::try_from(offset)?;
+            let offset = prim_expr(offset)?;
             static_int(analyzer, &offset, &format!("{name}:layout m offset"))?;
         }
     }
@@ -352,7 +353,7 @@ fn full_domain_physical_span(
     Ok(maximum + 1)
 }
 
-fn map_get(map: &Map<FfiString, PrimExpr>, key: &str) -> AResult<Option<PrimExpr>> {
+fn map_get(map: &Map<FfiString, Expr>, key: &str) -> AResult<Option<Expr>> {
     Ok(map.get(&FfiString::from(key))?)
 }
 
@@ -411,7 +412,7 @@ pub fn inspect_buffer_layout(
     let scope = buffer_scope(buffer);
     // A TensorType has neither an element offset nor strides: a view's offset and
     // strides are part of its layout.
-    let (elem_offset, dynamic_elem_offset, packed_nibble_offset): (i64, Option<PrimExpr>, i64) =
+    let (elem_offset, dynamic_elem_offset, packed_nibble_offset): (i64, Option<Expr>, i64) =
         (0, None, 0);
     let explicit_strides: Option<Vec<i64>> = None;
     let static_shape = shape
@@ -468,8 +469,8 @@ pub fn inspect_buffer_layout(
             expr_any(&extent),
         )?);
     }
-    let expected_elements_expr = PrimExpr::try_from(expected_elements_expr)?;
-    let zero_indices: Vec<PrimExpr> = shape
+    let expected_elements_expr = prim_expr(expected_elements_expr)?;
+    let zero_indices: Vec<Expr> = shape
         .iter()
         .map(|_| IntImm::new("int32", 0).map(Into::into))
         .collect::<tvm_ffi::Result<_>>()?;
@@ -477,7 +478,7 @@ pub fn inspect_buffer_layout(
     let zero_extent_shared_placeholder = static_shape
         && expected_elements == Some(0)
         && (scope == "shared" || scope == "shared.dyn");
-    let apply_zero = |candidate: &Layout| -> AResult<Map<FfiString, PrimExpr>> {
+    let apply_zero = |candidate: &Layout| -> AResult<Map<FfiString, Expr>> {
         if zero_extent_shared_placeholder {
             Ok(candidate.apply(&zero_indices)?)
         } else {
@@ -485,13 +486,13 @@ pub fn inspect_buffer_layout(
         }
     };
     let mapped_zero = apply_zero(&canonical)?;
-    let mut mapped: Vec<(String, PrimExpr)> = mapped_zero
+    let mut mapped: Vec<(String, Expr)> = mapped_zero
         .iter()
         .map(|(axis, value)| (ffi_text(&axis), value))
         .collect();
     mapped.sort_by(|left, right| left.0.cmp(&right.0));
     let zero_axes: Vec<String> = mapped.iter().map(|(axis, _)| axis.clone()).collect();
-    let mut dynamic_layout_elem_offset: Option<PrimExpr> = None;
+    let mut dynamic_layout_elem_offset: Option<Expr> = None;
     let is_compose = canonical.clone().try_cast::<ComposeLayout>().is_ok();
     if let Some(mapped_m_zero) = map_get(&mapped_zero, "m")? {
         let simplified_m_zero = simplify(analyzer, &mapped_m_zero)?;
@@ -794,14 +795,14 @@ pub fn inspect_buffer_layout(
     })
 }
 
-fn get_axis(mapped: &[(String, PrimExpr)], axis: &str) -> Option<PrimExpr> {
+fn get_axis(mapped: &[(String, Expr)], axis: &str) -> Option<Expr> {
     mapped
         .iter()
         .find(|(name, _)| name == axis)
         .map(|(_, value)| value.clone())
 }
 
-fn set_axis(mapped: &mut Vec<(String, PrimExpr)>, axis: &str, value: PrimExpr) {
+fn set_axis(mapped: &mut Vec<(String, Expr)>, axis: &str, value: Expr) {
     if let Some(entry) = mapped.iter_mut().find(|(name, _)| name == axis) {
         entry.1 = value;
     } else {
@@ -818,14 +819,14 @@ fn inspect_tmem(
     dtype: String,
     itemsize: i64,
     elem_offset: i64,
-    dynamic_elem_offset: Option<PrimExpr>,
+    dynamic_elem_offset: Option<Expr>,
     expected_elements: Option<i64>,
     signature: String,
     layout: &Layout,
     canonical: &Layout,
-    mapped: &[(String, PrimExpr)],
+    mapped: &[(String, Expr)],
     zero_axes: &[String],
-    dynamic_layout_elem_offset: Option<PrimExpr>,
+    dynamic_layout_elem_offset: Option<Expr>,
     packed_nibble: bool,
     tmem_address: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {

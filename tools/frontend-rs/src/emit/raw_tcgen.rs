@@ -19,7 +19,7 @@ use crate::emit::tcgen_descriptor::{
 use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::MEM_ST;
 use crate::tvm_compat::int_value;
-use tvm_tirx::ir::{IntImmObj, PrimExpr, TensorLoadObj, Var};
+use tvm_tirx::ir::{Expr, IntImmObj, TensorLoadObj, Var};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -1609,7 +1609,7 @@ impl<'a> Emitter<'a> {
                 return not_covered("tcgen05 register source is not a typed buffer");
             };
             self.record_global_write(&buffer)?;
-            let indices: Vec<PrimExpr> = load.indices.iter().collect();
+            let indices: Vec<Expr> = load.indices.iter().collect();
             let pointer = self.emit_buffer_address(&buffer, &indices)?;
             let pointer_name = self.control_name(&format!("raw_tcgen_{instruction}_register"));
             self.emit_line(&format!("let {pointer_name} = {};", pointer.code));

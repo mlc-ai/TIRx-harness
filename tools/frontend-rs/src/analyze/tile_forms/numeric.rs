@@ -2,12 +2,13 @@
 
 use tvm_tirx::ir::Location;
 use tvm_tirx::ir::TensorRegionObj;
-use tvm_tirx::ir::{FloatImmObj, PrimExpr, PrimType};
+use tvm_tirx::ir::{Expr, FloatImmObj, PrimType};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tirx::{Layout, TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
 };
+use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{axis_name, expr_any};
@@ -172,8 +173,8 @@ pub(super) fn resolve_unary_elementwise(
             );
         }
         if value.dtype != destination.dtype {
-            let expr = PrimExpr::try_from(value.expr.clone())?;
-            let cast: PrimExpr = Cast::new(PrimType::new(&destination.dtype), expr, Location::unknown())?.into();
+            let expr = prim_expr(value.expr.clone())?;
+            let cast: Expr = Cast::new(PrimType::new(&destination.dtype), expr, Location::unknown())?.into();
             value = TileScalar {
                 expr: expr_any(&cast),
                 dtype: destination.dtype.clone(),

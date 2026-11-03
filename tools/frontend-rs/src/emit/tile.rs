@@ -4,7 +4,7 @@
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{IntImm, IntImmObj, PrimExpr, PrimType, TensorLoadObj, Var};
+use tvm_tirx::ir::{Expr, IntImm, IntImmObj, PrimType, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
 use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout, TilePrimitiveCallObj};
@@ -112,11 +112,11 @@ fn is_integer_like_dtype(dtype: &str) -> bool {
 }
 
 /// `_static_int`: the analyzer-simplified literal, or `None`.
-fn static_int(analyzer: &Analyzer, value: &PrimExpr) -> AResult<Option<i64>> {
+fn static_int(analyzer: &Analyzer, value: &Expr) -> AResult<Option<i64>> {
     Ok(int_imm_expr(&analyzer.simplify(value)?))
 }
 
-fn same_expression(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr) -> AResult<bool> {
+fn same_expression(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr) -> AResult<bool> {
     Ok(analyzer.can_prove_equal(lhs, rhs)?)
 }
 
@@ -178,7 +178,7 @@ fn visit_value_expression(
     Ok(())
 }
 
-fn is_owner_region_min_expression(schema: &Schema, expr: &PrimExpr) -> AResult<bool> {
+fn is_owner_region_min_expression(schema: &Schema, expr: &Expr) -> AResult<bool> {
     let mut safe = true;
     visit_value_expression(schema, &oref(expr.clone()), &mut |node| {
         let dtype = dtype_of(node).unwrap_or_default();
@@ -194,7 +194,7 @@ fn is_owner_region_min_expression(schema: &Schema, expr: &PrimExpr) -> AResult<b
 }
 
 /// Pure integer address expressions backed only by private state.
-fn is_owner_register_copy_min_expression(schema: &Schema, expr: &PrimExpr) -> AResult<bool> {
+fn is_owner_register_copy_min_expression(schema: &Schema, expr: &Expr) -> AResult<bool> {
     let mut safe = true;
     visit_value_expression(schema, &oref(expr.clone()), &mut |node| {
         let dtype = dtype_of(node).unwrap_or_default();
@@ -243,15 +243,15 @@ fn canonical_tile_layout(layout: &TileLayout) -> AResult<Option<TileLayout>> {
 
 /// A Python `int` handed to `tirx.Cast(dtype, value)`: TVM converts it to an
 /// `int32` literal.
-fn python_int_expr(value: i64) -> AResult<PrimExpr> {
+fn python_int_expr(value: i64) -> AResult<Expr> {
     Ok(IntImm::new("int32", value).into())
 }
 
-fn cast_to(dtype: &str, value: PrimExpr) -> AResult<PrimExpr> {
+fn cast_to(dtype: &str, value: Expr) -> AResult<Expr> {
     Ok(Cast::new(PrimType::new(dtype), value, Location::unknown())?.into())
 }
 
-fn add_expr(lhs: &PrimExpr, rhs: &PrimExpr) -> AResult<PrimExpr> {
+fn add_expr(lhs: &Expr, rhs: &Expr) -> AResult<Expr> {
     op_binary("_OpAdd", expr_any(lhs), expr_any(rhs))
 }
 
@@ -471,7 +471,7 @@ fn layout_is_swizzle(layout: &Layout) -> AResult<bool> {
 }
 
 /// `region.buffer.shape` as primitive expressions.
-fn buffer_shape(buffer: &Var) -> Vec<PrimExpr> {
+fn buffer_shape(buffer: &Var) -> Vec<Expr> {
     buffer.tensor_type().shape.iter().collect()
 }
 
@@ -635,7 +635,7 @@ impl<'a> Emitter<'a> {
     fn tile_owner_slot_loop(
         &mut self,
         extent: i64,
-        body: impl FnOnce(&mut Self, &[PrimExpr]) -> AResult<()>,
+        body: impl FnOnce(&mut Self, &[Expr]) -> AResult<()>,
     ) -> AResult<()> {
         let suffix = self.control_name("tile_owner");
         let row_name = format!("tile_owner_rows_{suffix}");
@@ -667,8 +667,8 @@ impl<'a> Emitter<'a> {
     fn tile_region_indices_from_coordinates(
         &self,
         region: &TileRegion,
-        coordinates: &[PrimExpr],
-    ) -> AResult<Vec<PrimExpr>> {
+        coordinates: &[Expr],
+    ) -> AResult<Vec<Expr>> {
         if coordinates.len() != region.extents.len() {
             return unsupported("Internal tile coordinate rank mismatch");
         }
@@ -684,8 +684,8 @@ impl<'a> Emitter<'a> {
     fn tile_region_indices(
         &mut self,
         region: &TileRegion,
-        linear: &PrimExpr,
-    ) -> AResult<Vec<PrimExpr>> {
+        linear: &Expr,
+    ) -> AResult<Vec<Expr>> {
         let coordinates = self.tile_coordinates(linear, &region.extents)?;
         self.tile_region_indices_from_coordinates(region, &coordinates)
     }
@@ -694,8 +694,8 @@ impl<'a> Emitter<'a> {
         &mut self,
         destination: &TileRegion,
         region: &TileRegion,
-        linear: &PrimExpr,
-    ) -> AResult<Vec<PrimExpr>> {
+        linear: &Expr,
+    ) -> AResult<Vec<Expr>> {
         if destination.extents.len() < region.extents.len() {
             return unsupported("Internal tile broadcast rank mismatch");
         }
@@ -719,7 +719,7 @@ impl<'a> Emitter<'a> {
     fn tile_load_owner_aligned_region(
         &mut self,
         region: &TileRegion,
-        logical_coordinates: &[PrimExpr],
+        logical_coordinates: &[Expr],
         source_op_id: i64,
     ) -> AResult<RustValue> {
         let indices = tile_logical_region_indices(region, logical_coordinates)?;
@@ -784,7 +784,7 @@ impl<'a> Emitter<'a> {
     fn tile_store_region_at_indices(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         value: RustValue,
         access_mask: Option<&str>,
         owner_aligned: bool,
@@ -915,7 +915,7 @@ impl<'a> Emitter<'a> {
     fn tile_store_region(
         &mut self,
         region: &TileRegion,
-        linear: &PrimExpr,
+        linear: &Expr,
         value: RustValue,
         access_mask: Option<&str>,
         source_op_id: i64,
@@ -934,7 +934,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         op: &ParsedTileCall,
         regions: &[TileRegion],
-        linear: &PrimExpr,
+        linear: &Expr,
         base_mask: &str,
     ) -> AResult<String> {
         let mut masks = Vec::new();
@@ -1031,7 +1031,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         op: &ParsedTileCall,
         regions: &[TileRegion],
-        linear: &PrimExpr,
+        linear: &Expr,
     ) -> AResult<String> {
         if regions.iter().any(|region| region.memory_scope == "local") {
             return Ok("ctx.active_mask()".to_owned());
@@ -1360,7 +1360,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         op: &ParsedTileCall,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
     ) -> AResult<(String, String)> {
         let owners = self.physical_owner_coordinates(&region.buffer, indices)?;
         let mut axes: Vec<String> = owners.iter().map(|(axis, _)| axis.clone()).collect();
@@ -1463,7 +1463,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         op: &ParsedTileCall,
         region: &TileRegion,
-        linear: &PrimExpr,
+        linear: &Expr,
         required_mask: &str,
     ) -> AResult<RustValue> {
         let indices = self.tile_broadcast_region_indices(&op.destination, region, linear)?;
@@ -2405,10 +2405,10 @@ impl<'a> Emitter<'a> {
         &mut self,
         source: &TileRegion,
         axes: &[i64],
-        output_linear: &PrimExpr,
-        reduction_linear: &PrimExpr,
+        output_linear: &Expr,
+        reduction_linear: &Expr,
         output_replication: i64,
-    ) -> AResult<Vec<PrimExpr>> {
+    ) -> AResult<Vec<Expr>> {
         let spatial_extents: Vec<i64> = source
             .extents
             .iter()
@@ -2421,7 +2421,7 @@ impl<'a> Emitter<'a> {
             .map(|axis| source.extents[*axis as usize])
             .collect();
         let spatial_linear;
-        let spatial_ref: &PrimExpr = if output_replication != 1 {
+        let spatial_ref: &Expr = if output_replication != 1 {
             let name = self.control_name("tile_spatial_output");
             self.emit_line(&format!(
                 "let {name}: i64 = {} / {output_replication}_i64;",
@@ -2891,7 +2891,7 @@ impl<'a> Emitter<'a> {
                 Uniformity::Varying,
             )
         };
-        let load_element = |emitter: &mut Self, coordinate: PrimExpr| -> AResult<RustValue> {
+        let load_element = |emitter: &mut Self, coordinate: Expr| -> AResult<RustValue> {
             let indices = emitter.tile_region_indices_from_coordinates(source, &[coordinate])?;
             emitter.emit_buffer_load(
                 &source.buffer,

@@ -1,7 +1,7 @@
 //! Host-evaluable scalar bindings used by runtime buffer shapes.
 
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{Expr, PrimExpr, TensorLoad, TensorLoadObj, Var};
+use tvm_tirx::ir::{Expr, TensorLoad, TensorLoadObj, Var};
 use tvm_tirx::ir::{BindObj, ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -10,8 +10,8 @@ use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder
 use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
 use super::util::{
-    as_buffer, buffer_scope, ident, int_imm_expr, oref, simplify, unsupported, AResult, IdSet,
-    TensorVarExt,
+    AResult, IdSet, TensorVarExt, as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr,
+    simplify, unsupported,
 };
 
 pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
@@ -24,7 +24,7 @@ pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
     Ok(bool::try_from(result)?)
 }
 
-fn is_zero_index(analyzer: &Analyzer, value: &PrimExpr) -> AResult<bool> {
+fn is_zero_index(analyzer: &Analyzer, value: &Expr) -> AResult<bool> {
     Ok(int_imm_expr(&simplify(analyzer, value)?) == Some(0))
 }
 
@@ -32,7 +32,7 @@ fn is_zero_index(analyzer: &Analyzer, value: &PrimExpr) -> AResult<bool> {
 #[derive(Clone)]
 pub enum Scalar {
     Int(i64),
-    Expr(PrimExpr),
+    Expr(Expr),
 }
 
 impl Scalar {
@@ -86,7 +86,7 @@ impl ShapeExpressionContext {
                 }
             }
         }
-        let stores: Vec<(ObjectRef, Var, Vec<PrimExpr>, PrimExpr)> = statements
+        let stores: Vec<(ObjectRef, Var, Vec<Expr>, Expr)> = statements
             .iter()
             .filter_map(|statement| {
                 statement.as_node::<TensorStoreObj>().map(|store| {
@@ -108,7 +108,7 @@ impl ShapeExpressionContext {
             if !["local", "local_scalar", "register", "reg"].contains(&scope.as_str()) {
                 continue;
             }
-            let shape: Vec<PrimExpr> = buffer.tensor_type().shape.iter().collect();
+            let shape: Vec<Expr> = buffer.tensor_type().shape.iter().collect();
             if shape.len() != 1 {
                 continue;
             }
@@ -179,7 +179,7 @@ impl ShapeExpressionContext {
                 return Err(error);
             }
             if structural_equal(&current, &resolved)? {
-                let simplified = simplify(analyzer, &PrimExpr::try_from(resolved)?)?;
+                let simplified = simplify(analyzer, &prim_expr(resolved)?)?;
                 return Ok(Scalar::Expr(simplified));
             }
             current = resolved;

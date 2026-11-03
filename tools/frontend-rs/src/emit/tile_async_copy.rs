@@ -6,11 +6,13 @@ use std::mem;
 
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{CallObj, IntImm, PrimExpr, PrimType, TensorLoadObj, Var};
+use tvm_tirx::ir::{CallObj, Expr, IntImm, PrimType, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{And, Cast, CastObj, LetObj, NotObj, Select, SelectObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::PrimExprExt;
+use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{expr_any, op_binary};
@@ -304,7 +306,7 @@ impl<'a> Emitter<'a> {
     pub fn emit_buffer_load_at_lane(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         execution_lane: &str,
         access_mask: Option<String>,
         zero_fill_invalid: bool,
@@ -347,7 +349,7 @@ impl<'a> Emitter<'a> {
     pub(super) fn physical_index_at_lane(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
         nonnegative_floor: bool,
@@ -371,7 +373,7 @@ impl<'a> Emitter<'a> {
     pub(super) fn physical_access_predicate_at_lane(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
     ) -> AResult<String> {
@@ -401,7 +403,7 @@ impl<'a> Emitter<'a> {
     pub(super) fn tmem_coordinates_at_lane(
         &mut self,
         buffer: &Var,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         execution_lane: &str,
         source_op_id: Option<i64>,
         buffer_load: Option<NestedLoadSite>,
@@ -458,7 +460,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         prefix: &str,
         extent: i64,
-        body: impl FnOnce(&mut Self, &PrimExpr) -> AResult<R>,
+        body: impl FnOnce(&mut Self, &Expr) -> AResult<R>,
     ) -> AResult<R> {
         let suffix = self.control_name(prefix);
         let rust_name = format!("{prefix}_{suffix}");
@@ -519,7 +521,7 @@ impl<'a> Emitter<'a> {
 pub(super) struct AsyncCopyEmitter<'e, 'a> {
     pub kernel: &'e mut Emitter<'a>,
     pub source_op_id: i64,
-    gather4: Vec<PrimExpr>,
+    gather4: Vec<Expr>,
 }
 
 impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
@@ -534,10 +536,10 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
     fn region_indices(
         &self,
         region: &TileRegion,
-        linear: &PrimExpr,
+        linear: &Expr,
         logical_shape: Option<&[i64]>,
-        gather4: &[PrimExpr],
-    ) -> AResult<Vec<PrimExpr>> {
+        gather4: &[Expr],
+    ) -> AResult<Vec<Expr>> {
         if !gather4.is_empty() {
             let shape = match logical_shape {
                 Some(shape) if shape.len() == 2 && region.mins.len() == 2 => shape,
@@ -572,9 +574,9 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
 
     fn axis_statically_in_bounds(
         &mut self,
-        minimum: &PrimExpr,
+        minimum: &Expr,
         region_extent: i64,
-        buffer_extent: &PrimExpr,
+        buffer_extent: &Expr,
         analyzer: &Analyzer,
     ) -> bool {
         let proved = || -> AResult<bool> {
@@ -582,14 +584,14 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
             let minimum = proofs.resolve_expression(minimum)?;
             let buffer_extent = proofs.resolve_expression(buffer_extent)?;
             let dtype = dtype_text(minimum.dtype());
-            let zero: PrimExpr = IntImm::new(&dtype, 0).into();
-            let extent: PrimExpr = IntImm::new(&dtype, region_extent).into();
+            let zero: Expr = IntImm::new(&dtype, 0).into();
+            let extent: Expr = IntImm::new(&dtype, region_extent).into();
             let lower = op_binary("_OpGE", expr_any(&minimum), expr_any(&zero))?;
             if !analyzer.can_prove(&lower)? {
                 return Ok(false);
             }
             let end = op_binary("_OpAdd", expr_any(&minimum), expr_any(&extent))?;
-            let bound: PrimExpr = Cast::new(PrimType::new(&dtype), buffer_extent, Location::unknown())?.into();
+            let bound: Expr = Cast::new(PrimType::new(&dtype), buffer_extent, Location::unknown())?.into();
             let upper = op_binary("_OpLE", expr_any(&end), expr_any(&bound))?;
             analyzer.can_prove(&upper).map_err(Into::into)
         };
@@ -599,12 +601,12 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
     fn bounds_predicate(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         force_all_axes: bool,
-    ) -> AResult<PrimExpr> {
+    ) -> AResult<Expr> {
         let analyzer = Analyzer::new();
-        let buffer_shape: Vec<PrimExpr> = region.buffer.tensor_type().shape.iter().collect();
-        let mut predicate: Option<PrimExpr> = None;
+        let buffer_shape: Vec<Expr> = region.buffer.tensor_type().shape.iter().collect();
+        let mut predicate: Option<Expr> = None;
         for axis in 0..region.mins.len() {
             let minimum = &region.mins[axis];
             let extent = region.extents[axis];
@@ -616,9 +618,9 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
                 continue;
             }
             let index_dtype = dtype_text(index.dtype());
-            let zero: PrimExpr = IntImm::new(&index_dtype, 0).into();
+            let zero: Expr = IntImm::new(&index_dtype, 0).into();
             let lower = op_binary("_OpGE", expr_any(index), expr_any(&zero))?;
-            let bound: PrimExpr =
+            let bound: Expr =
                 Cast::new(PrimType::new(&index_dtype), buffer_extent.clone(), Location::unknown())?.into();
             let upper = op_binary("_OpLT", expr_any(index), expr_any(&bound))?;
             let condition = prim(&oref(And::new(lower, upper, Location::unknown())?))?;
@@ -648,7 +650,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
     fn bounds_at_lane(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
         force_all_axes: bool,
@@ -780,7 +782,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         logical_shape: &[i64],
         space: &str,
         target_rank: &str,
-        gather4: &[PrimExpr],
+        gather4: &[Expr],
     ) -> AResult<Option<Capture>> {
         let itemsize = self
             .kernel
@@ -819,7 +821,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         logical_shape: &[i64],
         space: &str,
         target_rank: &str,
-        gather4: &[PrimExpr],
+        gather4: &[Expr],
         itemsize: i64,
         reject: NestedLoadSite,
     ) -> AResult<()> {
@@ -897,7 +899,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         role: &str,
         logical_shape: &[i64],
         target_rank: &str,
-        gather4: &[PrimExpr],
+        gather4: &[Expr],
     ) -> AResult<String> {
         let Some((space, _mapper)) = v2_space(&region.memory_scope) else {
             return unsupported(format!(
@@ -951,7 +953,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         role: &str,
         logical_shape: &[i64],
         target_rank: &str,
-        gather4: &[PrimExpr],
+        gather4: &[Expr],
     ) -> AResult<String> {
         let Some((space, mapper)) = v2_space(&region.memory_scope) else {
             return unsupported(format!(
@@ -1021,11 +1023,11 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         role: &str,
         logical_shape: &[i64],
         target_rank: &str,
-        gather4: &[PrimExpr],
+        gather4: &[Expr],
         itemsize: i64,
         space: &str,
         table: &str,
-        linear: &PrimExpr,
+        linear: &Expr,
     ) -> AResult<()> {
         let indices = self.region_indices(region, linear, Some(logical_shape), gather4)?;
         let linear_usize = self
@@ -1100,7 +1102,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         self.gather4 = match op.attribute("gather4") {
             Some(TileAttr::Values(values)) => values
                 .iter()
-                .map(|value| PrimExpr::try_from(value.clone()).map_err(Into::into))
+                .map(|value| prim_expr(value.clone()).map_err(Into::into))
                 .collect::<AResult<Vec<_>>>()?,
             _ => Vec::new(),
         };

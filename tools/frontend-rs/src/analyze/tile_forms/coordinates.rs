@@ -2,8 +2,10 @@
 
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{PrimExpr, Var};
+use tvm_tirx::ir::Var;
 use tvm_tirx::tvm_ffi::{self as tvm_ffi, Any, Array, Map, String as FfiString};
+use tvm_tirx::ir::Expr;
+use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary};
@@ -12,22 +14,22 @@ use super::parse::sorted_strings;
 use super::TileRegion;
 
 /// `Var(name, "int32")` as a primitive expression.
-pub(super) fn int32_var(name: &str) -> AResult<PrimExpr> {
+pub(super) fn int32_var(name: &str) -> AResult<Expr> {
     prim(&oref(Var::new(name, "int32", Location::unknown())))
 }
 
 /// TVM's `int -> PrimExpr` FFI fallback conversion (`TypeTraits<PrimExpr>`).
-pub(super) fn int_expr(value: i64) -> AResult<PrimExpr> {
+pub(super) fn int_expr(value: i64) -> AResult<Expr> {
     let converted: Any =
         tvm_ffi::cached_global_func!("prim.convert").call_tuple((int_any(value),))?;
-    Ok(PrimExpr::try_from(converted)?)
+    Ok(prim_expr(converted)?)
 }
 
 /// `int` or `PrimExpr` arithmetic exactly as Python evaluates it.
 #[derive(Clone)]
 pub enum Val {
     Int(i64),
-    Expr(PrimExpr),
+    Expr(Expr),
 }
 
 impl Val {
@@ -47,7 +49,7 @@ impl Val {
     }
 
     /// The value as one FFI argument of PrimExpr type.
-    fn expr(&self) -> AResult<PrimExpr> {
+    fn expr(&self) -> AResult<Expr> {
         match self {
             Val::Int(value) => int_expr(*value),
             Val::Expr(expr) => Ok(expr.clone()),
@@ -106,7 +108,7 @@ pub(super) fn vint(value: i64) -> Val {
     Val::Int(value)
 }
 
-pub(super) fn vexpr(expr: &PrimExpr) -> Val {
+pub(super) fn vexpr(expr: &Expr) -> Val {
     Val::Expr(expr.clone())
 }
 
@@ -116,7 +118,7 @@ pub(super) fn prove_equal(analyzer: &Analyzer, lhs: &Val, rhs: &Val) -> AResult<
 }
 
 /// `analyzer.simplify(value)` with Python's int conversion.
-pub(super) fn simplify_val(analyzer: &Analyzer, value: &Val) -> AResult<PrimExpr> {
+pub(super) fn simplify_val(analyzer: &Analyzer, value: &Val) -> AResult<Expr> {
     Ok(analyzer.simplify(&value.expr()?)?)
 }
 
@@ -125,9 +127,9 @@ pub(super) fn simplify_val(analyzer: &Analyzer, value: &Val) -> AResult<PrimExpr
 // ----------------------------------------------------------------------
 
 /// One `layout.apply(...)` result: physical axis name -> coordinate expression.
-pub(super) type Physical = Vec<(String, PrimExpr)>;
+pub(super) type Physical = Vec<(String, Expr)>;
 
-pub(super) fn physical_get<'a>(physical: &'a Physical, axis: &str) -> Option<&'a PrimExpr> {
+pub(super) fn physical_get<'a>(physical: &'a Physical, axis: &str) -> Option<&'a Expr> {
     physical
         .iter()
         .find(|(name, _)| name == axis)
@@ -159,7 +161,7 @@ pub(super) fn axes_subset(physical: &Physical, allowed: &[&str]) -> bool {
         .all(|(name, _)| allowed.contains(&name.as_str()))
 }
 
-fn logical_region_indices_at(region: &TileRegion, coordinates: &[Val]) -> AResult<Vec<PrimExpr>> {
+fn logical_region_indices_at(region: &TileRegion, coordinates: &[Val]) -> AResult<Vec<Expr>> {
     let expected_rank = region.extents.iter().filter(|extent| **extent != 1).count();
     if coordinates.len() != expected_rank {
         return unsupported(format!(
@@ -192,7 +194,7 @@ pub(super) fn physical_layout_coordinates_at(
         .join(", ");
     let indices = logical_region_indices_at(region, coordinates)?;
     let buffer_type = region.buffer.tensor_type();
-    let mapped = (|| -> tvm_ffi::Result<Map<FfiString, PrimExpr>> {
+    let mapped = (|| -> tvm_ffi::Result<Map<FfiString, Expr>> {
         let Some(layout) = buffer_type.layout.clone() else {
             return Err(ffi_error(
                 "'NoneType' object has no attribute 'canonicalize'",

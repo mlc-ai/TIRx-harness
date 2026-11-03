@@ -1,7 +1,7 @@
 //! A declared synchronization-word wait, using the raw load's decoded operands.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm_tirx::ir::{CallObj, IntImm, IntImmObj, PrimExpr, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, Expr, IntImm, IntImmObj, PtrTypeObj, TensorLoadObj};
 use tvm_tirx::ir::prim::{
     AndObj, CastObj, EQObj, GEObj, GTObj, LEObj, LTObj, NEObj, NotObj, OrObj, SelectObj,
 };
@@ -234,7 +234,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
                 values.push(None);
                 continue;
             }
-            let indices: Vec<PrimExpr> = coordinates
+            let indices: Vec<Expr> = coordinates
                 .iter()
                 .map(|coordinate| IntImm::new("int32", *coordinate).map(Into::into))
                 .collect::<tvm_ffi::Result<_>>()?;
@@ -261,7 +261,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         Ok((shape, values))
     }
 
-    fn flat_index(&mut self, indices: &[PrimExpr], shape: &[i64]) -> AResult<String> {
+    fn flat_index(&mut self, indices: &[Expr], shape: &[i64]) -> AResult<String> {
         if indices.len() != shape.len() {
             return unsupported(
                 "a candidate-indexed wait predicate has an invalid local-buffer rank",
@@ -290,7 +290,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
             );
         }
         let (shape, values) = self.capture_buffer(&source)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let index = self.flat_index(&indices, &shape)?;
         let arms = values
             .iter()

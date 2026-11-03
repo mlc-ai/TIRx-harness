@@ -1,6 +1,6 @@
 //! Closed vector IR form classification.
 
-use tvm_tirx::ir::{PrimExpr, TensorLoadObj, Var};
+use tvm_tirx::ir::{Expr, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{RampObj, ShuffleObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -9,7 +9,7 @@ use tvm_tirx::tvm_ffi::ObjectRefCore;
 use super::util::{buffer_dtype, dtype_of, oref, static_int, unsupported, AResult};
 use super::Ctx;
 
-fn static_field(ctx: &Ctx, value: &PrimExpr, field: &str) -> AResult<i64> {
+fn static_field(ctx: &Ctx, value: &Expr, field: &str) -> AResult<i64> {
     static_int(&ctx.analyzer, value, field, "must be a static integer")
 }
 
@@ -61,7 +61,7 @@ pub fn classify_vector_buffer_load(
         return Ok(None);
     };
     let buffer_dtype = buffer_dtype(source);
-    let indices: Vec<PrimExpr> = load.indices.iter().collect();
+    let indices: Vec<Expr> = load.indices.iter().collect();
     let ramp_axes: Vec<usize> = indices
         .iter()
         .enumerate()
@@ -94,13 +94,13 @@ pub fn classify_vector_buffer_load(
 
 pub enum VectorForm {
     Extract {
-        vector: PrimExpr,
+        vector: Expr,
         vector_dtype: String,
         result_dtype: String,
         index: i64,
     },
     Construct {
-        vectors: Vec<PrimExpr>,
+        vectors: Vec<Expr>,
         vector_dtype: String,
         element_dtype: String,
     },
@@ -111,8 +111,8 @@ pub fn classify_vector_extract(
     node: &ObjectRef,
     shuffle: &ShuffleObj,
 ) -> AResult<VectorForm> {
-    let vectors: Vec<PrimExpr> = shuffle.vectors.iter().collect();
-    let indices: Vec<PrimExpr> = shuffle.indices.iter().collect();
+    let vectors: Vec<Expr> = shuffle.vectors.iter().collect();
+    let indices: Vec<Expr> = shuffle.indices.iter().collect();
     if vectors.len() == 1 && indices.len() == 1 {
         let vector = oref(vectors[0].clone());
         let vector_dtype = dtype_of(&vector)?;

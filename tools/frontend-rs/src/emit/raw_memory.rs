@@ -12,7 +12,7 @@ use crate::emit::memory_support::{v2_memory_space_rust, v2_memory_type_rust_ptx}
 use crate::emit::{abi, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, expr_rust_type, scope_marker};
-use tvm_tirx::ir::{CallObj, PrimExpr, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -1517,7 +1517,7 @@ impl<'a> Emitter<'a> {
         let Some(source_buffer) = as_buffer(&oref(load.source.clone())) else {
             return crate::analyze::util::not_covered("ldg32 source is not a typed buffer");
         };
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let source_code = self.buffer_code(&source_buffer)?;
         if self.plan_of(&source_code).space != MemorySpace::Global {
             return unsupported(format!("{} source must be global memory", call.op_name));

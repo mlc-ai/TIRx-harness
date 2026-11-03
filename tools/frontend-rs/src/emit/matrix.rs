@@ -15,7 +15,7 @@ use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, v2_memory_type_rust, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm_tirx::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, Var, VarObj};
+use tvm_tirx::ir::{CallObj, Expr, FloatImmObj, IntImm, IntImmObj, TensorLoadObj, Var, VarObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -897,7 +897,7 @@ impl<'a> Emitter<'a> {
 
     /// `kernel.emit_buffer_address(buffer, zeros)`.
     fn matrix_buffer_base_address(&mut self, buffer: &Var) -> AResult<String> {
-        let mut zeros: Vec<PrimExpr> = Vec::new();
+        let mut zeros: Vec<Expr> = Vec::new();
         for _ in buffer.tensor_type().shape.iter() {
             zeros.push(IntImm::new("int32", 0).into());
         }
@@ -921,7 +921,7 @@ impl<'a> Emitter<'a> {
             return crate::analyze::util::not_covered("MMA register source is not a typed buffer");
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let pointer = self.emit_buffer_address(&buffer, &indices)?;
         let pointer_name = self.control_name(label);
         self.emit_line(&format!("let {pointer_name} = {};", pointer.code));

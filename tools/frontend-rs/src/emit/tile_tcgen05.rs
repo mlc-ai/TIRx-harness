@@ -2,10 +2,11 @@
 //! instruction call.
 
 use tvm_tirx::ir::Location;
-use tvm_tirx::ir::{PrimExpr, PrimType, Var};
+use tvm_tirx::ir::{Expr, PrimType, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tirx::TileLayout;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
+use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{axis_name, expr_any, int_any, op_binary, Extent, LayoutInfo};
@@ -47,11 +48,11 @@ fn tmem_to_local_m64_destination_layout(num: i64) -> Option<&'static str> {
     }
 }
 
-fn same_expr(lhs: &PrimExpr, rhs: &PrimExpr) -> AResult<bool> {
+fn same_expr(lhs: &Expr, rhs: &Expr) -> AResult<bool> {
     structural_equal(&Any::from(lhs.clone()), &Any::from(rhs.clone()))
 }
 
-fn same_optional_expr(lhs: &Option<PrimExpr>, rhs: &Option<PrimExpr>) -> AResult<bool> {
+fn same_optional_expr(lhs: &Option<Expr>, rhs: &Option<Expr>) -> AResult<bool> {
     match (lhs, rhs) {
         (None, None) => Ok(true),
         (Some(lhs), Some(rhs)) => same_expr(lhs, rhs),
@@ -133,7 +134,7 @@ struct TcgenTransferEmitter<'e, 'a> {
 
 impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
     /// `_static_int`.
-    fn static_int(&self, value: &PrimExpr, field: &str) -> AResult<i64> {
+    fn static_int(&self, value: &Expr, field: &str) -> AResult<i64> {
         static_int(
             &self.kernel.ctx.analyzer,
             value,
@@ -145,9 +146,9 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
     fn indices(
         &self,
         region: &TileRegion,
-        linear: &PrimExpr,
+        linear: &Expr,
         tmem_row_mode: &str,
-    ) -> AResult<Vec<PrimExpr>> {
+    ) -> AResult<Vec<Expr>> {
         let mut coordinates = linear_coordinates(linear, &region.extents)?;
         if tmem_row_mode == "m64_d_low_slab" {
             if coordinates.len() != 2 || region.extents[0] != 64 {
@@ -232,7 +233,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
         })
     }
 
-    fn is_static_zero(&self, value: &PrimExpr) -> bool {
+    fn is_static_zero(&self, value: &Expr) -> bool {
         match self.static_int(value, "canonical region minimum") {
             Ok(value) => value == 0,
             Err(_) => false,
@@ -327,7 +328,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
         let proof = || -> AResult<bool> {
             let (_, row) = tir_var("numsim_canonical_st_row", "int64")?;
             let (_, column) = tir_var("numsim_canonical_st_column", "int64")?;
-            let indices = |region: &TileRegion| -> AResult<Vec<PrimExpr>> {
+            let indices = |region: &TileRegion| -> AResult<Vec<Expr>> {
                 region
                     .mins
                     .iter()
@@ -348,7 +349,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
             let register_offset = self
                 .kernel
                 .physical_element_offset(&register.buffer, &register_indices)?;
-            let cast_to = |target: &PrimExpr, value: &PrimExpr| -> AResult<PrimExpr> {
+            let cast_to = |target: &Expr, value: &Expr| -> AResult<Expr> {
                 Ok(Cast::new(PrimType::new(&dtype_text(target.dtype())), value.clone(), Location::unknown())?.into())
             };
             if !analyzer.can_prove_equal(thread, &cast_to(thread, &row)?)?
@@ -455,7 +456,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
     fn regular_ref(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         target_rank: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -493,7 +494,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
     fn tmem_ref(
         &mut self,
         region: &TileRegion,
-        indices: &[PrimExpr],
+        indices: &[Expr],
         lane: &str,
         target_rank: &str,
         lane_offset: i64,

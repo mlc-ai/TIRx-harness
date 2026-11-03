@@ -8,7 +8,7 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
-    CallObj, ExprObj, FloatImmObj, GlobalVarObj, IntImmObj, LocationObj, OpaqueExprObj, PrimExpr,
+    CallObj, Expr, ExprObj, FloatImmObj, GlobalVarObj, IntImmObj, LocationObj, OpaqueExprObj,
     PrimTypeObj, PtrTypeObj, SequentialSpanObj, TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var,
     VarObj,
 };
@@ -435,8 +435,32 @@ pub fn buffer_ref(buffer: &Var) -> ObjectRef {
     oref(buffer.clone())
 }
 
-pub fn prim(node: &ObjectRef) -> AResult<PrimExpr> {
-    Ok(PrimExpr::try_from(Any::from(node.clone()))?)
+pub fn prim(node: &ObjectRef) -> AResult<Expr> {
+    prim_expr(Any::from(node.clone()))
+}
+
+/// `value` as a primitive expression: an `Expr` whose type is a `PrimType`.
+pub fn prim_expr(value: impl Into<Any>) -> AResult<Expr> {
+    let expr = Expr::try_from(value.into())?;
+    if prim_dtype(&expr.ty).is_none() {
+        return Err(Failure::Ffi(Error::new(
+            tvm_ffi::TYPE_ERROR,
+            "expected an expression whose type is a PrimType",
+            "",
+        )));
+    }
+    Ok(expr)
+}
+
+/// The dtype of a primitive expression; panics on another type, which `prim_expr` rules out.
+pub trait PrimExprExt {
+    fn dtype(&self) -> DLDataType;
+}
+
+impl PrimExprExt for Expr {
+    fn dtype(&self) -> DLDataType {
+        prim_dtype(&self.ty).expect("primitive expression type invariant was violated")
+    }
 }
 
 pub fn int_imm(node: &ObjectRef) -> Option<i64> {
@@ -444,18 +468,18 @@ pub fn int_imm(node: &ObjectRef) -> Option<i64> {
         .and_then(|imm| int_value(imm).ok())
 }
 
-pub fn int_imm_expr(expr: &PrimExpr) -> Option<i64> {
+pub fn int_imm_expr(expr: &Expr) -> Option<i64> {
     expr.as_node::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
 }
 
-pub fn simplify(analyzer: &Analyzer, expr: &PrimExpr) -> AResult<PrimExpr> {
+pub fn simplify(analyzer: &Analyzer, expr: &Expr) -> AResult<Expr> {
     Ok(analyzer.simplify(expr)?)
 }
 
 pub fn static_int(
     analyzer: &Analyzer,
-    expr: &PrimExpr,
+    expr: &Expr,
     field: &str,
     requirement: &str,
 ) -> AResult<i64> {
