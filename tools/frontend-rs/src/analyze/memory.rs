@@ -12,8 +12,8 @@ use super::buffers::BufferBindings;
 use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
 use super::util::{
-    buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, prim_expr, same, unsupported,
-    AResult, IdSet, TensorVarExt,
+    buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, prim_expr, same, tensor_var,
+    unsupported, AResult, IdSet, TensorVarExt,
 };
 use super::Ctx;
 use crate::decode::projected_buffer;
@@ -142,7 +142,7 @@ pub fn referenced_buffers(
         if node.as_node::<AllocBufferObj>().is_some() || node.as_node::<DeclBufferObj>().is_some() {
             // Allocations and declarations record no reference here.
         } else if let Some(store) = node.as_node::<TensorStoreObj>() {
-            append(Some(store.buffer.clone()), &mut seen, &mut referenced);
+            append(Some(tensor_var(&oref(store.dest.clone()))?), &mut seen, &mut referenced);
         } else if let Some(region) = node.as_node::<TensorRegionObj>() {
             append(
                 super::util::as_buffer(&oref(region.source.clone())),

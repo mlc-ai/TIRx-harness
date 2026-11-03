@@ -10,8 +10,8 @@ use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder
 use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
 use super::util::{
-    AResult, IdSet, TensorVarExt, as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr,
-    simplify, unsupported,
+    as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr, simplify, tensor_var,
+    unsupported, AResult, IdSet, TensorVarExt,
 };
 
 pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
@@ -90,15 +90,15 @@ impl ShapeExpressionContext {
             .iter()
             .filter_map(|statement| {
                 statement.as_node::<TensorStoreObj>().map(|store| {
-                    (
+                    Ok((
                         oref(statement.clone()),
-                        store.buffer.clone(),
+                        tensor_var(&oref(store.dest.clone()))?,
                         store.indices.iter().collect(),
                         store.value.clone(),
-                    )
+                    ))
                 })
             })
-            .collect();
+            .collect::<AResult<_>>()?;
         let mut initializers = Vec::new();
         for (node, buffer, indices, value) in &stores {
             if controlled.contains(node) {

@@ -250,7 +250,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                     dtype: buffer_dtype(&buffer),
                     memory_scope: memory_scope(&buffer),
                     buffer,
-                    mins: ranges.iter().map(|item| item.min.clone()).collect(),
+                    mins: ranges.iter().map(|item| item.begin.clone()).collect(),
                     extents,
                 }));
             }

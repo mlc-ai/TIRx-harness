@@ -14,7 +14,8 @@ use tvm_tirx::tvm_ffi::{object::ObjectRef, ObjectRefCore};
 
 use super::frontend::KernelPlan;
 use super::util::{
-    as_buffer, as_var, dtype_of, ffi_text, int_imm, oref, same, tensor_var, AResult, IdMap, IdSet,
+    as_buffer, as_var, dtype_of, enum_name, ffi_text, int_imm, oref, same, tensor_var, AResult,
+    IdMap, IdSet,
 };
 use super::Ctx;
 use crate::decode::pointers::{
@@ -105,7 +106,7 @@ impl<'a> PointerTargets<'a> {
                     .set(oref(bind.var.clone()), oref(bind.value.clone()));
             }
             if let Some(store) = node.as_node::<TensorStoreObj>() {
-                let key = plan.buffer_bindings.storage_key(&store.buffer)?;
+                let key = plan.buffer_bindings.storage_key(&tensor_var(&oref(store.dest.clone()))?)?;
                 if let Some(defs) = writes.get_mut(&key) {
                     defs.push(vec![oref(store.value.clone())]);
                 }
@@ -236,7 +237,7 @@ impl<'a> PointerTargets<'a> {
                     if pointer.element_type.as_node::<TensorMapTypeObj>().is_some() {
                         return Ok(Fact::Unknown);
                     }
-                    if ffi_text(&pointer.storage_scope) == "global" {
+                    if enum_name(&*pointer.scope) == "global" {
                         return Ok(Fact::target(Target::Pointer(index)));
                     }
                 }

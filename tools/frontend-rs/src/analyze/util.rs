@@ -20,8 +20,9 @@ use tvm_tirx::ir::prim::{
 };
 use tvm_tirx::ir::{
     AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
-    SeqStmtObj, StmtObj, TensorStoreObj, WhileObj,
+    SeqStmtObj, Stmt, StmtObj, TensorStoreObj, WhileObj,
 };
+use tvm_tirx::tirx::Function;
 use tvm_tirx::tirx::{
     AllocBufferObj,
     AttrStmtObj,
@@ -30,7 +31,6 @@ use tvm_tirx::tirx::{
     TensorTypeObj,
     TilePrimitiveCallObj,
 };
-use tvm_tirx::runtime::{MemoryScope, MemoryScopeObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     self, Any, AnyView, DLDataType, DLDataTypeExt, Error, FieldGetter, ObjectCore, ObjectIdentity,
@@ -396,6 +396,14 @@ pub fn is_tensor_var(var: &Var) -> bool {
     var.ty.as_node::<TensorTypeObj>().is_some()
 }
 
+/// The body of a function definition. A declaration has none, so it cannot be analyzed.
+pub fn function_body(func: &Function) -> AResult<Stmt> {
+    match &func.body {
+        Some(body) => Ok(body.clone().into()),
+        None => unsupported("a function declaration has no body to analyze"),
+    }
+}
+
 pub fn as_buffer(node: &ObjectRef) -> Option<Var> {
     as_var(node).filter(is_tensor_var)
 }
@@ -420,14 +428,15 @@ pub fn buffer_dtype(buffer: &Var) -> String {
 }
 
 pub fn buffer_scope(buffer: &Var) -> String {
-    scope_name(&buffer.tensor_type().scope)
+    enum_name(&*buffer.tensor_type().scope)
 }
 
-/// The name of a memory scope, such as `shared` or `tmem` (Python `MemoryScope.name`).
-pub fn scope_name(scope: &MemoryScope) -> String {
-    let name: FfiString = FieldGetter::new(MemoryScopeObj::type_index(), "_str_index")
-        .and_then(|getter| getter.get(&**scope))
-        .expect("memory scopes are named");
+/// The name of an `ffi.Enum` value, such as a memory scope (`shared`) or a layout axis
+/// (`TCol`); Python's `.name`.
+pub fn enum_name<T: ObjectCore>(value: &T) -> String {
+    let name: FfiString = FieldGetter::new(T::type_index(), "_str_index")
+        .and_then(|getter| getter.get(value))
+        .expect("ffi.Enum values are named");
     ffi_text(&name)
 }
 

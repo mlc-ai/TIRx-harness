@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use crate::analyze::buffers::{call_op_name, BufferBindings};
 use crate::analyze::util::{
-    as_buffer, dtype_of, dtype_text, ffi_text, int_const, int_imm, kind, oref, prim, same,
-    unsupported, AResult, Json,
+    as_buffer, dtype_of, dtype_text, ffi_text, function_body, int_const, int_imm, kind, oref, prim,
+    same, unsupported, AResult, Json,
 };
 use crate::decode::projected_buffer;
 use tvm_tirx::sym::Analyzer;
@@ -362,7 +362,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         implicit_tensor_map_metadata(&func)?;
         return Ok(func);
     }
-    let body = func.body().clone();
+    let body = function_body(func)?;
     let statements: Vec<Stmt> = match body.as_node::<SeqStmtObj>() {
         Some(sequence) => sequence.seq.iter().collect(),
         None => vec![body],
@@ -493,7 +493,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         return unsupported(format!("host TensorMaps are not encoded: {missing:?}"));
     }
     let bindings = BufferBindings::build(
-        &crate::walk_statements(func.body().clone())?
+        &crate::walk_statements(function_body(func)?)?
             .iter()
             .collect::<Vec<_>>(),
     )?;
@@ -540,7 +540,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         let normalized = if name == original {
             variable.clone()
         } else {
-            let renamed = variable.copy_with(FfiString::from(name), variable.ty.clone());
+            let renamed = Var::new(&name, variable.ty.clone(), variable.loc.clone());
             renames.push((variable.clone(), renamed.clone().into()));
             renamed
         };

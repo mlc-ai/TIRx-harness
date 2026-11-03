@@ -8,9 +8,9 @@ use tvm_tirx::tvm_ffi::{
 };
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_const, int_imm_expr, not_covered, oref,
-    prim, prim_expr, repr_of, simplify, static_int as shared_static_int, unsupported, AResult,
-    Failure, PrimExprExt, TensorVarExt,
+    buffer_dtype, buffer_name, buffer_scope, enum_name, ffi_text, int_const, int_imm_expr,
+    not_covered, oref, prim, prim_expr, repr_of, simplify, static_int as shared_static_int,
+    unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
 };
 use crate::schema::Schema;
 
@@ -151,7 +151,7 @@ fn prove_equal(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr, field: &str) -> ARes
 }
 
 pub fn axis_name(axis: &tvm_tirx::tirx::Axis) -> AResult<String> {
-    Ok(ffi_text(&axis.name()?))
+    Ok(enum_name(&**axis))
 }
 
 fn iter_signature(items: &Array<tvm_tirx::tirx::Iter>) -> AResult<String> {
@@ -273,12 +273,12 @@ fn full_domain_physical_span(
     if let Ok(tile_layout) = layout.clone().try_cast::<TileLayout>() {
         atom_size = static_int(
             analyzer,
-            &layout.get_size(None)?,
+            &layout.size(None)?,
             &format!("{name}:layout atom size"),
         )?;
         atom_span = static_int(
             analyzer,
-            &layout.get_span(Some("m"))?,
+            &layout.span(Some("m"))?,
             &format!("{name}:layout atom span"),
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
@@ -289,12 +289,12 @@ fn full_domain_physical_span(
             .try_cast::<TileLayout>()?;
         atom_size = static_int(
             analyzer,
-            &tile_layout.get_size(None)?,
+            &Layout::from(tile_layout.clone()).size(None)?,
             &format!("{name}:layout atom size"),
         )?;
         atom_span = static_int(
             analyzer,
-            &layout.get_span(None)?,
+            &layout.span(None)?,
             &format!("{name}:layout atom span"),
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
@@ -628,7 +628,7 @@ pub fn inspect_buffer_layout(
                 };
                 let span = static_int(
                     analyzer,
-                    &canonical.get_span(Some(axis))?,
+                    &canonical.span(Some(axis))?,
                     &format!("{name}:{axis} span"),
                 )?;
                 if span <= 0 || span > limit {
@@ -639,7 +639,7 @@ pub fn inspect_buffer_layout(
             }
             prove_equal(
                 analyzer,
-                &canonical.get_size(None)?,
+                &canonical.size(None)?,
                 &expected_elements_expr,
                 &format!("{name}:layout size"),
             )?;
@@ -648,7 +648,7 @@ pub fn inspect_buffer_layout(
             } else {
                 static_int(
                     analyzer,
-                    &canonical.get_span(Some("m"))?,
+                    &canonical.span(Some("m"))?,
                     &format!("{name}:m span"),
                 )?
             };
@@ -709,7 +709,7 @@ pub fn inspect_buffer_layout(
                     Some(offset) => {
                         let relative = op_binary(
                             "_OpSub",
-                            expr_any(&canonical.get_span(Some("m"))?),
+                            expr_any(&canonical.span(Some("m"))?),
                             expr_any(offset),
                         )?;
                         static_int(
@@ -744,7 +744,7 @@ pub fn inspect_buffer_layout(
             Some(offset) => {
                 let relative = op_binary(
                     "_OpSub",
-                    expr_any(&canonical.get_span(None)?),
+                    expr_any(&canonical.span(None)?),
                     expr_any(offset),
                 )?;
                 static_int(
@@ -919,7 +919,7 @@ fn inspect_tmem(
     }
     let lane_span = static_int(
         analyzer,
-        &canonical.get_span(Some("TLane"))?,
+        &canonical.span(Some("TLane"))?,
         &format!("{name}:TLane span"),
     )?;
     if lane_span <= 0 || lane_span > 128 {
@@ -929,7 +929,7 @@ fn inspect_tmem(
     }
     let tcol_capacity = match static_int(
         analyzer,
-        &canonical.get_span(Some("TCol"))?,
+        &canonical.span(Some("TCol"))?,
         &format!("{name}:TCol span"),
     ) {
         Ok(value) => value,

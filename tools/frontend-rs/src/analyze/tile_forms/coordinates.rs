@@ -5,6 +5,7 @@ use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::Var;
 use tvm_tirx::tvm_ffi::{self as tvm_ffi, Any, Array, Map, String as FfiString};
 use tvm_tirx::ir::Expr;
+use tvm_tirx::ir::PrimType;
 use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
 
@@ -15,7 +16,7 @@ use super::TileRegion;
 
 /// `Var(name, "int32")` as a primitive expression.
 pub(super) fn int32_var(name: &str) -> AResult<Expr> {
-    prim(&oref(Var::new(name, "int32", Location::unknown())))
+    prim(&oref(Var::new(name, PrimType::int(32), Location::unknown())))
 }
 
 /// TVM's `int -> PrimExpr` FFI fallback conversion (`TypeTraits<PrimExpr>`).

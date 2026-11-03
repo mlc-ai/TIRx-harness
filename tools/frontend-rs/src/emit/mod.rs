@@ -7,6 +7,7 @@ use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use crate::analyze::util::function_body;
 use crate::analyze::util::TensorVarExt;
 
 pub mod abi;
@@ -610,7 +611,7 @@ impl<'a> Emitter<'a> {
     }
 
     pub fn emit(&mut self) -> AResult<String> {
-        let body = self.func.body().clone();
+        let body = function_body(&self.func)?;
         self.emit_stmt(&body, None)?;
         Ok(self.lines.join("\n"))
     }

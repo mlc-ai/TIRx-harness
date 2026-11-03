@@ -153,7 +153,7 @@ fn ptx_call_parts(call: Call, modifier_count: i64) -> Result<Array<Any>> {
         })
         .collect::<Vec<_>>();
     Ok(Array::new(vec![
-        call.op.clone().try_cast::<Op>()?.name()?.into(),
+        call.op.clone().try_cast::<Op>()?.name.clone().into(),
         call.args.clone().into(),
         Array::new(tokens).into(),
         call.span.clone().into(),
@@ -342,7 +342,7 @@ fn launch_topology(
         };
         values.insert(analyze::util::oref(variable), value);
     }
-    let topology = analyze::topology::extract_topology(&context, &func.body(), values)?;
+    let topology = analyze::topology::extract_topology(&context, &analyze::util::function_body(&func)?, values)?;
     Ok(topology.json().to_string().into())
 }
 

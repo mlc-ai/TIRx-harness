@@ -201,9 +201,10 @@ pub(super) fn validate_tcgen_smem_layout(
         if shape[axis] == 1 {
             variables.push(int_const("int32", 0)?.into());
         } else {
-            variables.push(prim(&oref(Var::with_type(
+            variables.push(prim(&oref(Var::new(
                 &format!("numsim_{}_{axis}", role.to_lowercase()),
                 PrimType::from_dtype(extent.dtype())?,
+                Location::unknown(),
             )))?);
         }
     }

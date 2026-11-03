@@ -14,7 +14,7 @@ use super::util::{as_buffer, buffer_ref, buffer_scope, ffi_text, oref, same, ARe
 /// Name of the op called by a `Call` node, if the callee is an `Op`.
 pub fn call_op_name(call: &CallObj) -> AResult<Option<String>> {
     match call.op.clone().try_cast::<Op>() {
-        Ok(op) => Ok(Some(ffi_text(&op.name()?))),
+        Ok(op) => Ok(Some(ffi_text(&op.name))),
         Err(_) => Ok(None),
     }
 }

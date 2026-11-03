@@ -1,6 +1,8 @@
 //! `analyze_primfunc` producing the kernel manifest and its source nodes.
 
-use crate::analyze::util::{is_tensor_var, json_object, json_strings, TensorVarExt};
+use crate::analyze::util::{
+    enum_name, function_body, is_tensor_var, json_object, json_strings, tensor_var, TensorVarExt,
+};
 use tvm_tirx::ir::Location;
 use tvm_tirx::ir::StringImm;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
@@ -159,10 +161,10 @@ pub struct ParameterSpec {
 }
 
 pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
-    let statements: Vec<Stmt> = crate::walk_statements(func.body().clone())?
+    let statements: Vec<Stmt> = crate::walk_statements(function_body(func)?)?
         .iter()
         .collect();
-    let nodes: Vec<ObjectRef> = crate::post_order_nodes(oref(func.body().clone()))?
+    let nodes: Vec<ObjectRef> = crate::post_order_nodes(oref(function_body(func)?))?
         .iter()
         .collect();
     let buffer_bindings = BufferBindings::build(&statements)?;
@@ -206,7 +208,7 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
     let uses_readonly_proxy = crate::emit::raw_memory::uses_readonly_proxy(&nodes)?;
     let name = kernel_name(func)?;
     let hash = structural_hash(func)?;
-    let topology = extract_topology(ctx, func.body(), Default::default())?;
+    let topology = extract_topology(ctx, &function_body(func)?, Default::default())?;
     let implicit_tensor_maps = crate::emit::raw_tma::implicit_tensor_map_metadata(func)?;
     let (tensor_maps, tensor_map_parameters) = crate::emit::raw_tma::tensor_map_specs(
         &implicit_tensor_maps,
@@ -385,10 +387,11 @@ fn check_node(
         }
     }
     if let Some(store) = node.as_node::<TensorStoreObj>() {
-        if !is_supported_buffer_dtype(ctx, &store.buffer) {
+        let buffer = tensor_var(&oref(store.dest.clone()))?;
+        if !is_supported_buffer_dtype(ctx, &buffer) {
             unsupported.push(format!(
                 "op#{op_id}:BufferStore(dtype={})",
-                buffer_dtype(&store.buffer)
+                buffer_dtype(&buffer)
             ));
         }
     }
@@ -565,7 +568,7 @@ fn scalar_and_pointer_entries(
                 continue;
             }
             let name = ffi_text(&parameter.name);
-            let storage_scope = ffi_text(&pointer.storage_scope);
+            let storage_scope = enum_name(&*pointer.scope);
             pointers.push(json_object(vec![
                 ("name", Json::String(name.clone())),
                 ("dtype", Json::String(dtype.clone())),

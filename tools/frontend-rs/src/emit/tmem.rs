@@ -8,6 +8,7 @@ use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::tensor_var;
 use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
 
@@ -402,10 +403,10 @@ impl<'a> Emitter<'a> {
         value: &RustValue,
         buffer_ref: &str,
     ) -> AResult<()> {
+        let buffer = tensor_var(&oref(stmt.dest.clone()))?;
         let indices: Vec<Expr> = stmt.indices.iter().collect();
-        let (lane, tcol, allocated_addr) =
-            self.tmem_coordinates(&stmt.buffer, &indices, Some(op_id))?;
-        let access_marker = self.tmem_access_marker(&stmt.buffer)?;
+        let (lane, tcol, allocated_addr) = self.tmem_coordinates(&buffer, &indices, Some(op_id))?;
+        let access_marker = self.tmem_access_marker(&buffer)?;
         let memory_dtype = if dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu" {
             "uint8"
         } else {
@@ -427,7 +428,7 @@ impl<'a> Emitter<'a> {
         }
         let marker = v2_memory_type_rust(self.ctx.schema, memory_dtype)?;
         let site = self.v2_site(Some(op_id));
-        let logical_name = self.logical_buffer_name(&stmt.buffer)?;
+        let logical_name = self.logical_buffer_name(&buffer)?;
         let invocation = abi::warp_call(
             "tmem::write",
             &site,

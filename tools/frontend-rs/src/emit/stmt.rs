@@ -14,6 +14,7 @@ use tvm_tirx::tirx::{
 };
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::tensor_var;
 use crate::analyze::util::prim_expr;
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
@@ -1833,11 +1834,12 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_store(&mut self, node: &ObjectRef, stmt: &TensorStoreObj) -> AResult<()> {
-        self.record_global_write(&stmt.buffer)?;
+        let buffer = tensor_var(&oref(stmt.dest.clone()))?;
+        self.record_global_write(&buffer)?;
         let op_id = self.static_op_id(node)?;
-        let dtype = buffer_dtype(&stmt.buffer);
+        let dtype = buffer_dtype(&buffer);
         let (space, itemsize, dynamic) = {
-            let code = self.buffer_code(&stmt.buffer)?;
+            let code = self.buffer_code(&buffer)?;
             let plan = self.plan_of(code);
             (
                 plan.space,
@@ -1872,7 +1874,7 @@ impl<'a> Emitter<'a> {
                 value.rust_type
             ));
         }
-        let buffer_ref = self.buffer_ref(&stmt.buffer)?;
+        let buffer_ref = self.buffer_ref(&buffer)?;
         if space == MemorySpace::Tmem {
             return self.emit_tmem_store(stmt, op_id, &dtype, &value, &buffer_ref);
         }
@@ -1882,8 +1884,8 @@ impl<'a> Emitter<'a> {
             );
         }
         let indices: Vec<Expr> = stmt.indices.iter().collect();
-        let index = self.physical_index(&stmt.buffer, &indices)?;
-        let access_mask = self.physical_access_mask(&stmt.buffer, &indices, "ctx.active_mask()")?;
+        let index = self.physical_index(&buffer, &indices)?;
+        let access_mask = self.physical_access_mask(&buffer, &indices, "ctx.active_mask()")?;
         let space_marker = if dynamic {
             Some("v2::Generic")
         } else {
@@ -1916,7 +1918,7 @@ impl<'a> Emitter<'a> {
             ));
         }
         let marker = v2_memory_type_rust(self.ctx.schema, &memory_dtype)?;
-        let logical_name = self.logical_buffer_name(&stmt.buffer)?;
+        let logical_name = self.logical_buffer_name(&buffer)?;
         let address = abi::buffer_address(
             space_marker,
             &buffer_ref,

@@ -49,7 +49,7 @@ pub(super) fn int64_imm(value: i64) -> AResult<Expr> {
 
 /// `tirx.Var(name, dtype)` as a primitive expression together with its identity.
 pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, Expr)> {
-    let variable = oref(Var::new(name, dtype, Location::unknown()));
+    let variable = oref(Var::new(name, prim_type(dtype)?, Location::unknown()));
     let expr = prim(&variable)?;
     Ok((variable, expr))
 }
