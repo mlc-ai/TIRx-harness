@@ -299,6 +299,8 @@ pub struct Emitter<'a> {
     pub capturing_for_statements: IdSet,
     pub dynamic_buffers: Vec<(Var, String)>,
     pub logical_buffer_name_cache: Vec<(Var, String)>,
+    /// The checker identity of each ordinary logical root, unique per root.
+    pub logical_root_names: Vec<(Var, String)>,
     pub loop_transfer_cache: IdMap<bool>,
     pub subtree_may_suspend_cache: IdMap<bool>,
     pub failed_inner_uniform_if_splits: IdSet,
@@ -589,6 +591,7 @@ impl<'a> Emitter<'a> {
             capturing_for_statements: IdSet::default(),
             dynamic_buffers: Vec::new(),
             logical_buffer_name_cache: Vec::new(),
+            logical_root_names: Vec::new(),
             loop_transfer_cache: IdMap::default(),
             subtree_may_suspend_cache: IdMap::default(),
             failed_inner_uniform_if_splits: IdSet::default(),

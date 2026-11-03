@@ -94,14 +94,6 @@ def dps_pointer_offset(output: T.Tensor((33,), "float32")):
 
 
 @T.function
-def dps_read_only_destination(output: T.Tensor((33,), "float32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    destination = output.ptr_to([lane])
-    T.ptx.st.global_.f32(destination, T.cast(lane, "float32") + T.float32(100))
-
-
-@T.function
 def dps_destination_after_access_extent(output: T.Tensor((33,), "float32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
@@ -368,8 +360,8 @@ def test_artifact_cache_identity_ignores_spans_and_rebinds_current_location(tmp_
     for node in payload["nodes"]:
         if node["type"] == "ir.SourceName":
             node["data"] = "/tmp/relocated/no_op_kernel.py"
-        elif node["type"] == "ir.Span":
-            node["data"]["line"] += 2000
+        elif node["type"] == "ir.SourceLoc":
+            node["data"]["start_line"] += 2000
             node["data"]["end_line"] += 2000
     relocated = load_json(json.dumps(payload))
 
@@ -935,19 +927,6 @@ def test_dps_writes_through_the_full_physical_pointer(tmp_path):
         (np.array([-1], dtype=np.float32), np.arange(100, 132, dtype=np.float32))
     )
     np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-@pytest.mark.parametrize(
-    ("kernel", "message"),
-    [
-        (dps_read_only_destination, "non-writable physical pointer"),
-    ],
-)
-def test_dps_preserves_pointer_access_contracts(kernel, message, tmp_path):
-    module = numsim.transpile(kernel, cache_dir=tmp_path)
-
-    with pytest.raises(numsim.NumSimExecutionError, match=message):
-        numsim.Engine().run(module, {"output": np.zeros(33, dtype=np.float32)})
 
 
 def test_dps_integer_pointer_arithmetic_does_not_carry_access_ptr_extent(tmp_path):

@@ -161,7 +161,7 @@ def test_error_recovery_respects_expression_let_scope(dtype, tmp_path):
         )
 
 
-@pytest.mark.parametrize("threads", [64, 128])
+@pytest.mark.parametrize("threads", [48, 128])
 def test_native_topology_returns_semantic_errors_as_data(threads):
     kernel = tvm_tirx.script.from_source(
         f"""
@@ -176,11 +176,12 @@ def kernel():
     result = native_frontend._library()["numsim_launch_topology"](
         kernel, native_frontend.compile_schema(), tvm_ffi.convert({})
     )
-    if threads == 64:
+    if threads == 48:
         assert result["value"] is None
         assert result["error"]["kind"] == "unsupported"
-        assert "warpgroup thread extent must be 128" in result["error"]["message"]
-        with pytest.raises(UnsupportedTIRxError, match="warpgroup thread extent must be 128"):
+        message = "CTA thread extent 48 is not a whole number of warps"
+        assert message in result["error"]["message"]
+        with pytest.raises(UnsupportedTIRxError, match=message):
             native_frontend.launch_topology(kernel, {})
     else:
         assert result["error"] is None

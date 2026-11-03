@@ -246,7 +246,7 @@ def reused_blocking_mbarrier_wait_pointer(output: T.Tensor((32,), "uint32")):
 
 @T.function
 def reused_scalar_wait_pointers(output: T.Tensor((32, 4), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64")
     response = T.alloc_shared((4,), "uint32", align=16)
@@ -311,7 +311,7 @@ def reused_prefetch_l2_pointer(source: T.Tensor((32,), "uint32")):
 
 @T.function
 def reused_mapa_source_pointer():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((1,), "uint32")
     first = T.alloc_local((1,), "uint64")
@@ -325,7 +325,7 @@ def reused_mapa_source_pointer():
 
 @T.function
 def reused_st_async_cluster_task_info_pointers():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     destination = T.alloc_shared((8,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=8)

@@ -14,6 +14,7 @@ from tests.numsim.corpus.kernels.gemm import (
     _pack_e2m1,
 )
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import (
     ComparisonSpec,
     NumSimCase,
@@ -1806,12 +1807,13 @@ def prepare_cudnn_dsa_sparse_attention_backward_case() -> NumSimCase:
         "scale": scale,
     }
     kernels = tuple(
-        kernel.specialize(
+        specialize(
+            kernel,
             {
                 parameter: launch_values[parameter.name]
                 for parameter in kernel.params
                 if parameter.name in launch_values
-            }
+            },
         )
         for kernel in dsa_sparse_attention_backward.get_kernel(**config)
     )
@@ -2335,12 +2337,13 @@ def prepare_cudnn_bsa_forward_combine_blk64_case() -> NumSimCase:
         seqlen_q=seqlen_q,
         kv_splits=num_splits,
     )
-    kernel = kernel.specialize(
+    kernel = specialize(
+        kernel,
         {
             parameter: launch_values[parameter.name]
             for parameter in kernel.params
             if parameter.name in launch_values
-        }
+        },
     )
 
     return NumSimCase(
@@ -2385,8 +2388,8 @@ def prepare_cudnn_csa_compressor_fwd_case() -> NumSimCase:
     expected = np.sum(kv_f32 * weights, axis=0, dtype=np.float32)
 
     kernel = csa_compressor_fwd.get_kernel(head_dim=head_dim, coff=coff)
-    kernel = kernel.specialize(
-        {param: 1 for param in kernel.params if param.name in {"nb_total", "n_seq"}}
+    kernel = specialize(
+        kernel, {param: 1 for param in kernel.params if param.name in {"nb_total", "n_seq"}}
     )
 
     return NumSimCase(

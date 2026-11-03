@@ -7,7 +7,9 @@ use tvm_tirx::ir::Location;
 use tvm_tirx::ir::StringImm;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{CastObj, RampObj, ShuffleObj};
-use tvm_tirx::ir::{Evaluate, ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj};
+use tvm_tirx::ir::{
+    Evaluate, EvaluateObj, ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
+};
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiString, WalkOrder};
@@ -86,13 +88,43 @@ fn node_text(node: &ObjectRef) -> AResult<String> {
         repr_text(node)?.trim().to_owned()
     };
     if looks_like_address_printer(&text) {
-        return not_covered("node text falls back to the address printer");
+        let Some(fallback) = call_text(node)? else {
+            return not_covered("node text falls back to the address printer");
+        };
+        text = fallback;
     }
     let chars: Vec<char> = text.chars().collect();
     if chars.len() > 1000 {
         text = format!("{}...", chars[..997].iter().collect::<String>());
     }
     Ok(text)
+}
+
+/// `T.<op>(<operands>)` for a call, or an evaluated call, that the TVMScript
+/// printer can only show by address. tvm-tirx's printer recovers a PTX call's
+/// surface spelling from its operand count, which two table entries can share
+/// (`mbarrier.try_wait.parity` with a report and with a hint); the op is unique.
+fn call_text(node: &ObjectRef) -> AResult<Option<String>> {
+    let call_node = match node.as_node::<EvaluateObj>() {
+        Some(evaluate) => oref(evaluate.value.clone()),
+        None => node.clone(),
+    };
+    let Some(call) = call_node.as_node::<CallObj>() else {
+        return Ok(None);
+    };
+    let Some(op_name) = call_op_name(call)? else {
+        return Ok(None);
+    };
+    let mut operands = Vec::with_capacity(call.args.len());
+    for operand in call.args.iter() {
+        let text = repr_text(&oref(operand))?.trim().to_owned();
+        if looks_like_address_printer(&text) {
+            return Ok(None);
+        }
+        operands.push(text);
+    }
+    let name = op_name.strip_prefix("tirx.").unwrap_or(&op_name);
+    Ok(Some(format!("T.{name}({})", operands.join(", "))))
 }
 
 /// `^[A-Za-z_][A-Za-z0-9_.]*\(0x[0-9A-Fa-f]+\)$`

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
+from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm_tirx.backend.cuda.lang.clc import query_cancel_first_ctaid_x
 from tvm_tirx.script import tirx as T
 
@@ -143,7 +145,7 @@ def remote_expect_tx_completes_target_barrier(output: T.Tensor((2,), "int32")):
 
 @T.function
 def clc_no_work_cluster_acquire_wait(output: T.Tensor((1,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     response = T.alloc_shared((4,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=8)
@@ -271,6 +273,20 @@ def test_tvm_storage_sync_roundtrip_preserves_shared_values(tmp_path):
     )
 
     np.testing.assert_array_equal(result.outputs["output"], source ^ np.uint32(0xA5A55A5A))
+
+
+@T.function
+def global_storage_sync(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.gpu_storage_sync("global")
+    output[T.cuda.lane_id()] = T.uint32(1)
+
+
+def test_storage_sync_outside_shared_memory_is_rejected(tmp_path):
+    with pytest.raises(
+        UnsupportedTIRxError, match='only for the shared storage scope, got "global"'
+    ):
+        numsim.transpile(global_storage_sync, cache_dir=tmp_path)
 
 
 def test_cp_async_mbarrier_noinc_arrives_immediately_only_for_lanes_without_prior_work(

@@ -410,7 +410,7 @@ def _compile_gpu(prim_func: Any, *, arch: str) -> Any:
         return tvm_tirx.compile(
             tvm_tirx.IRModule({"main": prim_func}),
             target=target,
-            tir_pipeline="tirx",
+            pipeline="tirx",
         )
 
 

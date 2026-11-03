@@ -26,10 +26,10 @@ def ld_red_kernel(dtype="f32", maximum=True, split=False, absolute=False, nan=Fa
             T.ptx["tcgen05.st.sync.aligned.32x32b.x4.b32"](
                 address[0] + T.uint32(half * 16), r[0], r[1], r[2], r[3]
             )
-        if wait_st:
+        if T.constexpr(wait_st):
             T.ptx.tcgen05.wait__st.sync.aligned()
         T.cuda.cta_sync()
-        if split:
+        if T.constexpr(split):
             T.ptx[instruction](r[0], r[1], r[2], r[3], reduced[0], address[0], 16)
         else:
             T.ptx[instruction](r[0], r[1], r[2], r[3], reduced[0], address[0])

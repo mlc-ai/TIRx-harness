@@ -143,7 +143,7 @@ def cta_votes_and_grid_sync(
     output_or: T.Tensor((128,), "int64"),
     output_grid: T.Tensor((4,), "int32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=1))
     cluster = T.cuda.cluster_id("x")
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
@@ -174,7 +174,7 @@ def floating_predicate_collectives(
     and_results: T.Tensor((2, 64), "int64"),
     or_results: T.Tensor((2, 64), "int64"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=1))
     cluster = T.cuda.cluster_id("x")
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
@@ -320,7 +320,7 @@ def ptx_dps_modifier_forms(
 
 @T.function
 def canonical_mapa(output: T.Tensor((32,), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane + 37
@@ -336,7 +336,7 @@ def canonical_mapa(output: T.Tensor((32,), "int32")):
 
 @T.function
 def explicit_mapa_forms(output: T.Tensor((32,), "int32"), addresses: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane + 37
@@ -443,7 +443,7 @@ def mapped_addresses_use_ordinary_integer_dataflow(output: T.Tensor((2, 32), "in
 def fetch_logical_and_representative_registers(
     output32: T.Tensor((3, 32, 13), "int32"), output64: T.Tensor((3, 32, 3), "int64")
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32, cluster=1))
     cluster = T.cuda.cluster_id("x")
     lane = T.cuda.lane_id()
     output32[cluster, lane, 0] = T.cuda.mov_sreg(32, "clusterid.x")
@@ -466,7 +466,7 @@ def fetch_logical_and_representative_registers(
 
 @T.function
 def fetch_warp_identifier_registers(output: T.Tensor((2, 32, 2), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64, cluster=1))
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     output[warp, lane, 0] = T.cuda.mov_sreg(32, "warpid")

@@ -94,6 +94,12 @@ impl<'a> Emitter<'a> {
         source_op_id: i64,
     ) -> AResult<()> {
         let op_name = decoded.op_name.as_str();
+        if self.plan.topology.is_multidimensional() {
+            // A cancelled CTA's response carries a linear CTA id below.
+            return unsupported(format!(
+                "{op_name} on a grid or cluster that extends along y or z is not modeled"
+            ));
+        }
         let response =
             self.emit_as_unsigned_bits(&parts.response, 128, op_name, "clc_response", None)?;
         let first_ctaid = self.control_name("clc_first_ctaid");

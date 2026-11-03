@@ -292,6 +292,25 @@ def test_numerically_irrelevant_launch_metadata_is_explicitly_supported():
     verify(spec)
 
 
+@T.function
+def programmatic_dependent_launch(output: T.Tensor((1,), "int32")):
+    T.device_entry(
+        launch=T.cuda.LaunchConfig(grid=1, block=32, programmatic_stream_serialization=True)
+    )
+    T.ptx.griddepcontrol.wait()
+    if T.cuda.lane_id() == 0:
+        output[0] = 1
+
+
+def test_programmatic_stream_serialization_only_schedules_the_launch():
+    # The launch may overlap its predecessor; griddepcontrol.wait still records
+    # the external grid dependency the kernel relies on.
+    spec = analyze(programmatic_dependent_launch)
+
+    assert spec.unsupported == ()
+    assert "external_grid_dependency_satisfied" in spec.kernels[0].semantic_requirements
+
+
 def test_unknown_attr_semantics_fail_closed():
     spec = analyze(unknown_attr)
 

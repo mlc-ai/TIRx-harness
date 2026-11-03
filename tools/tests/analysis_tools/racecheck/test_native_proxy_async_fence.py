@@ -91,7 +91,7 @@ def clc_response_reuse_proxy_ordering(
     fence_before_reuse: T.int32,
     output: T.Tensor((2,), "uint32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     response = T.alloc_shared((4,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=8)

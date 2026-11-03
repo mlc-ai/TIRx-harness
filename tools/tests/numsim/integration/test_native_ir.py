@@ -129,8 +129,8 @@ def test_host_promotion_preserves_parameters_types_spans_and_references(native_c
     promoted = normalized.params[-1]
     assert normalized.params[0].same_as(func.params[0])
     assert promoted.same_as(variable) == (not rename)
-    assert promoted.ty.same_as(variable.ty) and promoted.span.same_as(span)
-    assert normalized.span.same_as(span) and normalized.ret_type.same_as(func.ret_type)
+    assert promoted.ty.same_as(variable.ty) and promoted.loc.same_as(span)
+    assert normalized.loc.same_as(span) and normalized.ret_type.same_as(func.ret_type)
     metadata = json.loads(str(normalized.attrs["numsim.implicit_tensor_maps"]))
     assert metadata[0]["name"] == str(promoted.name)
     assert str(promoted.name) == ("output_tmap" if rename else str(variable.name))

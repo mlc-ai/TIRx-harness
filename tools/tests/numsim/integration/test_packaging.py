@@ -144,11 +144,11 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
         (
             "import pathlib",
             "import numpy as np",
-            "from tvm.script import tirx as T",
+            "from tvm_tirx.script import tirx as T",
             "from tirx_harness import numsim",
-            "@T.prim_func",
-            "def wheel_add_one(source: T.Buffer((32,), 'float32'), "
-            "output: T.Buffer((32,), 'float32')):",
+            "@T.function",
+            "def wheel_add_one(source: T.Tensor((32,), 'float32'), "
+            "output: T.Tensor((32,), 'float32')):",
             "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
             "    lane = T.cuda.lane_id()",
             "    output[lane] = source[lane] + T.float32(1)",

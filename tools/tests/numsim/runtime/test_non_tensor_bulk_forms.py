@@ -373,7 +373,7 @@ def lane_varying_bulk_multicast_cta_mask(
 def bulk_g2s_cluster_static_true_predicate(
     source: T.Tensor((16,), "uint8"), output: T.Tensor((16,), "uint8")
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((16,), "uint8", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=8)

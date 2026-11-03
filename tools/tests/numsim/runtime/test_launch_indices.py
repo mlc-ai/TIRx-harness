@@ -71,11 +71,75 @@ def test_launch_indices_follow_the_device_entry_launch(tmp_path):
     np.testing.assert_array_equal(result.outputs["output"], _expected())
 
 
+GRID_3D, CLUSTER_3D = (4, 3, 2), (2, 3, 1)
+
+
 @T.function
-def two_dimensional_grid(output: T.Tensor((2, 2), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=(2, 2), block=32))
+def three_dimensional_launch(output: T.Tensor((2, 3, 4, 16), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=GRID_3D, block=32, cluster=CLUSTER_3D))
     if T.cuda.lane_id() == 0:
-        output[T.cuda.block_idx("x"), T.cuda.block_idx("y")] = 1
+        x = T.cuda.block_idx("x")
+        y = T.cuda.block_idx("y")
+        z = T.cuda.block_idx("z")
+        output[z, y, x, 0] = T.cuda.cluster_id("x")
+        output[z, y, x, 1] = T.cuda.cluster_id("y")
+        output[z, y, x, 2] = T.cuda.cluster_id("z")
+        output[z, y, x, 3] = T.cuda.cluster_cta_id("x")
+        output[z, y, x, 4] = T.cuda.cluster_cta_id("y")
+        output[z, y, x, 5] = T.cuda.cluster_cta_id("z")
+        output[z, y, x, 6] = T.cuda.grid_dim("y")
+        output[z, y, x, 7] = T.cuda.grid_dim("z")
+        output[z, y, x, 8] = T.cuda.cluster_dim("y")
+        output[z, y, x, 9] = T.cuda.cluster_dim("z")
+        output[z, y, x, 10] = T.Cast("int32", T.cuda.mov_sreg(32, "cluster_ctarank"))
+        output[z, y, x, 11] = T.Cast("int32", T.cuda.mov_sreg(32, "ctaid.y"))
+        output[z, y, x, 12] = T.Cast("int32", T.cuda.mov_sreg(32, "ctaid.z"))
+        output[z, y, x, 13] = T.Cast("int32", T.cuda.mov_sreg(32, "nclusterid.y"))
+        output[z, y, x, 14] = T.Cast("int32", T.cuda.mov_sreg(32, "cluster_ctaid.y"))
+        output[z, y, x, 15] = T.Cast("int32", T.cuda.mov_sreg(32, "nctaid.x"))
+
+
+def three_dimensional_expected() -> np.ndarray:
+    """Each CTA's coordinates by the CUDA definitions, indexed by its blockIdx."""
+
+    grid, cluster = np.array(GRID_3D), np.array(CLUSTER_3D)
+    expected = np.empty((*GRID_3D[::-1], 16), dtype=np.int32)
+    for z, y, x in np.ndindex(*GRID_3D[::-1]):
+        block = np.array([x, y, z])
+        cluster_id, cluster_cta = block // cluster, block % cluster
+        rank = cluster_cta[0] + cluster[0] * (cluster_cta[1] + cluster[1] * cluster_cta[2])
+        expected[z, y, x] = [
+            *cluster_id,
+            *cluster_cta,
+            grid[1],
+            grid[2],
+            cluster[1],
+            cluster[2],
+            rank,
+            y,
+            z,
+            grid[1] // cluster[1],
+            cluster_cta[1],
+            grid[0],
+        ]
+    return expected
+
+
+def test_three_dimensional_grid_and_cluster_coordinates_follow_cuda(tmp_path):
+    module = numsim.transpile(three_dimensional_launch, cache_dir=tmp_path)
+    result = numsim.Engine().run(
+        module,
+        {"output": np.full((*GRID_3D[::-1], 16), -1, dtype=np.int32)},
+        outputs=("output",),
+    )
+    np.testing.assert_array_equal(result.outputs["output"], three_dimensional_expected())
+
+
+@T.function
+def two_dimensional_block(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32, 2)))
+    if T.cuda.lane_id() == 0:
+        output[T.cuda.thread_idx("y")] = 1
 
 
 @T.function
@@ -88,7 +152,7 @@ def preferred_cluster_differs(output: T.Tensor((4,), "int32")):
 @pytest.mark.parametrize(
     "kernel, message",
     [
-        (two_dimensional_grid, "one-dimensional, but grid.y is 2"),
+        (two_dimensional_block, "CTAs are one-dimensional, but block.y is 2"),
         (preferred_cluster_differs, "preferred_cluster must equal cluster"),
     ],
 )

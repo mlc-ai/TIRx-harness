@@ -780,7 +780,7 @@ def invalid(destination: T.Tensor((16,), "uint8")):
 
 @T.function
 def cluster_barrier_default_and_release_forms(output: T.Tensor((1,), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     T.ptx.barrier.cluster.arrive()
     T.ptx.barrier.cluster.wait()
@@ -792,7 +792,7 @@ def cluster_barrier_default_and_release_forms(output: T.Tensor((1,), "int32")):
 
 @T.function
 def cluster_barrier_unaligned_divergent_arrive(output: T.Tensor((1,), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     if lane < 16:
         T.ptx.barrier.cluster.arrive()

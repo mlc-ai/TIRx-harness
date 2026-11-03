@@ -987,6 +987,15 @@ impl<'a> Emitter<'a> {
             "ntid.x" => Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned()),
             _ => None,
         };
+        if self.plan.topology.is_multidimensional() {
+            if let Some(code) = self.plan.topology.cta_coordinate(register_name) {
+                return Ok(RustValue::new(
+                    format!("({code}) as {result_type}"),
+                    result_type,
+                    Uniformity::Uniform,
+                ));
+            }
+        }
         if ZERO.contains(&register_name) || ONE.contains(&register_name) {
             let value = if ONE.contains(&register_name) { 1 } else { 0 };
             return Ok(RustValue::new(
@@ -2702,6 +2711,20 @@ pub fn cuda_launch_index(emitter: &mut Emitter, call: &Decoded) -> AResult<Optio
     let topology = &plan.topology;
     let warps = emitter.warps_per_warpgroup;
     let uniform = |code: String| RustValue::new(format!("({code}) as i32"), "i32", Uniformity::Uniform);
+    let register = match name {
+        "block_idx" => Some("ctaid"),
+        "cluster_id" => Some("clusterid"),
+        "cluster_cta_id" => Some("cluster_ctaid"),
+        "grid_dim" => Some("nctaid"),
+        "cluster_dim" => Some("cluster_nctaid"),
+        _ => None,
+    };
+    if let Some(register) = register.filter(|_| topology.is_multidimensional()) {
+        let code = topology
+            .cta_coordinate(&format!("{register}.{axis}"))
+            .expect("a CTA coordinate register");
+        return Ok(Some(uniform(code)));
+    }
     let value = match (name, axis.as_str()) {
         ("block_idx" | "thread_idx" | "cluster_id" | "cluster_cta_id", "y" | "z") => uniform("0".to_owned()),
         (_, "y" | "z") => uniform("1".to_owned()),

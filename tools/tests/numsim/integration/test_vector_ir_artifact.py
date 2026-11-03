@@ -103,7 +103,8 @@ def test_vector_ir_roundtrip_executes_packed_and_f32x4_semantics(tmp_path):
 
     np.testing.assert_array_equal(result.outputs["output_u32"], source_u32)
     np.testing.assert_array_equal(result.outputs["output_f32"], source_f32)
-    assert "F32x4" in module.rust_source
+    # A Bind keeps the float32x4 value as one four-lane register value.
+    assert "loaded_f32x4" in module.rust_source
     assert "packed_u32x2" in module.rust_source
 
 

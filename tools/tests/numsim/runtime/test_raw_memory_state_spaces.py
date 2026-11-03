@@ -24,6 +24,7 @@ def invalid(source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
     lane = T.cuda.lane_id()
     {instruction}
 """
-    with pytest.raises(ValueError, match="not a valid modifier") as caught:
+    # tvm-tirx rejects an unknown modifier in a T.ptx["..."] spelling with KeyError.
+    with pytest.raises(KeyError, match="not a valid modifier") as caught:
         tvm_tirx.script.from_source(source, extra_vars={"T": T})
     assert space in str(caught.value)

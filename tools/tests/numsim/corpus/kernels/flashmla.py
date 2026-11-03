@@ -10,6 +10,7 @@ from unittest.mock import patch
 import numpy as np
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import (
     ComparisonSpec,
     NumSimCase,
@@ -236,7 +237,7 @@ def prepare_sparse_prefill_case(
 
 def _specialize_runtime_scalars(kernel: Any, values: dict[str, int | float]) -> Any:
     substitutions = {param: values[param.name] for param in kernel.params if param.name in values}
-    return kernel.specialize(substitutions)
+    return specialize(kernel, substitutions)
 
 
 def prepare_sparse_decode_head64_case() -> NumSimCase:

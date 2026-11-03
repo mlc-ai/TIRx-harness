@@ -306,7 +306,7 @@ def attach_source_nodes(
         kernels.append(
             replace(
                 kernel,
-                script=_plain_text(func.script()) if _render_script else "",
+                script=_kernel_script(func) if _render_script else "",
                 source_map=rebound_source_map,
             )
         )
@@ -332,6 +332,21 @@ def source_kernels(func: Any) -> tuple[Function, ...]:
     return tuple(kernels)
 
 
+def _kernel_script(func: Function) -> str:
+    """The TVMScript of ``func``, or empty when tvm-tirx cannot print it.
+
+    The printer recovers a PTX call's surface spelling from its operand count,
+    and two table entries can share one (``mbarrier.try_wait.parity`` with a
+    report and with a hint), which it raises as a table AssertionError. The
+    script is diagnostic only; source entries carry their own text.
+    """
+
+    try:
+        return _plain_text(func.script())
+    except AssertionError:
+        return ""
+
+
 def native_module_spec(
     funcs: tuple[Function, ...],
     manifest: dict[str, Any],
@@ -355,7 +370,7 @@ def native_module_spec(
             replace(
                 spec,
                 source_map=source_map,
-                script=_plain_text(func.script()) if render_script else "",
+                script=_kernel_script(func) if render_script else "",
             )
         )
     result = ModuleSpec(kernels=tuple(bound))

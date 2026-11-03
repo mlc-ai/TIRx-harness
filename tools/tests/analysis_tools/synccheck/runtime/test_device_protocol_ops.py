@@ -63,7 +63,7 @@ def divergent_unaligned_named_barrier_op():
 
 @T.function
 def split_cluster_barrier_protocol_ops():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
 
     T.ptx.barrier.cluster.arrive()
     T.ptx.barrier.cluster.wait()
@@ -115,7 +115,7 @@ def mbarrier_protocol_ops():
 
 @T.function
 def clc_protocol_op():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     response = T.alloc_shared((4,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=8)

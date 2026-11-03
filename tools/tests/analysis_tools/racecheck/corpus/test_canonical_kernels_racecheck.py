@@ -55,8 +55,6 @@ def test_native_racecheck_validates_canonical_kernel(
     entry,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    if entry.name == "alphamoe_fp8_blockscale_qwen3next":
-        pytest.xfail("Racecheck does not yet support AlphaMoE's wait over multiple tagged records")
     case = entry.prepare()
     module = numsim.transpile(
         case.kernel,

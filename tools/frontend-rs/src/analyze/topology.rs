@@ -315,9 +315,54 @@ pub struct LaunchTopology {
     /// setmaxnreg count with it; it stays out of `json()` so the manifest is
     /// unchanged.
     pub min_blocks_per_sm: i64,
+    /// The CTA grid and cluster shapes along x, y and z. The engine numbers
+    /// clusters and CTAs linearly; emission recovers each coordinate from
+    /// these shapes, which stay out of `json()` like `min_blocks_per_sm`.
+    pub grid: [i64; 3],
+    pub cluster: [i64; 3],
 }
 
 impl LaunchTopology {
+    /// Whether the grid or a cluster extends along y or z.
+    pub fn is_multidimensional(&self) -> bool {
+        self.grid[1] != 1 || self.grid[2] != 1 || self.cluster[1] != 1 || self.cluster[2] != 1
+    }
+
+    /// Rust code for the CTA coordinate special register `register`
+    /// (`ctaid`, `clusterid` and `cluster_ctaid` with their extents), or
+    /// `None` for any other register. The engine numbers clusters with x
+    /// fastest, and `ctx.cta_id_in_cluster()` is the PTX `%cluster_ctarank`,
+    /// which also linearizes the CTA's position in its cluster with x fastest.
+    pub fn cta_coordinate(&self, register: &str) -> Option<String> {
+        let (name, axis) = register.rsplit_once('.')?;
+        let axis = ["x", "y", "z"]
+            .iter()
+            .position(|candidate| *candidate == axis)?;
+        let clusters = [
+            self.grid[0] / self.cluster[0],
+            self.grid[1] / self.cluster[1],
+            self.grid[2] / self.cluster[2],
+        ];
+        let coordinate = |linear: &str, extents: [i64; 3]| {
+            let stride: i64 = extents[..axis].iter().product();
+            format!("(({linear} / {stride}) % {})", extents[axis])
+        };
+        Some(match name {
+            "ctaid" => format!(
+                "({} * {} + {})",
+                coordinate("ctx.cluster_id()", clusters),
+                self.cluster[axis],
+                coordinate("ctx.cta_id_in_cluster()", self.cluster)
+            ),
+            "clusterid" => coordinate("ctx.cluster_id()", clusters),
+            "cluster_ctaid" => coordinate("ctx.cta_id_in_cluster()", self.cluster),
+            "nctaid" => self.grid[axis].to_string(),
+            "nclusterid" => clusters[axis].to_string(),
+            "cluster_nctaid" => self.cluster[axis].to_string(),
+            _ => return None,
+        })
+    }
+
     pub fn json(&self) -> Json {
         json_object(vec![
             ("clusters", Json::from(self.clusters)),
@@ -415,13 +460,17 @@ fn visit(
                 for (field, value) in launch_values(region)? {
                     let constraint = match field.as_str() {
                         "grid.x" => "global CTAs",
+                        "grid.y" => "grid y",
+                        "grid.z" => "grid z",
                         "block.x" => "threads per CTA",
                         "cluster.x" => "CTAs per cluster",
-                        _ if field.ends_with(".y") || field.ends_with(".z") => {
+                        "cluster.y" => "cluster y",
+                        "cluster.z" => "cluster z",
+                        "block.y" | "block.z" => {
                             let extent = static_int(ctx, &oref(value), environment)?;
                             if extent != 1 {
                                 return unsupported(format!(
-                                    "NumSim launches are one-dimensional, but {field} is {extent}"
+                                    "NumSim CTAs are one-dimensional, but {field} is {extent}"
                                 ));
                             }
                             continue;
@@ -480,22 +529,32 @@ pub(crate) fn extract_topology(
         entries: Vec::new(),
     };
     visit(ctx, body, &mut constraints, &mut environment)?;
-    let (clusters, ctas_per_cluster) = match (
-        constraints.get("global CTAs"),
-        constraints.get("CTAs per cluster"),
-    ) {
-        (Some(global), Some(per_cluster)) => {
-            if global % per_cluster != 0 {
-                return unsupported(format!(
-                    "global CTA count {global} is not divisible by cluster size {per_cluster}"
-                ));
-            }
-            (global / per_cluster, per_cluster)
+    let grid = [
+        constraints.get("global CTAs").unwrap_or(1),
+        constraints.get("grid y").unwrap_or(1),
+        constraints.get("grid z").unwrap_or(1),
+    ];
+    let cluster = [
+        constraints.get("CTAs per cluster").unwrap_or(1),
+        constraints.get("cluster y").unwrap_or(1),
+        constraints.get("cluster z").unwrap_or(1),
+    ];
+    if grid[0] % cluster[0] != 0 {
+        return unsupported(format!(
+            "global CTA count {} is not divisible by cluster size {}",
+            grid[0], cluster[0]
+        ));
+    }
+    for (axis, name) in [(1, "y"), (2, "z")] {
+        if grid[axis] % cluster[axis] != 0 {
+            return unsupported(format!(
+                "grid.{name} {} is not divisible by cluster.{name} {}",
+                grid[axis], cluster[axis]
+            ));
         }
-        (Some(global), None) => (global, 1),
-        (None, Some(per_cluster)) => (1, per_cluster),
-        (None, None) => (1, 1),
-    };
+    }
+    let ctas_per_cluster = cluster.iter().product::<i64>();
+    let clusters = grid.iter().product::<i64>() / ctas_per_cluster;
     let warps_per_cta = match constraints.get("threads per CTA") {
         Some(threads) if threads % WARP_SIZE != 0 => {
             return unsupported(format!(
@@ -511,6 +570,8 @@ pub(crate) fn extract_topology(
         warps_per_cta,
         warps_per_warpgroup: WARPS_PER_WARPGROUP,
         min_blocks_per_sm: constraints.get("min blocks per sm").unwrap_or(1),
+        grid,
+        cluster,
     })
 }
 
@@ -523,8 +584,16 @@ const DEVICE_ENTRY_ATTRS: &[&str] = &[
     "backend_config",
 ];
 /// Launch operands besides the grid, block and cluster shapes. The stream and
-/// priority only schedule the launch.
-const SCALAR_LAUNCH_FIELDS: &[&str] = &["dynamic_smem_bytes", "stream", "priority"];
+/// priority only schedule the launch. Programmatic stream serialization lets
+/// the launch begin before the preceding kernel in its stream completes; NumSim
+/// runs one launch whose inputs are complete before it starts, and orders work
+/// after `griddepcontrol.wait` through its external-grid-dependency model.
+const SCALAR_LAUNCH_FIELDS: &[&str] = &[
+    "dynamic_smem_bytes",
+    "stream",
+    "priority",
+    "programmatic_stream_serialization",
+];
 /// Kernel attributes constrain occupancy and launch validity only; NumSim
 /// executes the launch shape directly.
 const KERNEL_ATTRS: &[&str] = &[
@@ -581,6 +650,11 @@ pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
         if !shape && !SCALAR_LAUNCH_FIELDS.contains(&field.as_str()) {
             return Ok(Some(format!(
                 "RegionStmt({op_name}) launch field {field:?} has unsupported numerical semantics"
+            )));
+        }
+        if field == "programmatic_stream_serialization" && int_imm(&oref(value.clone())).is_none() {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) programmatic_stream_serialization must be a constant"
             )));
         }
         if field == "dynamic_smem_bytes" && int_imm(&oref(value.clone())).is_none_or(|bytes| bytes < 0) {

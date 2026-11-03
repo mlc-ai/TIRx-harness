@@ -6,6 +6,7 @@ import pytest
 import tvm_tirx
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
 from tests.numsim.support.execution import run_checked
+from tirx_harness.numsim.transpiler.frontend import analyze
 from tvm_tirx.script import tirx as T
 
 
@@ -86,6 +87,17 @@ def test_report_queries_and_phase_reset(pattern, tmp_path):
     if pattern != "disabled":
         expected[0, :] = 3
     np.testing.assert_array_equal(result.outputs["out"], expected)
+
+
+def test_report_parity_try_wait_has_source_text_the_printer_cannot_render():
+    # tvm-tirx's printer cannot tell this report form from the hinted
+    # non-report form (both take four operands); the source map spells the op.
+    spec = analyze(report_kernel("per_16bytes::8"))
+
+    texts = [entry.text for entry in spec.kernels[0].source_map]
+    assert any(text.startswith("T.ptx.mbarrier_try_wait_parity_report(") for text in texts)
+    assert not any(" at 0x" in text or "(0x" in text for text in texts)
+    assert spec.kernels[0].script == ""
 
 
 @pytest.mark.parametrize("cluster", [False, True])

@@ -80,7 +80,7 @@ def pointer_origin_disagrees_with_declared_scope(
 
 @T.function
 def mapa_shared_address_in_generic_handle(output: T.Tensor((1,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     shared = T.alloc_shared((1,), "uint64")
     remote_bits: T.uint64
     T.ptx.mapa.u64(remote_bits, T.address_of(shared[0]), T.uint32(0))
@@ -93,7 +93,7 @@ def mapa_shared_address_in_generic_handle(output: T.Tensor((1,), "uint32")):
 
 @T.function
 def mapa_source_through_nominal_global_declbuffer(output: T.Tensor((1,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     shared = T.alloc_shared((8,), "uint64")
     alias_pointer: T.let[
         T.Var(name="nominal_global_alias_pointer", ty=PtrType(PrimType("uint64"), "global"))

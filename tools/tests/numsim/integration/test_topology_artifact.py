@@ -48,5 +48,5 @@ def test_cta_pair_uses_two_cta_residue_without_reducing_cluster_topology(tmp_pat
     result = numsim.Engine().run(module, {"output": output})
 
     np.testing.assert_array_equal(result.outputs["output"], expected)
-    assert "ctx.cta_id_in_cluster() as i64" in module.rust_source
-    assert "(ctx.cta_id_in_cluster() % 2) as i64" in module.rust_source
+    assert "(ctx.cta_id_in_cluster()) as i32" in module.rust_source
+    assert "(ctx.cta_id_in_cluster() % 2) as i32" in module.rust_source

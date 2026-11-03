@@ -1,7 +1,7 @@
 //! Validation and emission of the sync instruction family.
 
 use crate::analyze::util::{
-    dtype_of, expr_type, is_pointer_type, oref, prim, prim_dtype, unsupported, AResult,
+    dtype_of, expr_type, ffi_text, is_pointer_type, oref, prim, prim_dtype, unsupported, AResult,
 };
 use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
@@ -301,7 +301,7 @@ impl RawSyncCall {
             Self::WarpSync => (SyncCallKind::WarpSync, &[0]),
             Self::WarpgroupSync => (SyncCallKind::WarpgroupSync, &[1]),
             Self::CtaSync => (SyncCallKind::CtaSync, &[0]),
-            Self::StorageSync => (SyncCallKind::CtaSync, &[3]),
+            Self::StorageSync => (SyncCallKind::CtaSync, &[1]),
             Self::ClusterSync => (SyncCallKind::ClusterSync, &[0]),
             Self::GridSync => (SyncCallKind::GridSync, &[0]),
             Self::ThreadFence => (SyncCallKind::OrderingMarker, &[0]),
@@ -522,6 +522,22 @@ pub fn validate_raw_sync_call(node: &ObjectRef, op_name: &str) -> AResult<RawSyn
                 crate::dtypes::integer_dtypes(),
                 &format!("{op_name}.duration"),
             )?;
+        }
+        RawSyncCall::StorageSync => {
+            // A shared-memory storage sync is a CTA barrier; a global one
+            // synchronizes the grid and is not this lowering.
+            let scope = args[0]
+                .as_node::<StringImmObj>()
+                .map(|scope| ffi_text(&scope.value));
+            if !matches!(scope.as_deref(), Some("shared" | "shared.dyn")) {
+                return unsupported(format!(
+                    "{op_name} is modeled only for the shared storage scope, got {}",
+                    scope.map_or_else(
+                        || "a non-constant scope".to_owned(),
+                        |scope| format!("{scope:?}")
+                    )
+                ));
+            }
         }
         _ => {}
     }

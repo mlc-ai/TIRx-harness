@@ -17,7 +17,7 @@ def commit_kernel(restricted, multicast):
         f'''
 @T.function
 def kernel(output: T.Tensor((32,), "uint32"), enabled: T.int32, selected: T.int32):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
     lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64")
     pointer = T.alloc_local((1,), "uint32")

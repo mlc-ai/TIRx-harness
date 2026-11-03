@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import (
     ComparisonRegion,
     ComparisonSpec,
@@ -495,7 +496,7 @@ def _specialize_runtime_scalars(kernel: Any, values: dict[str, int]) -> Any:
     substitutions = {
         parameter: values[parameter.name] for parameter in kernel.params if parameter.name in values
     }
-    return kernel.specialize(substitutions)
+    return specialize(kernel, substitutions)
 
 
 def _prepare_kda_decode_case(

@@ -151,11 +151,17 @@ impl<'a> Emitter<'a> {
                 }
                 (Err(error), _) | (_, Err(error)) => return Err(error),
             };
-            if child_plan.backing_index != parent_plan.backing_index
+            // A view that reinterprets the element type is a distinct logical
+            // name, as the pointer-based reinterpretations before tvm-tirx were.
+            // tvm-tirx names every `view`/`rearrange` result `v`; a view that
+            // keeps its parent's name is that parent, not a renamed alias.
+            if child_plan.layout.dtype != parent_plan.layout.dtype
+                || child_plan.backing_index != parent_plan.backing_index
                 || !Self::same_static_byte_interval(child_plan, parent_plan)?
                 || !(child_plan.view_geometry_changed(parent_plan)?
                     || child_plan.name.is_empty()
-                    || parent_plan.name.is_empty())
+                    || parent_plan.name.is_empty()
+                    || child_plan.name == parent_plan.name)
             {
                 break;
             }
@@ -180,9 +186,36 @@ impl<'a> Emitter<'a> {
         if name.is_empty() {
             name = format!("anonymous_{}", self.buffer_code(buffer)?.field);
         }
+        let name = self.unique_root_name(&root, name);
         self.logical_buffer_name_cache
             .push((buffer.clone(), name.clone()));
         Ok(name)
+    }
+
+    /// `name` for the logical root `root`, made unique among distinct roots:
+    /// tvm-tirx names every `view`/`rearrange` result `v`, and two roots that
+    /// share a name must not share a checker identity.
+    fn unique_root_name(&mut self, root: &Var, name: String) -> String {
+        if let Some((_, existing)) = self
+            .logical_root_names
+            .iter()
+            .find(|(candidate, _)| same(candidate, root))
+        {
+            return existing.clone();
+        }
+        let base = name.clone();
+        let mut name = name;
+        let mut suffix = 1;
+        while self
+            .logical_root_names
+            .iter()
+            .any(|(_, taken)| *taken == name)
+        {
+            suffix += 1;
+            name = format!("{base}_{suffix}");
+        }
+        self.logical_root_names.push((root.clone(), name.clone()));
+        name
     }
 
     /// The runtime pointer behind a decoded buffer projection.
@@ -865,6 +898,7 @@ impl<'a> Emitter<'a> {
                 | "AssertStmt"
                 | "Bind"
                 | "BufferStore"
+                | "Return" // ends the kernel; emit_return rejects one inside a loop
         ) {
             false
         } else {
@@ -1140,7 +1174,26 @@ impl<'a> Emitter<'a> {
                 &thread_tag
             ));
         }
+        let topology = &self.plan.topology;
         let value = match thread_tag.as_str() {
+            "blockIdx.x" if topology.is_multidimensional() => RustValue::new(
+                format!(
+                    "({}) as i32",
+                    topology.cta_coordinate("ctaid.x").expect("ctaid.x")
+                ),
+                "i32",
+                Uniformity::Uniform,
+            ),
+            "clusterCtaIdx.x" if topology.is_multidimensional() => RustValue::new(
+                format!(
+                    "({}) as i32",
+                    topology
+                        .cta_coordinate("cluster_ctaid.x")
+                        .expect("cluster_ctaid.x")
+                ),
+                "i32",
+                Uniformity::Uniform,
+            ),
             "blockIdx.x" => {
                 RustValue::new("ctx.global_cta_id() as i32", "i32", Uniformity::Uniform)
             }

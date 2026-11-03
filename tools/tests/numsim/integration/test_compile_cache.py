@@ -45,8 +45,8 @@ def _relocate_source_spans(func, source_name: str, line_delta: int):
     for node in payload["nodes"]:
         if node["type"] == "ir.SourceName":
             node["data"] = source_name
-        elif node["type"] == "ir.Span":
-            node["data"]["line"] += line_delta
+        elif node["type"] == "ir.SourceLoc":
+            node["data"]["start_line"] += line_delta
             node["data"]["end_line"] += line_delta
     return load_json(json.dumps(payload))
 

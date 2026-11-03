@@ -25,14 +25,14 @@ def dispatch_case(
 ):
     kernel, inputs, expected = collector_case(("",), tmem_a=tmem_a)
     kernel = with_cuda_arch(kernel, "sm_100a")
-    metadata = next(parameter for parameter in kernel.params if str(parameter) == "metadata")
+    metadata = next(parameter for parameter in kernel.params if parameter.name == "metadata")
     selector = ir.TensorLoad(metadata, [0, 0, 0])
     if multiple_issuers:
         lanes = []
         structural_walk(
             kernel.body,
             lambda node: lanes.append(node)
-            if type(node).__name__ == "Var" and str(node) == "lane"
+            if type(node).__name__ == "Var" and node.name == "lane"
             else None,
         )
         # Distinct types must not split one invalid issue into valid calls.
@@ -165,30 +165,28 @@ def _descriptor_values(kernel, descriptor):
     def collect(node):
         if type(node).__name__ != "Call" or str(node.op.name) != INSTR_DESC:
             return
-        destination, *fields = node.args
+        # tvm-tirx carries the descriptor fields as the call's attrs.
+        (destination,) = node.args
         if type(descriptor).__name__ != "TensorLoad" or not destination.args[0].source.same_as(
             descriptor.source
         ):
             return
-        d_dtype, a_dtype, b_dtype, m, n, k, trans_a, trans_b, cta_group, *flags = (
-            field.value for field in fields
-        )
-        neg_a, neg_b, sat_d, sparse = map(bool, flags)
+        fields = node.attrs
         values.add(
             encode_dense_instr_descriptor_fields(
-                d_dtype=d_dtype,
-                a_dtype=a_dtype,
-                b_dtype=b_dtype,
-                m=m,
-                n=n,
-                k=k,
-                trans_a=bool(trans_a),
-                trans_b=bool(trans_b),
-                cta_group=cta_group,
-                neg_a=neg_a,
-                neg_b=neg_b,
-                sat_d=sat_d,
-                sparse=sparse,
+                d_dtype=str(fields.d_dtype),
+                a_dtype=str(fields.a_dtype),
+                b_dtype=str(fields.b_dtype),
+                m=int(fields.M),
+                n=int(fields.N),
+                k=int(fields.K),
+                trans_a=bool(fields.trans_a),
+                trans_b=bool(fields.trans_b),
+                cta_group=int(fields.n_cta_groups),
+                neg_a=bool(fields.neg_a),
+                neg_b=bool(fields.neg_b),
+                sat_d=bool(fields.sat_d),
+                sparse=bool(fields.is_sparse),
             )
         )
 

@@ -187,5 +187,6 @@ def test_stochastic_and_exponent_forms_record_their_rounding():
 def test_non_table_cvt_neighbours_are_rejected_by_target_parser(
     spelling, destination_dtype, arguments
 ):
-    with pytest.raises(ValueError):
+    # tvm-tirx rejects an unknown modifier in a T.ptx["..."] spelling with KeyError.
+    with pytest.raises((KeyError, ValueError)):
         _cvt_call(spelling, destination_dtype, *arguments)

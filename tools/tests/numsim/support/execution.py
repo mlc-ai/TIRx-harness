@@ -16,7 +16,9 @@ def specialize(kernel, bindings):
         {
             parameter: value
             if isinstance(value, ir.Expr)
-            else tirx.const(value, str(parameter.ty.dtype))
+            else tirx.const(
+                value.item() if hasattr(value, "item") else value, str(parameter.ty.dtype)
+            )
             for parameter, value in bindings.items()
         },
     )

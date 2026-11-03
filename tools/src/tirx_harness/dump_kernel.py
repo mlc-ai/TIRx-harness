@@ -1,4 +1,4 @@
-"""Dump CUDA / PTX / SASS from a compiled TIRx module (the ``tvm.compile`` output).
+"""Dump CUDA / PTX / SASS from a compiled TIRx module (the ``tvm_tirx.compile`` output).
 
 In-process API that turns a compiled module into its generated CUDA source and,
 via nvcc / ptxas / cuobjdump, PTX / cubin / SASS plus the ``ptxas -v``
@@ -6,7 +6,7 @@ register/spill/SMEM report — so you don't run that pipeline by hand::
 
     from tirx_harness.dump_kernel import dump_module, dump_cuda
 
-    ex = tvm.compile(tvm.IRModule({"main": pf}), target="cuda", tir_pipeline="tirx")
+    ex = tvm_tirx.compile(tvm_tirx.IRModule({"main": pf}), target="cuda", pipeline="tirx")
     d = dump_module(ex, ptx=True)      # -> DumpResult
     print(d.cuda, d.ptx, d.sass)       # artifact text
     print(d.ptxas["registers"])        # parsed ptxas -v report
@@ -15,7 +15,7 @@ register/spill/SMEM report — so you don't run that pipeline by hand::
     dump_module(ex, outdir="/tmp/dumps", name="v0")   # also persist files
     cuda = dump_cuda(ex)               # just the CUDA source string
 
-Both accept the ``Executable`` from ``tvm.compile`` or a runtime ``Module``.
+Both accept the ``Executable`` from ``tvm_tirx.compile`` or a runtime ``Module``.
 Arch is auto-detected from the local GPU (B200 -> ``sm_100a``); the
 architecture-specific ``a`` suffix (needed for ``tcgen05.*`` on Blackwell and
 Hopper-only opcodes) is added automatically for SM 9.x/10.x.
@@ -103,9 +103,9 @@ def _iter_modules(m):
 
 
 def dump_cuda(mod) -> str:
-    """Extract generated CUDA source from a compiled module (the ``tvm.compile`` output).
+    """Extract generated CUDA source from a compiled module (the ``tvm_tirx.compile`` output).
 
-    Accepts the ``Executable`` returned by ``tvm.compile`` (uses its ``.mod``) or a
+    Accepts the ``Executable`` returned by ``tvm_tirx.compile`` (uses its ``.mod``) or a
     runtime ``Module`` directly. The device CUDA lives in an *imported* submodule
     (the top-level host module doesn't carry it), so walk the import tree and
     return the first source that actually contains a ``__global__`` entry.
@@ -120,7 +120,7 @@ def dump_cuda(mod) -> str:
             if isinstance(src, str) and "__global__" in src:
                 return src
     raise ValueError(
-        "no CUDA source found in module — is it a tir_pipeline='tirx', target='cuda' build?"
+        "no CUDA source found in module — is it a pipeline='tirx', target='cuda' build?"
     )
 
 
@@ -315,9 +315,9 @@ def dump_module(
     name: str = "kernel",
     quiet: bool = True,
 ) -> DumpResult:
-    """Dump CUDA / PTX / SASS from a compiled module (the ``tvm.compile`` output).
+    """Dump CUDA / PTX / SASS from a compiled module (the ``tvm_tirx.compile`` output).
 
-    ``mod`` is the ``Executable`` returned by ``tvm.compile`` (or a runtime
+    ``mod`` is the ``Executable`` returned by ``tvm_tirx.compile`` (or a runtime
     ``Module``). CUDA is always returned; ``ptx``/``sass`` toggle those stages,
     which shell out to nvcc/ptxas/cuobjdump. ``arch`` defaults to the local GPU
     (B200 -> ``sm_100a``). With ``outdir`` set, artifacts are written there as
@@ -330,7 +330,7 @@ def dump_module(
 
     Example::
 
-        ex = tvm.compile(tvm.IRModule({"main": pf}), target="cuda", tir_pipeline="tirx")
+        ex = tvm_tirx.compile(tvm_tirx.IRModule({"main": pf}), target="cuda", pipeline="tirx")
         d = dump_module(ex, ptx=True)
         assert d.ok, d.errors
         print(d.sass)                 # SASS text
