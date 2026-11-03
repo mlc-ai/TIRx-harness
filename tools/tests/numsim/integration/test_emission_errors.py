@@ -33,7 +33,7 @@ def test_analysis_collects_independent_failures_after_a_failed_binding():
     kernel = spec.kernels[0]
     entries = {entry.op_name: entry for entry in kernel.source_map if entry.op_name}
     assert len(kernel.unsupported) == 2
-    for name in ("tirx.exp", "tirx.log"):
+    for name in ("prim.exp", "prim.log"):
         source = entries[name]
         assert source.span is not None
         assert any(
@@ -117,7 +117,7 @@ def test_analysis_collects_unvisited_calls_after_an_emission_failure(body, expec
         assert source.span is not None
         names.add(source.op_name)
         assert "expected" in message
-    assert names == {"tirx.exp", "tirx.log"}
+    assert names == {"prim.exp", "prim.log"}
     with pytest.raises(UnsupportedTIRxError):
         verify(spec)
 

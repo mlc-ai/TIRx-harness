@@ -91,16 +91,16 @@ def test_registry_remains_closed_for_unregistered_calls():
 @pytest.mark.parametrize(
     "op_name",
     [
-        "tirx.fabs",
-        "tirx.log1p",
-        "tirx.sigmoid",
+        "prim.fabs",
+        "prim.log1p",
+        "prim.sigmoid",
     ],
 )
 def test_registry_accepts_float32_gate_intrinsics(op_name: str):
     assert _accepted("float32", op_name, "T.float32(1)")
 
 
-@pytest.mark.parametrize("op_name", ["tirx.fabs", "tirx.log1p", "tirx.sigmoid"])
+@pytest.mark.parametrize("op_name", ["prim.fabs", "prim.log1p", "prim.sigmoid"])
 def test_gate_intrinsics_reject_unmodeled_float64_forms(op_name: str):
     assert f"Call({op_name}(float64)->float64)" in _rejected("float64", op_name, "T.float64(1)")
 
@@ -214,6 +214,6 @@ def test_registry_exposes_scalar_and_collective_names():
     assert "tirx.ptx.fma_f32" not in names
     assert "tirx.ptx.ex2" not in names
     assert "tirx.ptx.rcp" not in names
-    assert _accepted("float32", "tirx.fma", "T.float32(1)", "T.float32(1)", "T.float32(1)")
+    assert _accepted("float32", "prim.fma", "T.float32(1)", "T.float32(1)", "T.float32(1)")
     assert _accepted("handle", "tirx.reinterpret", "T.uint64(1)")
     assert _accepted("uint64", "tirx.reinterpret", "values.ptr_to([lane])", value_dtype="uint8")

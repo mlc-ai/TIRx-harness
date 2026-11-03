@@ -288,7 +288,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
     let Ok(call) = evaluate.value.clone().try_cast::<Call>() else {
         return Ok(None);
     };
-    if call_op_name(&call)?.as_deref() == Some("tirx.tensormap_encode_tiled") {
+    if call_op_name(&call)?.as_deref() == Some("tirx.cuda.tensormap_encode_tiled") {
         let Some(attrs) = call
             .attrs
             .as_ref()

@@ -264,7 +264,7 @@ pub fn resolve_legacy_matrix_call(
             &MMA_ACCUMULATOR_DTYPES, &result_dtype
         ));
     }
-    if op_name == "tirx.mma_fill" || op_name == "tirx.mma_fill_legacy" {
+    if op_name == "tirx.cuda.mma_fill" || op_name == "tirx.mma_fill_legacy" {
         if args.len() != 3 {
             return unsupported(format!("{op_name} expects 3 arguments, got {}", args.len()));
         }
@@ -1322,8 +1322,8 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         match call.op_name.as_str() {
             "tirx.ptx_legacy.mma" => self.emit_legacy_mma(call, source_op_id),
-            "tirx.mma_fill" | "tirx.mma_fill_legacy" => self.emit_mma_fill(call, source_op_id),
-            "tirx.mma_store" | "tirx.mma_store_legacy" => self.emit_mma_store(call, source_op_id),
+            "tirx.cuda.mma_fill" | "tirx.mma_fill_legacy" => self.emit_mma_fill(call, source_op_id),
+            "tirx.cuda.mma_store" | "tirx.mma_store_legacy" => self.emit_mma_store(call, source_op_id),
             other => {
                 crate::analyze::util::not_covered(format!("statement call {other} has no lowering"))
             }

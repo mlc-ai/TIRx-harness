@@ -272,7 +272,7 @@ def kernel():
 
 
 def test_resolver_keeps_the_validated_tirx_call_as_the_lowering_input():
-    call = _call("tirx.fma", "float32", _arg("float32"), _arg("float32"), _arg("float32"))
+    call = _call("prim.fma", "float32", _arg("float32"), _arg("float32"), _arg("float32"))
 
     assert _emitted_heads(_form(call)) == ["v2::reg::fma::<v2::reg::variant::F32Rn>"]
 
