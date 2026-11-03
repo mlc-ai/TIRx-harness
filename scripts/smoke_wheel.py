@@ -11,14 +11,13 @@ import numpy as np
 import tirx_harness
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import native_frontend
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def add_one(source: T.Buffer((32,), "float32"), output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def add_one(source: T.Tensor((32,), "float32"), output: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = source[lane] + T.float32(1)
 
 
