@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import tvm.backend.cuda.tile_primitive  # noqa: F401
-from tirx_harness.numsim.transpiler import native_frontend
-from tvm.tirx.operator.tile_primitive import list_registered_schedules
+import tvm_ffi
+
+import tvm_tirx  # noqa: F401
+from tirx_harness.numsim.transpiler.host_prelude import _TILE_OPERATIONS
 
 
-def test_numsim_registers_all_cuda_tile_primitive_operations():
-    schedules = list_registered_schedules()
-    cuda_tile_calls = {name for name, targets in schedules.items() if "cuda" in targets}
-    tile_ops = native_frontend.registry()["tile_ops"]
+def test_numsim_dispatches_every_cuda_tile_operation():
+    names = {str(name) for name in tvm_ffi.get_global_func("ir.ListOpNames")()}
+    cuda_tile_operations = {name for name in names if name.startswith("tirx.cuda.tile.")}
 
-    assert tile_ops
-    assert tile_ops == sorted(set(tile_ops))
-    assert set(tile_ops) == cuda_tile_calls
+    assert cuda_tile_operations
+    assert cuda_tile_operations == _TILE_OPERATIONS

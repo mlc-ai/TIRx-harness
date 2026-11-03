@@ -1,22 +1,20 @@
 //! Physical allocation/view planning.
 
+use crate::decode::{data_source, projected_buffer, tensor_decl, TensorDecl};
 use tvm_tirx::ir::TensorRegionObj;
 use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj, Var};
-use tvm_tirx::ir::{BindObj, Stmt, TensorStoreObj};
-use tvm_tirx::tirx::{AllocBufferObj, AttrStmtObj, DeclBufferObj, Function};
+use tvm_tirx::ir::{RegionStmtObj, Stmt, TensorStoreObj};
+use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore};
+use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore, String as FfiString};
 use tvm_tirx::sym::ProofStrength;
 
-use super::buffers::BufferBindings;
+use super::buffers::{BufferBindings};
+use super::topology::{is_launch_entry, launch_values};
 use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
-use super::util::{
-    buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, prim_expr, same, tensor_var,
-    unsupported, AResult, IdSet, TensorVarExt,
-};
+use super::util::{buffer_name, buffer_ref, buffer_scope, int_imm, oref, prim_expr, same, scalar_bind, tensor_var, unsupported, AResult, IdSet, TensorVarExt};
 use super::Ctx;
-use crate::decode::projected_buffer;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum MemorySpace {
@@ -139,9 +137,7 @@ pub fn referenced_buffers(
         }
     };
     for node in nodes {
-        if node.as_node::<AllocBufferObj>().is_some() || node.as_node::<DeclBufferObj>().is_some() {
-            // Allocations and declarations record no reference here.
-        } else if let Some(store) = node.as_node::<TensorStoreObj>() {
+        if let Some(store) = node.as_node::<TensorStoreObj>() {
             append(Some(tensor_var(&oref(store.dest.clone()))?), &mut seen, &mut referenced);
         } else if let Some(region) = node.as_node::<TensorRegionObj>() {
             append(
@@ -168,9 +164,7 @@ pub fn referenced_buffers(
 
 pub fn bind_map(statements: &[Stmt]) -> Map<Var, Expr> {
     map_from_pairs(statements.iter().filter_map(|statement| {
-        statement
-            .as_node::<BindObj>()
-            .map(|bind| (bind.var.clone(), bind.value.clone()))
+        scalar_bind(statement).map(|bind| (bind.var.clone(), bind.value.clone()))
     }))
 }
 
@@ -217,11 +211,48 @@ fn append_buffer(builder: &mut BackingBuilder, buffer: &Var, is_parameter: bool)
     builder.buffers.push((buffer.clone(), is_parameter));
 }
 
-fn find_pool_size(pool_sizes: &[(ObjectRef, i64)], key: &ObjectRef) -> Option<i64> {
-    pool_sizes
-        .iter()
-        .find(|(candidate, _)| same(candidate, key))
-        .map(|(_, size)| *size)
+/// The dynamic shared memory of the `tirx.device_entry` launch: its
+/// `dynamic_smem_bytes` operand, or else the pool requirement `cuda.smem_required`.
+fn dynamic_shared_capacity(statements: &[Stmt]) -> AResult<Option<i64>> {
+    let mut capacity: Option<i64> = None;
+    for statement in statements {
+        let Some(region) = statement.as_node::<RegionStmtObj>() else {
+            continue;
+        };
+        if !is_launch_entry(region) {
+            continue;
+        }
+        let launched = launch_values(region)?
+            .into_iter()
+            .find(|(field, _)| field == "dynamic_smem_bytes")
+            .map(|(_, value)| int_imm(&oref(value)));
+        let required = match region.attrs.dict.get(&FfiString::from("cuda.smem_required"))? {
+            Some(value) => Some(i64::try_from(value)?),
+            None => None,
+        };
+        let size = match (launched, required) {
+            (Some(None), _) => return unsupported("dynamic_smem_bytes must be a static integer"),
+            (Some(Some(launched)), Some(required)) if launched < required => {
+                return unsupported(format!(
+                    "dynamic_smem_bytes={launched} is smaller than the {required}-byte pool requirement"
+                ))
+            }
+            (Some(Some(launched)), _) => launched,
+            (None, Some(required)) => required,
+            (None, None) => continue,
+        };
+        if size < 0 {
+            return unsupported("dynamic shared memory cannot be negative");
+        }
+        if capacity.is_some_and(|previous| previous != size) {
+            return unsupported(format!(
+                "device entries declare conflicting dynamic shared memory {} and {size}",
+                capacity.unwrap()
+            ));
+        }
+        capacity = Some(size);
+    }
+    Ok(capacity)
 }
 
 pub(in crate::analyze) fn build_memory_plan(
@@ -237,58 +268,7 @@ pub(in crate::analyze) fn build_memory_plan(
     let mut dynamic_views: Vec<(Var, Expr, MemorySpace)> = Vec::new();
     let referenced = referenced_buffers(nodes, false)?;
     let dynamic_referenced = referenced_buffers(nodes, true)?;
-    let mut pool_sizes: Vec<(ObjectRef, i64)> = Vec::new();
-    let mut dyn_smem_bytes: Option<i64> = None;
-    for statement in statements {
-        let Some(attr) = statement.as_node::<AttrStmtObj>() else {
-            continue;
-        };
-        let attr_key = ffi_text(&attr.attr_key);
-        if attr_key == "tirx.dyn_smem_bytes" {
-            let Some(size) = int_imm(&oref(attr.value.clone())) else {
-                return unsupported("tirx.dyn_smem_bytes must be a non-negative IntImm");
-            };
-            if size < 0 {
-                return unsupported("tirx.dyn_smem_bytes cannot be negative");
-            }
-            if let Some(previous) = dyn_smem_bytes {
-                if previous != size {
-                    return unsupported(format!(
-                        "tirx.dyn_smem_bytes has conflicting capacities {previous} and {size}"
-                    ));
-                }
-            }
-            dyn_smem_bytes = Some(size);
-            continue;
-        }
-        if attr_key != "tirx.pool_max_bytes" {
-            continue;
-        }
-        let Some(size) = int_imm(&oref(attr.value.clone())) else {
-            return unsupported(
-                "AttrStmt(tirx.pool_max_bytes) must bind a buffer root to a non-negative IntImm",
-            );
-        };
-        let node = ObjectRef::try_from(attr.node.clone())
-            .map_err(|_| super::util::ffi_error("pool_max_bytes node is not an object"))?;
-        let pool_key = match projected_buffer(&node)? {
-            Some(source) => buffer_bindings.storage_key(&source)?,
-            None => node,
-        };
-        if size < 0 {
-            return unsupported("tirx.pool_max_bytes cannot be negative");
-        }
-        let previous = find_pool_size(&pool_sizes, &pool_key);
-        if let Some(previous) = previous {
-            if previous != size {
-                return unsupported(format!(
-                    "tirx.pool_max_bytes has conflicting capacities {previous} and {size}"
-                ));
-            }
-        } else {
-            pool_sizes.push((pool_key, size));
-        }
-    }
+    let dyn_smem_bytes = dynamic_shared_capacity(statements)?;
     let bindings = bind_map(statements);
     let shape_expressions = ShapeExpressionContext::build(analyzer, statements, buffer_bindings)?;
     for parameter in crate::buffer_parameters(func.clone())?.iter() {
@@ -314,12 +294,13 @@ pub(in crate::analyze) fn build_memory_plan(
         }
     }
     for statement in statements {
-        let (buffer, is_alloc, data) = if let Some(alloc) = statement.as_node::<AllocBufferObj>() {
-            (alloc.buffer.clone(), true, None)
-        } else if let Some(decl) = statement.as_node::<DeclBufferObj>() {
-            (decl.buffer.clone(), false, Some(decl.data.clone()))
-        } else {
+        let Some((buffer, decl)) = tensor_decl(statement)? else {
             continue;
+        };
+        let (is_alloc, data) = match decl {
+            TensorDecl::Alloc => (true, None),
+            TensorDecl::View(data) => (false, Some(data)),
+            TensorDecl::Tmem(_) => (false, None),
         };
         let scope_name = buffer_scope(&buffer);
         if scope_name == "tmem" || scope_name.starts_with("tmem.") {
@@ -338,7 +319,7 @@ pub(in crate::analyze) fn build_memory_plan(
             continue;
         }
         if let Some(data) = &data {
-            if projected_buffer(&oref(data.clone()))?.is_none() {
+            if data_source(data)?.is_none() {
                 let info = ctx.inspect_layout(&buffer, &bindings)?;
                 if info.element_count.is_none() {
                     return unsupported(format!(
@@ -376,7 +357,7 @@ pub(in crate::analyze) fn build_memory_plan(
             if let Some(allocation) = &builder.allocation {
                 if !same(allocation, &buffer) {
                     return unsupported(format!(
-                        "buffer:{}:multiple AllocBuffer nodes share one data variable",
+                        "buffer:{}:multiple allocations share one data variable",
                         buffer_name(&buffer)
                     ));
                 }
@@ -395,7 +376,7 @@ pub(in crate::analyze) fn build_memory_plan(
                 .map(|(buffer, _)| buffer_name(buffer))
                 .collect();
             return unsupported(format!(
-                "buffer:{}:DeclBuffer data variable has no parameter or AllocBuffer owner",
+                "buffer:{}:declared tensor data has no parameter or allocation owner",
                 names.join(",")
             ));
         }
@@ -468,25 +449,17 @@ pub(in crate::analyze) fn build_memory_plan(
             ));
         }
         let owner_start = owner_info.elem_offset * owner_info.itemsize;
-        let mut pool_byte_len = find_pool_size(&pool_sizes, &builder.key);
-        if pool_byte_len.is_none()
-            && dyn_smem_bytes.is_some()
-            && buffer_scope(&owner) == "shared.dyn"
-        {
-            pool_byte_len = dyn_smem_bytes;
-        }
+        let pool_byte_len = dyn_smem_bytes.filter(|_| buffer_scope(&owner) == "shared.dyn");
         let owner_end: Option<i64>;
         if let Some(pool_len) = pool_byte_len {
-            if parameter.is_some() || space != MemorySpace::Shared {
-                return unsupported(
-                    "tirx.pool_max_bytes requires an internal shared-memory allocation",
-                );
+            if parameter.is_some() {
+                return unsupported("dynamic shared memory requires an internal allocation");
             }
             if owner_start != 0
                 || (owner_info.element_count.is_some() && owner_info.byte_end()? > pool_len)
             {
                 return unsupported(format!(
-                    "buffer:{}:declared allocation exceeds tirx.pool_max_bytes={pool_len}",
+                    "buffer:{}:declared allocation exceeds the {pool_len}-byte dynamic shared memory",
                     buffer_name(&owner)
                 ));
             }
@@ -618,14 +591,6 @@ pub(in crate::analyze) fn build_memory_plan(
                 dynamic_data_var: None,
                 referenced: true,
             });
-        }
-    }
-
-    for (key, _) in &pool_sizes {
-        if !builders.iter().any(|builder| same(&builder.key, key)) {
-            return unsupported(
-                "tirx.pool_max_bytes refers to a data variable without an allocation owner",
-            );
         }
     }
 

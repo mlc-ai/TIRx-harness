@@ -1,7 +1,6 @@
 //! Validation and emission of the raw_memory instruction family.
 
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::memory::MemorySpace;
 use crate::analyze::util::{
     as_buffer, dtype_of, oref, prim, static_int, static_string, unsupported, AResult,
 };
@@ -9,10 +8,11 @@ use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::memory_support::{v2_memory_space_rust, v2_memory_type_rust_ptx};
+use crate::emit::stmt::pointer_pointee_dtype;
 use crate::emit::{abi, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, expr_rust_type, scope_marker};
-use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, TensorLoadObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -33,11 +33,9 @@ pub struct LegacyMemoryCall {
     pub op_name: String,
     pub address: Option<ObjectRef>,
     pub destination: Option<ObjectRef>,
-    pub value: Option<ObjectRef>,
     pub byte_offset: Option<ObjectRef>,
     pub destination_offset: Option<ObjectRef>,
     pub source_offset: Option<ObjectRef>,
-    pub predicate: Option<ObjectRef>,
     pub target_dtype: Option<String>,
     pub result_dtype: Option<String>,
     pub ptx_type: Option<String>,
@@ -53,11 +51,9 @@ impl LegacyMemoryCall {
             op_name: op_name.to_owned(),
             address: None,
             destination: None,
-            value: None,
             byte_offset: None,
             destination_offset: None,
             source_offset: None,
-            predicate: None,
             target_dtype: None,
             result_dtype: None,
             ptx_type: None,
@@ -94,13 +90,6 @@ fn static_flag(ctx: &Ctx, value: &ObjectRef, field: &str) -> AResult<bool> {
     Ok(integer != 0)
 }
 
-pub fn is_type_annotation(value: &ObjectRef) -> AResult<bool> {
-    let Some(call) = value.as_node::<CallObj>() else {
-        return Ok(false);
-    };
-    Ok(call_op_name(call)?.as_deref() == Some("tirx.type_annotation") && call.args.is_empty())
-}
-
 pub fn resolve_legacy_memory_call(
     ctx: &Ctx,
     node: &ObjectRef,
@@ -112,30 +101,20 @@ pub fn resolve_legacy_memory_call(
         ));
     };
     match op_name {
-        "tirx.type_annotation" => {
-            require_arity(call, 0)?;
-            let target_dtype = dtype_of(node)?;
-            dtype_byte_len(ctx.schema, &target_dtype)?;
-            let mut parsed = LegacyMemoryCall::new(op_name);
-            parsed.target_dtype = Some(target_dtype.clone());
-            parsed.result_dtype = Some(target_dtype);
-            Ok(parsed)
-        }
         "tirx.ptr_byte_offset" => {
-            let args = require_arity(call, 3)?;
-            let (source, byte_offset, annotation) = (&args[0], &args[1], &args[2]);
+            let args = require_arity(call, 2)?;
+            let (source, byte_offset) = (&args[0], &args[1]);
             if dtype_of(node)? != "handle" || dtype_of(source)? != "handle" {
                 return unsupported(format!("{op_name} requires handle source and result"));
             }
             if !is_integer_dtype(&dtype_of(byte_offset)?) {
                 return unsupported(format!("{op_name} byte offset must be an integer"));
             }
-            if !is_type_annotation(annotation)? {
+            let Some(target_dtype) = pointer_pointee_dtype(node) else {
                 return unsupported(format!(
-                    "{op_name} target must be a zero-argument tirx.type_annotation"
+                    "{op_name} result must be a pointer to a primitive element type"
                 ));
-            }
-            let target_dtype = dtype_of(annotation)?;
+            };
             dtype_byte_len(ctx.schema, &target_dtype)?;
             let mut parsed = LegacyMemoryCall::new(op_name);
             parsed.address = Some(source.clone());
@@ -200,36 +179,6 @@ pub fn resolve_legacy_memory_call(
             parsed.vector_width = matrix_count;
             parsed.matrix_count = matrix_count;
             parsed.transpose = transpose;
-            Ok(parsed)
-        }
-        "tirx.s_tir.ldg32" => {
-            let args = require_arity(call, 4)?;
-            let (destination, predicate, source, destination_offset) =
-                (&args[0], &args[1], &args[2], &args[3]);
-            if dtype_of(destination)? != "handle" || source.as_node::<TensorLoadObj>().is_none() {
-                return unsupported(format!(
-                    "{op_name} requires local data handle and global TensorLoad"
-                ));
-            }
-            let predicate_dtype = dtype_of(predicate)?;
-            if dtype_of(source)? != "float32"
-                || !(is_integer_dtype(&predicate_dtype) || predicate_dtype == "bool")
-            {
-                return unsupported(format!(
-                    "{op_name} requires float32 source and bool/integer guard"
-                ));
-            }
-            if !is_integer_dtype(&dtype_of(destination_offset)?) {
-                return unsupported(format!("{op_name} local address must be integer"));
-            }
-            let mut parsed = LegacyMemoryCall::new(op_name);
-            parsed.destination = Some(destination.clone());
-            parsed.value = Some(source.clone());
-            parsed.destination_offset = Some(destination_offset.clone());
-            parsed.predicate = Some(predicate.clone());
-            parsed.result_dtype = Some("float32".to_owned());
-            parsed.ptx_type = Some("f32".to_owned());
-            parsed.space = Some("global".to_owned());
             Ok(parsed)
         }
         other => Err(crate::analyze::util::Failure::Ffi(
@@ -1473,115 +1422,6 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// `emit_ldg32`.
-    fn emit_ldg32(&mut self, call: &LegacyMemoryCall, source_op_id: i64) -> AResult<()> {
-        let destination_expr = call.destination.as_ref().expect("destination");
-        let destination_offset_expr = call.destination_offset.as_ref().expect("offset");
-        let source_load = call.value.as_ref().expect("source load");
-        let predicate_expr = call.predicate.as_ref().expect("predicate");
-        let destination = self.emit_pointer_handle(destination_expr)?;
-        if destination.rust_type != "PhysicalPtr" {
-            return unsupported(format!(
-                "{} destination did not resolve to a physical address",
-                call.op_name
-            ));
-        }
-        let guard = self.emit_expr(predicate_expr)?;
-        let guard = self.coerce_value(guard, "u32", "ldg32_guard")?;
-        let guard = self.as_warp_value(guard);
-        let predicate = self.control_name("ldg32_predicate");
-        let predicate_values = self.control_name("ldg32_predicate_values");
-        let mask = self.control_name("ldg32_guard_mask");
-        let site = self.v2_site(Some(source_op_id));
-        let setp = abi::lane_call_context(
-            "reg::setp",
-            &site,
-            &[format!(
-                "({}, {})",
-                abi::register(&guard.code),
-                abi::splat("0_u32")
-            )],
-            Some("v2::reg::variant::Setp<v2::reg::variant::U32, v2::reg::variant::Ne>"),
-            None,
-        );
-        self.emit_line(&format!("let {predicate} = {setp};"));
-        self.emit_line(&format!(
-            "let {predicate_values} = v2_register_out({predicate});"
-        ));
-        self.emit_line(&format!(
-            "let {mask} = {predicate_values}.to_mask(|_, value| *value) & ctx.active_mask();"
-        ));
-        let load = source_load
-            .as_node::<TensorLoadObj>()
-            .expect("validated TensorLoad");
-        let Some(source_buffer) = as_buffer(&oref(load.source.clone())) else {
-            return crate::analyze::util::not_covered("ldg32 source is not a typed buffer");
-        };
-        let indices: Vec<Expr> = load.indices.iter().collect();
-        let source_code = self.buffer_code(&source_buffer)?;
-        if self.plan_of(&source_code).space != MemorySpace::Global {
-            return unsupported(format!("{} source must be global memory", call.op_name));
-        }
-        let source_index = self.physical_index(&source_buffer, &indices)?;
-        let source_mask = self.physical_access_mask(&source_buffer, &indices, &mask)?;
-        let source_context = self.control_name("ldg32_source_context");
-        let loaded = self.control_name("ldg32_loaded");
-        let buffer_ref = self.buffer_ref(&source_buffer)?;
-        self.emit_line(&format!(
-            "let {source_context} = ctx.with_active_mask({source_mask});"
-        ));
-        let logical_name = self.logical_buffer_name(&source_buffer)?;
-        let site = self.v2_site(Some(source_op_id));
-        let load_call = abi::warp_call(
-            "mem::ld",
-            &site,
-            &[abi::buffer_address(
-                "v2::Global",
-                &buffer_ref,
-                &source_index.code,
-                4,
-                &logical_name,
-            )],
-            Some(
-                "v2::mem::variant::Ld<v2::reg::variant::F32, v2::Global, v2::mem::variant::Plain>",
-            ),
-            Some(&abi::context(&source_context)),
-            false,
-            true,
-        );
-        self.emit_line(&format!("let {loaded} = v2_register_out({load_call});"));
-        let result = self.control_name("ldg32_result");
-        let zero = self.control_name("ldg32_zero");
-        let site = self.v2_site(Some(source_op_id));
-        let mov = abi::lane_call_context(
-            "reg::mov",
-            &site,
-            &[abi::splat("0.0_f32")],
-            Some("v2::reg::variant::F32"),
-            Some(&abi::context(&format!(
-                "ctx.with_active_mask(ctx.active_mask() - {mask})"
-            ))),
-        );
-        self.emit_line(&format!("let {zero} = {mov};"));
-        self.emit_line(&format!("let mut {result} = v2_register_out({zero});"));
-        self.emit_line(&format!("{result}.masked_assign({mask}, &{loaded});"));
-        let offsets = self.emit_expr(destination_offset_expr)?;
-        let offsets = self.as_i64(offsets)?;
-        let offsets = self.as_warp_value(offsets);
-        let extents = self.control_name("ldg32_destination_extent");
-        let pointer = self.control_name("ldg32_destination");
-        self.emit_line(&format!("let {extents} = WarpValue::splat(1_i64);"));
-        self.emit_line(&format!(
-            "let {pointer} = {}.with_element_offset_extent(&{}, &{extents}, 4_usize, ctx.active_mask(), 2_u8, \"{}\")?;",
-            destination.code, offsets.code, call.op_name
-        ));
-        self.emit_line(&format!(
-            "write_frontend_register_result::<f32>(&physical, {}, &{pointer}, v2_register({result}))?;",
-            abi::context("ctx")
-        ));
-        Ok(())
-    }
-
     fn emit_ptr_byte_offset(&mut self, call: &LegacyMemoryCall) -> AResult<RustValue> {
         let mut pointer = self.emit_expr(call.address.as_ref().expect("address"))?;
         if pointer.rust_type == "PhysicalPtr" {
@@ -1666,20 +1506,13 @@ pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>>
 pub fn emit_legacy(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let parts = resolve_legacy_memory_call(emitter.ctx, call.node, &call.op_name)?;
     match call.op_name.as_str() {
-        "tirx.ptx_legacy.ldmatrix" | "tirx.s_tir.ldg32" => {
+        "tirx.ptx_legacy.ldmatrix" => {
             let source_op_id = call.source_op_id(emitter)?;
-            if call.op_name == "tirx.ptx_legacy.ldmatrix" {
-                emitter.emit_raw_ldmatrix_legacy(&parts, source_op_id)?;
-            } else {
-                emitter.emit_ldg32(&parts, source_op_id)?;
-            }
+            emitter.emit_raw_ldmatrix_legacy(&parts, source_op_id)?;
             Ok(None)
         }
         _ => emitter
             .with_call_expr(call.node, |emitter| match call.op_name.as_str() {
-                "tirx.type_annotation" => {
-                    Ok(RustValue::new("()", "TypeAnnotation", Uniformity::Uniform))
-                }
                 "tirx.ptr_byte_offset" => emitter.emit_ptr_byte_offset(&parts),
                 "tirx.cuda.cvta_generic_to_shared" => emitter.emit_cvta_shared(&parts),
                 other => crate::analyze::util::not_covered(format!(

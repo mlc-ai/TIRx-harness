@@ -284,7 +284,7 @@ impl RawSyncCall {
             "tirx.cuda.warp_sync" => Self::WarpSync,
             "tirx.cuda.warpgroup_sync" => Self::WarpgroupSync,
             "tirx.cuda.cta_sync" => Self::CtaSync,
-            "tirx.tvm_storage_sync" => Self::StorageSync,
+            "tirx.gpu_storage_sync" => Self::StorageSync,
             "tirx.cuda.cluster_sync" => Self::ClusterSync,
             "tirx.cuda.grid_sync" => Self::GridSync,
             "tirx.cuda.thread_fence" => Self::ThreadFence,

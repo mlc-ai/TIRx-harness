@@ -1,12 +1,16 @@
 //! Identity and lexical traversal contracts, without public test-only services.
 
-use crate::analyze::buffers::BufferBindings;
-use crate::analyze::util::{int_const, oref, same};
-use tvm_tirx::ir::{Expr, IntImm, Location, PrimType, SourceName, Var};
+use crate::decode::{data_source, DECL_TENSOR, TENSOR_DATA_PTR};
+use crate::analyze::buffers::{BufferBindings};
+use crate::analyze::util::{int_const, oref, prim_type, same};
 use tvm_tirx::ir::prim::{Add, AddObj};
-use tvm_tirx::ir::{Evaluate, For, If, SeqStmt, Stmt, While};
-use tvm_tirx::tirx::{AttrStmt, DeclBuffer, TensorType};
-use tvm_tirx::tvm_ffi::{Any, AnyView, Array, Function, Map, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::{
+    Bind, Call, Evaluate, Expr, For, ForKind, If, Location, Op, PrimType, PtrType, RegionStmt,
+    SeqStmt, SourceLoc, SourceName, Stmt, Type, Var, While,
+};
+use tvm_tirx::runtime::MemoryScope;
+use tvm_tirx::tirx::TensorType;
+use tvm_tirx::tvm_ffi::{Any, Array, Function, Map, ObjectRefCore, String as FfiString};
 
 fn save(value: Any) -> FfiString {
     Function::get_global("ffi.ToJSONGraphString")
@@ -17,72 +21,90 @@ fn save(value: Any) -> FfiString {
         .unwrap()
 }
 
+/// The registered memory scope `name`, through its JSON spelling.
+fn memory_scope(name: &str) -> MemoryScope {
+    let graph = format!(
+        r#"{{"root_index": 0, "nodes": [{{"type": "runtime.MemoryScope", "data": "{name}"}}]}}"#
+    );
+    Function::get_global("ffi.FromJSONGraphString")
+        .unwrap()
+        .call_tuple((FfiString::from(graph),))
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+fn tensor_type() -> TensorType {
+    TensorType::new(
+        [Expr::from(int_const("int64", 4).unwrap())],
+        prim_type("int32").unwrap(),
+        memory_scope("global"),
+        0,
+        None,
+        Location::unknown(),
+    )
+    .unwrap()
+}
+
+fn call(ty: impl Into<Type>, op: &str, args: Vec<Expr>, ty_args: Vec<Type>) -> Expr {
+    Call::new(Some(&ty.into()), Op::get(op).unwrap(), args, None, ty_args, Location::unknown())
+        .unwrap()
+        .into()
+}
+
+/// `Bind(view, decl_tensor(tensor_data_ptr(source)))`.
+fn declare_view(view: &Var, source: &Var) -> Stmt {
+    let ty = tensor_type();
+    let pointer = PtrType::new(prim_type("int32").unwrap(), &memory_scope("global")).unwrap();
+    let data = call(pointer, TENSOR_DATA_PTR, vec![source.clone().into()], Vec::new());
+    let decl = call(ty.clone(), DECL_TENSOR, vec![data], vec![ty.into()]);
+    Bind::new(view.clone(), decl, Location::unknown()).unwrap().into()
+}
+
+fn tensor(name: &str) -> Var {
+    Var::new(name, tensor_type(), Location::unknown())
+}
+
 #[test]
 fn buffer_bindings_preserve_identities_and_last_declaration() {
-    let ty = TensorType::new(
-        "global",
-        "int32",
-        vec![Expr::from(int_const("int64", 4).unwrap())],
-    )
-    .unwrap();
-    let first = ty.new_var("same");
-    let second = ty.new_var("same");
-    let alias = ty.new_var("alias");
-    let scalar = Var::new("same", "int32", Location::unknown()).unwrap();
-    let first_data = first.data().unwrap();
-    let second_data = second.data().unwrap();
-    let declarations = vec![
-        Stmt::from(DeclBuffer::new(&alias, first_data.clone()).unwrap()),
-        Stmt::from(DeclBuffer::new(&alias, second_data.clone()).unwrap()),
-    ];
+    let first = tensor("same");
+    let second = tensor("same");
+    let alias = tensor("alias");
+    let scalar = Var::new("same", prim_type("int32").unwrap(), Location::unknown());
+    let declarations = vec![declare_view(&alias, &first), declare_view(&alias, &second)];
     let func = tvm_tirx::tirx::Function::new(
         vec![first.clone(), scalar, second.clone()],
-        SeqStmt::new(declarations.clone(), Location::unknown()).unwrap(),
-    )
-    .unwrap();
+        Some(&SeqStmt::new(declarations.clone(), Location::unknown())),
+        Type::from(PrimType::void()),
+        tvm_tirx::ir::DictAttrs::new(Map::<FfiString, Any>::new()),
+        Location::unknown(),
+    );
     let before = save(func.clone().into());
     let parameters = crate::buffer_parameters(func.clone()).unwrap();
     assert_eq!(parameters.len(), 2);
-    assert!(same(&parameters.get(0).unwrap(), first));
-    assert!(same(&parameters.get(1).unwrap(), second));
+    assert!(same(&parameters.get(0).unwrap(), &first));
+    assert!(same(&parameters.get(1).unwrap(), &second));
     let bindings = BufferBindings::build(&declarations).unwrap();
     assert_eq!(bindings.declarations.len(), 2);
-    for ((buffer, data), expected) in bindings.declarations.iter().zip([first_data, second_data]) {
-        assert!(same(buffer, alias));
-        assert!(same(data, &expected));
+    for ((buffer, data), source) in bindings.declarations.iter().zip([&first, &second]) {
+        assert!(same(buffer, &alias));
+        let (root, offsets) = data_source(data).unwrap().unwrap();
+        assert!(same(&root, source) && offsets.is_empty());
     }
-    assert!(same(
-        &bindings.storage_key(&alias).unwrap(),
-        second
-    ));
+    assert!(same(&bindings.storage_key(&alias).unwrap(), &second));
     assert!(!bindings.same_storage(&first, &alias).unwrap());
     assert_eq!(save(func.into()), before);
 }
 
 #[test]
 fn cyclic_buffer_bindings_keep_each_starting_identity() {
-    let ty = TensorType::new(
-        "global",
-        "int32",
-        vec![Expr::from(int_const("int64", 4).unwrap())],
-    )
-    .unwrap();
-    let first = ty.new_var("first");
-    let second = ty.new_var("second");
-    let bindings = BufferBindings::build(&[
-        DeclBuffer::new(&first, second.data().unwrap())
-            .unwrap()
-            .into(),
-        DeclBuffer::new(&second, first.data().unwrap())
-            .unwrap()
-            .into(),
-    ])
-    .unwrap();
+    let first = tensor("first");
+    let second = tensor("second");
+    let bindings =
+        BufferBindings::build(&[declare_view(&first, &second), declare_view(&second, &first)])
+            .unwrap();
     for buffer in [&first, &second, &first] {
-        assert!(same(
-            &bindings.storage_key(buffer).unwrap(),
-            buffer
-        ));
+        assert!(same(&bindings.storage_key(buffer).unwrap(), buffer));
     }
 }
 
@@ -108,90 +130,87 @@ fn substitution_keeps_same_named_variables_distinct() {
 
 #[test]
 fn statement_walk_preserves_occurrences_order_identity_and_spans() {
-    let span = Location::new(&SourceName::get("statement-order.py").unwrap(), 7, 7, 1, 9).unwrap();
-    let shared: Stmt = Evaluate::with_span(int_const("int32", 1).unwrap(), Some(&span))
-        .unwrap()
-        .into();
-    let sequence: Stmt = SeqStmt::new(vec![shared.clone(), shared.clone()], Location::unknown())
-        .unwrap()
-        .into();
+    let span: Location =
+        SourceLoc::new(SourceName::get("statement-order.py").unwrap(), 7, 1, 7, 9).into();
+    let shared: Stmt = Evaluate::new(int_const("int32", 1).unwrap(), span.clone()).into();
+    let sequence: Stmt = SeqStmt::new(vec![shared.clone(), shared.clone()], Location::unknown()).into();
     let condition = int_const("bool", 1).unwrap();
-    let while_loop: Stmt = While::new(&condition, shared.clone()).unwrap().into();
-    let branch: Stmt =
-        If::with_span(&condition, sequence.clone(), Some(while_loop.clone()), None)
-            .unwrap()
-            .into();
+    let while_loop: Stmt = While::checked(&condition, shared.clone(), Location::unknown())
+        .unwrap()
+        .into();
+    let branch: Stmt = If::new(&condition, sequence.clone(), Some(&while_loop), Location::unknown())
+        .unwrap()
+        .into();
     let counted: Stmt = For::new(
-        Var::new("i", "int32", Location::unknown()).unwrap(),
+        Var::new("i", prim_type("int32").unwrap(), Location::unknown()),
         int_const("int32", 0).unwrap(),
         int_const("int32", 2).unwrap(),
+        int_const("int32", 1).unwrap(),
+        ForKind::Default,
         branch.clone(),
+        None,
+        Location::unknown(),
     )
     .unwrap()
     .into();
-    let annotation_only = Evaluate::from_i64(99).unwrap();
-    let attribute: Stmt = AttrStmt::new(
-        annotation_only,
-        "annotation",
-        int_const("int32", 0).unwrap(),
-        counted.clone(),
-    )
-    .unwrap()
-    .into();
-    let init: Stmt = Evaluate::from_i64(2).unwrap().into();
-    let empty = Array::<Any>::new(Vec::new());
-    let annotations: Map<FfiString, Any> = [(FfiString::from("ignored"), sequence.clone().into())]
+    let init: Stmt = Evaluate::new(int_const("int32", 2).unwrap(), Location::unknown()).into();
+    // Launch operands and attributes are not statements; only the region body is walked.
+    let fields = Array::new(vec![FfiString::from("grid.x")]);
+    let attrs: Map<FfiString, Any> = [(FfiString::from("cuda.launch_fields"), Any::from(fields))]
         .into_iter()
         .collect();
-    // SBlock is intentionally outside tvm-rust's typed pass surface. The
-    // reflected traversal still visits its executed init/body fields.
-    let block: Stmt = Function::get_global("s_tir.SBlock")
-        .unwrap()
-        .call_packed(&[
-            AnyView::from(&empty),
-            AnyView::from(&empty),
-            AnyView::from(&empty),
-            AnyView::from(&FfiString::from("block")),
-            AnyView::from(&attribute),
-            AnyView::from(&init),
-            AnyView::from(&empty),
-            AnyView::from(&empty),
-            AnyView::from(&annotations),
-            AnyView::from(&Option::<Location>::None),
-        ])
-        .unwrap()
-        .try_into()
-        .unwrap();
-    let root: Stmt = Function::get_global("s_tir.SBlockRealize")
-        .unwrap()
-        .call_tuple((empty, condition, block.clone(), Option::<Location>::None))
-        .unwrap()
-        .try_into()
-        .unwrap();
+    let region: Stmt = RegionStmt::new(
+        Op::get("tirx.device_entry").unwrap(),
+        vec![Expr::from(int_const("int32", 1).unwrap())],
+        Vec::<Var>::new(),
+        tvm_tirx::ir::DictAttrs::new(attrs),
+        SeqStmt::new(vec![init.clone(), counted.clone()], Location::unknown()),
+        Vec::<Var>::new(),
+        Location::unknown(),
+    )
+    .unwrap()
+    .into();
+    // Every loop and branch body is a SeqStmt.
+    let body = |stmt: &Stmt| -> Stmt {
+        if let Some(region) = stmt.as_node::<tvm_tirx::ir::RegionStmtObj>() {
+            return region.body.clone().into();
+        }
+        if let Some(loop_stmt) = stmt.as_node::<tvm_tirx::ir::ForObj>() {
+            return loop_stmt.body.clone().into();
+        }
+        if let Some(loop_stmt) = stmt.as_node::<tvm_tirx::ir::WhileObj>() {
+            return loop_stmt.body.clone().into();
+        }
+        let branch = stmt.as_node::<tvm_tirx::ir::IfObj>().unwrap();
+        branch.else_case.clone().unwrap().into()
+    };
+    assert!(same(
+        &branch.as_node::<tvm_tirx::ir::IfObj>().unwrap().then_case,
+        &sequence
+    ));
     let expected = vec![
-        root.clone(),
-        block,
+        region.clone(),
+        body(&region),
         init,
-        attribute,
-        counted,
-        branch,
+        counted.clone(),
+        body(&counted),
+        branch.clone(),
         sequence,
         shared.clone(),
         shared.clone(),
-        while_loop,
+        body(&branch),
+        while_loop.clone(),
+        body(&while_loop),
         shared,
     ];
-    let before = save(root.clone().into());
-    let actual = crate::walk_statements(root.clone()).unwrap();
+    let before = save(region.clone().into());
+    let actual = crate::walk_statements(region.clone()).unwrap();
     assert_eq!(actual.len(), expected.len());
     for (left, right) in actual.iter().zip(expected) {
         assert!(same(&left, &right));
     }
-    for index in [7, 8, 10] {
-        assert!(same(
-            actual.get(index).unwrap().span.as_ref().unwrap(),
-            &span
-        ));
+    for index in [7, 8, 12] {
+        assert!(same(&actual.get(index).unwrap().loc, &span));
     }
-    assert_eq!(save(root.into()), before);
+    assert_eq!(save(region.into()), before);
 }

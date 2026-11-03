@@ -1,7 +1,7 @@
 //! A declared synchronization-word wait, using the raw load's decoded operands.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm_tirx::ir::{CallObj, Expr, IntImm, IntImmObj, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, Expr, IntImmObj, PtrTypeObj, TensorLoadObj};
 use tvm_tirx::ir::prim::{
     AndObj, CastObj, EQObj, GEObj, GTObj, LEObj, LTObj, NEObj, NotObj, OrObj, SelectObj,
 };

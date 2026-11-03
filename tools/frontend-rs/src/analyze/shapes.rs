@@ -2,7 +2,7 @@
 
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{Expr, TensorLoad, TensorLoadObj, Var};
-use tvm_tirx::ir::{BindObj, ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
+use tvm_tirx::ir::{ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
@@ -10,8 +10,8 @@ use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder
 use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
 use super::util::{
-    as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr, simplify, tensor_var,
-    unsupported, AResult, IdSet, TensorVarExt,
+    as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr, scalar_bind, simplify,
+    tensor_var, unsupported, AResult, IdSet, TensorVarExt,
 };
 
 pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
@@ -69,7 +69,7 @@ impl ShapeExpressionContext {
     ) -> AResult<Self> {
         let mut bindings = Vec::new();
         for statement in statements {
-            if let Some(bind) = statement.as_node::<BindObj>() {
+            if let Some(bind) = scalar_bind(statement) {
                 bindings.push((bind.var.clone(), bind.value.clone()));
             }
         }

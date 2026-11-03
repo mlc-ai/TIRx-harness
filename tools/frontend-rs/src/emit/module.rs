@@ -431,14 +431,7 @@ fn render_kernel(
         setmaxnreg_calling_initial_count: emitter
             .sync
             .calling_initial_count(&emitter.plan.topology)?,
-        // Without analysis-capable slices the fixed-trace eligibility is the
-        // empty slice's: statically eligible with no read-only globals.
-        fixed_trace_statically_eligible: !(request.analysis_capable
-            && super::super::analyze::tile_forms::fixed_trace_has_unknown_call(
-                emitter.ctx,
-                &emitter.op_ids,
-                &emitter.plan.tile_calls,
-            )?),
+        fixed_trace_statically_eligible: true,
         global_memory_model_enabled: true,
     })
 }

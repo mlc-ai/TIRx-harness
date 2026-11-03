@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from functools import cache, partial
+from functools import cache
 from importlib.machinery import EXTENSION_SUFFIXES
 from importlib.metadata import distributions
 from pathlib import Path
@@ -52,14 +52,9 @@ def _library() -> Any:
             f"NumSim TVM Rust frontend mismatch: expected {expected}, found {actual}"
         )
     try:
-        from tvm.backend.cuda.tile_primitive.copy_async.tcgen05_cp import _build_plan
-
         from .ptx_dialect import register_native_ptx_decoder
 
         register_native_ptx_decoder(library["numsim_ptx_payload_schema"]())
-        tvm_ffi.register_global_func(
-            NATIVE_TCGEN05_CP_PLAN, partial(_tcgen05_cp_plan_error, _build_plan), override=True
-        )
     except Exception as error:
         raise NumSimBuildError("NumSim native callback registration failed") from error
     return library
@@ -72,19 +67,6 @@ def _expected_identity() -> str:
         raise NumSimBuildError(
             "NumSim native build identity is missing; reinstall tirx-harness"
         ) from error
-
-
-NATIVE_TCGEN05_CP_PLAN = "numsim.frontend.tcgen05_cp_plan_error"
-
-
-def _tcgen05_cp_plan_error(build_plan: Any, node: Any) -> str:
-    """`tile_forms._validate_tcgen_cp_layout`: the production plan's rejection, or ``""``."""
-
-    try:
-        build_plan(node)
-    except (TypeError, ValueError) as error:
-        return str(error)
-    return ""
 
 
 def layout_linear_offsets(layout: Any, count: int) -> Any:

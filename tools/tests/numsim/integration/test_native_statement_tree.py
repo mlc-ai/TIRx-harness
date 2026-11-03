@@ -22,7 +22,9 @@ def test_frontend_rejects_unknown_native_nodes_in_a_known_parent():
         (
             ir.Evaluate,
             lambda stmt: (
-                FutureStatement(span=None, body=stmt) if int(stmt.value.value) == 1 else stmt
+                FutureStatement(loc=ir.UnknownLoc(), body=stmt)
+                if int(stmt.value.value) == 1
+                else stmt
             ),
         ),
     )

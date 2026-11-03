@@ -2,22 +2,16 @@
 
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
-    as_var, dtype_of, expr_type, ffi_text, is_pointer_type, oref, prim, repr_text, static_int,
-    unmodeled, unsupported, AResult,
+    dtype_of, expr_type, is_pointer_type, oref, prim, static_int, unsupported, AResult,
 };
 use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
-use crate::emit::raw_memory::is_type_annotation;
 use crate::emit::register_call::require_register_call;
-use crate::emit::{abi, join_uniformity, Emitter, RustValue, Uniformity};
+use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
-use crate::tables::{
-    dtype_by_rust_type, dtype_byte_len, expr_rust_type, json_string, v2_memory_type_rust, MEM_LD,
-};
 use tvm_tirx::ir::CallObj;
-use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -39,170 +33,7 @@ const CP_ASYNC_SRC_SIZE_CALLS: [&str; 2] = [
     "tirx.ptx.cp_async_cg_src_size",
 ];
 
-fn call_of(node: &ObjectRef) -> AResult<&CallObj> {
-    match node.as_node::<CallObj>() {
-        Some(call) => Ok(call),
-        None => Err(crate::analyze::util::Failure::Ffi(
-            crate::analyze::util::ffi_error("memory lowerer requires a TIRx Call"),
-        )),
-    }
-}
-
-pub struct AccessPtrParts {
-    pub target_dtype: String,
-    pub address: ObjectRef,
-    pub element_offset: ObjectRef,
-    pub element_extent: ObjectRef,
-    pub access_mask: i64,
-}
-
-pub fn access_ptr_parts(ctx: &Ctx, node: &ObjectRef) -> AResult<AccessPtrParts> {
-    let call = call_of(node)?;
-    let op_name = "tirx.tvm_access_ptr";
-    let args: Vec<ObjectRef> = call.args.iter().map(oref).collect();
-    if args.len() != 5 || dtype_of(node)? != "handle" {
-        return unsupported(format!(
-            "{op_name} requires five arguments and handle result"
-        ));
-    }
-    let (annotation, address, element_offset, element_extent, access_mask) =
-        (&args[0], &args[1], &args[2], &args[3], &args[4]);
-    if !is_type_annotation(annotation)? {
-        return unsupported(format!(
-            "{op_name} requires a zero-argument type annotation"
-        ));
-    }
-    let target_dtype = dtype_of(annotation)?;
-    dtype_byte_len(ctx.schema, &target_dtype)?;
-    if dtype_of(address)? != "handle" {
-        return unsupported(format!("{op_name} base address must be handle"));
-    }
-    if !is_integer_dtype(&dtype_of(element_offset)?)
-        || !is_integer_dtype(&dtype_of(element_extent)?)
-    {
-        return unsupported(format!("{op_name} offset and extent must be integers"));
-    }
-    let mask = static_int(
-        &ctx.analyzer,
-        &prim(access_mask)?,
-        &format!("{op_name}.access_mask"),
-        "must be static",
-    )?;
-    if ![1, 2, 3].contains(&mask) {
-        return unsupported(format!(
-            "{op_name} access mask must be read=1, write=2, or both=3"
-        ));
-    }
-    Ok(AccessPtrParts {
-        target_dtype,
-        address: address.clone(),
-        element_offset: element_offset.clone(),
-        element_extent: element_extent.clone(),
-        access_mask: mask,
-    })
-}
-
 /// The validated parts.
-
-fn is_cuda_ldg_dtype(ctx: &Ctx, dtype: &str) -> bool {
-    if ctx.schema.scalar_dtype_bits.contains_key(dtype) {
-        return is_integer_dtype(dtype)
-            || matches!(dtype, "float16" | "bfloat16" | "float32" | "float64");
-    }
-    let Some((element, lanes, _, total_bits)) = ctx.schema.vector_dtype_abi(dtype) else {
-        return false;
-    };
-    if element == "bool" {
-        return false;
-    }
-    if element.starts_with("float8_") {
-        return total_bits == 64 || total_bits == 128;
-    }
-    if element == "float16" || element == "bfloat16" {
-        return lanes == 2 || lanes == 8;
-    }
-    is_integer_dtype(&element) || element == "float32" || element == "float64"
-}
-
-pub fn cuda_ldg_parts(ctx: &Ctx, node: &ObjectRef) -> AResult<(String, ObjectRef)> {
-    let call = call_of(node)?;
-    let op_name = "tirx.cuda.ldg";
-    let args: Vec<ObjectRef> = call.args.iter().map(oref).collect();
-    let result_dtype = dtype_of(node)?;
-    if args.len() != 2 || dtype_of(&args[0])? != "handle" {
-        return unsupported(format!("{op_name} requires (handle, dtype_name)"));
-    }
-    let dtype_name = match args[1].as_node::<StringImmObj>() {
-        Some(imm) => ffi_text(&imm.value),
-        None => {
-            return unsupported(format!(
-                "{op_name}.dtype must be a static string, got {}",
-                repr_text(&args[1])?
-            ))
-        }
-    };
-    if result_dtype == dtype_name && (result_dtype == "boolx2" || result_dtype == "boolx4") {
-        return unmodeled(
-            format!("call:{op_name}"),
-            format!(
-                "{op_name} compile-valid dtype {:?} has no exact NumSim packed-bool ABI",
-                &result_dtype
-            ),
-        );
-    }
-    if result_dtype != dtype_name || !is_cuda_ldg_dtype(ctx, &result_dtype) {
-        return unsupported(format!(
-            "{op_name} dtype attribute {:?} does not match supported result dtype {:?}",
-            &dtype_name, &result_dtype
-        ));
-    }
-    let address = args[0].clone();
-    if let Some(inner) = address.as_node::<CallObj>() {
-        if call_op_name(inner)?.as_deref() == Some("tirx.address_of") && inner.args.len() == 1 {
-            let pointee_dtype = dtype_of(&oref(inner.args.get(0)?))?;
-            if pointee_dtype != result_dtype {
-                return unsupported(format!(
-                    "{op_name} direct pointer dtype {:?} does not match loaded dtype {:?}",
-                    &pointee_dtype, &result_dtype
-                ));
-            }
-        }
-    }
-    Ok((result_dtype, address))
-}
-
-/// (v2 variant, Rust storage type, optional decoder).
-pub fn cuda_ldg_variant(
-    ctx: &Ctx,
-    result_dtype: &str,
-) -> AResult<(String, String, Option<&'static str>)> {
-    let (storage_type, decoder): (String, Option<&'static str>) = match result_dtype {
-        "float16" => ("u16".to_owned(), Some("fp16_bits_to_f32")),
-        "bfloat16" => ("u16".to_owned(), Some("bf16_bits_to_f32")),
-        _ => (expr_rust_type(ctx.schema, result_dtype)?, None),
-    };
-    let Some(storage_dtype) = dtype_by_rust_type(&storage_type) else {
-        return Err(crate::analyze::util::Failure::Ffi(
-            crate::analyze::util::ffi_error(&format!(
-                "cuda.ldg storage type {storage_type} has no dtype"
-            )),
-        ));
-    };
-    Ok((
-        format!(
-            "v2::mem::variant::Ld<{}, v2::Global>",
-            v2_memory_type_rust(ctx.schema, storage_dtype)?
-        ),
-        storage_type,
-        decoder,
-    ))
-}
-
-/// A validated `cuda.ldg` load: its result dtype and address.
-pub struct CudaLdg {
-    pub result_dtype: String,
-    pub address: ObjectRef,
-}
 
 /// The validated parts.
 
@@ -437,95 +268,6 @@ pub fn stmatrix_variant(parts: &StmatrixParts) -> String {
 /// The validated parts.
 
 impl<'a> Emitter<'a> {
-    fn emit_access_ptr(&mut self, parts: &AccessPtrParts) -> AResult<RustValue> {
-        let address = &parts.address;
-        let mut base = if as_var(address).is_some() && self.variables.contains(address) {
-            self.emit_expr(address)?
-        } else if as_var(address).is_some() {
-            self.emit_buffer_data_pointer(address)?
-        } else {
-            self.emit_expr(address)?
-        };
-        if base.rust_type != "PhysicalPtr" {
-            base = self.emit_raw_generic_pointer(base, "ctx.active_mask()")?;
-        }
-        if base.rust_type != "PhysicalPtr" {
-            return unsupported(format!(
-                "{} base must resolve to a physical address",
-                "tirx.tvm_access_ptr"
-            ));
-        }
-        let offset = self.emit_expr(&parts.element_offset)?;
-        let offset = self.as_i64(offset)?;
-        let offset = self.as_warp_value(offset);
-        let extent = self.emit_expr(&parts.element_extent)?;
-        let extent = self.as_i64(extent)?;
-        let extent = self.as_warp_value(extent);
-        let result = self.temp("access_ptr");
-        self.emit_line(&format!(
-            "let {result} = physical_ptr_access_view(&{}, &{}, &{}, {}_usize, ctx.active_mask(), {}_u8, {})?;",
-            base.code,
-            offset.code,
-            extent.code,
-            dtype_byte_len(self.ctx.schema, &parts.target_dtype)?,
-            parts.access_mask,
-            json_string("tirx.tvm_access_ptr")
-        ));
-        Ok(RustValue::new(
-            result,
-            "PhysicalPtr",
-            join_uniformity([base.uniformity, offset.uniformity, extent.uniformity]),
-        ))
-    }
-
-    fn emit_cuda_ldg(&mut self, expr: &ObjectRef, ldg: &CudaLdg) -> AResult<RustValue> {
-        let (result_dtype, address) = (&ldg.result_dtype, &ldg.address);
-        let mut pointer = self.emit_expr(&address)?;
-        if pointer.rust_type != "PhysicalPtr" {
-            pointer = self.emit_raw_generic_pointer(pointer, "ctx.active_mask()")?;
-        }
-        if pointer.rust_type != "PhysicalPtr" {
-            return unsupported(format!(
-                "{} address must resolve to a physical address",
-                "tirx.cuda.ldg"
-            ));
-        }
-        let (variant, storage_type, decoder) = cuda_ldg_variant(self.ctx, &result_dtype)?;
-        let raw_result = self.temp("cuda_ldg_raw");
-        let site = self.lowered_instruction_site(expr);
-        let abi_call = abi::warp_call(
-            MEM_LD,
-            &abi::site(site as u64),
-            &[abi::address(
-                "v2::Global",
-                &abi::cloned(&pointer.code),
-                None,
-            )],
-            Some(&variant),
-            None,
-            false,
-            true,
-        );
-        self.emit_line(&format!("let {raw_result} = {abi_call};"));
-        self.emit_line(&format!(
-            "let {raw_result} = v2_register_out({raw_result});"
-        ));
-        let Some(decoder) = decoder else {
-            return Ok(RustValue::new(
-                raw_result,
-                storage_type,
-                Uniformity::Varying,
-            ));
-        };
-        let result = self.temp("cuda_ldg");
-        self.emit_line(&format!(
-            "let {result} = WarpValue::from_fn(|lane| {decoder}({raw_result}[lane]));"
-        ));
-        Ok(RustValue {
-            quantized_dtype: Some(result_dtype.clone()),
-            ..RustValue::new(result, "f32", Uniformity::Varying)
-        })
-    }
 
     fn cp_async_predicate_mask(&mut self, predicate: Option<&ObjectRef>) -> AResult<String> {
         self.instruction_predicate_mask(
@@ -683,27 +425,6 @@ pub fn emit_stmatrix(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<Ru
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_ptx_stmatrix(decoded, &parts, source_op_id)?;
     Ok(None)
-}
-
-pub fn emit_access_ptr(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
-    let parts = access_ptr_parts(emitter.ctx, call.node)?;
-    emitter
-        .with_call_expr(call.node, |emitter| emitter.emit_access_ptr(&parts))
-        .map(Some)
-}
-
-pub fn emit_cuda_ldg(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
-    let (result_dtype, address) = cuda_ldg_parts(emitter.ctx, call.node)?;
-    cuda_ldg_variant(emitter.ctx, &result_dtype)?;
-    let parts = CudaLdg {
-        result_dtype,
-        address,
-    };
-    emitter
-        .with_call_expr(call.node, |emitter| {
-            emitter.emit_cuda_ldg(call.node, &parts)
-        })
-        .map(Some)
 }
 
 pub fn emit_cp_async(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {

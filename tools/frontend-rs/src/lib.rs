@@ -18,9 +18,9 @@ use std::collections::HashSet;
 
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{Call, Expr, IntImm, Op, Var};
+use tvm_tirx::ir::{Call, Expr, Op, Var};
 use tvm_tirx::ir::Stmt;
-use tvm_tirx::tirx::{AttrStmtObj, Function, Layout};
+use tvm_tirx::tirx::{Function, Layout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     structural_map, structural_visit, tvm_ffi_dll_export_typed_func, Any, Array, Error, Map,
@@ -58,10 +58,6 @@ pub(crate) fn walk_statements(stmt: Stmt) -> Result<Array<Stmt>> {
          -> Result<Option<VisitInterrupt>> {
             if let Some(stmt) = value.cast::<Stmt>() {
                 visitor.state_mut().push(stmt);
-                // AttrStmt.node is an annotation target, not an executed child.
-                if let Some(attr) = value.as_node::<AttrStmtObj>() {
-                    return visitor.visit(&attr.body);
-                }
                 return visitor.visit_children();
             }
             if value.cast::<Array<Stmt>>().is_some() {

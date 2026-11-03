@@ -1,7 +1,7 @@
 //! Generation-side layout helpers: physical element offsets and owner
 //! coordinates.
 
-use tvm_tirx::ir::{Expr, IntImm, Var};
+use tvm_tirx::ir::{Expr, Var};
 
 use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
 use crate::analyze::util::int_const;

@@ -1,32 +1,24 @@
 //! Statement and buffer-access emission.
 
+use crate::decode::{projected_buffer, tensor_decl, TensorDecl};
 use tvm_tirx::ir::{Expr, IntImmObj, PtrTypeObj, Var};
 use tvm_tirx::ir::prim::{sub, RampObj};
 use tvm_tirx::ir::{
-    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
-    SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
-};
-use tvm_tirx::tirx::{
-    AttrStmtObj,
-    DeclBufferObj,
-    ScopeIdDefStmtObj,
-    TilePrimitiveCallObj,
+    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, RegionStmtObj,
+    ReturnObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
 };
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::static_string;
 use crate::analyze::util::tensor_var;
 use crate::analyze::util::prim_expr;
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
-use super::super::analyze::topology::iter_var_of;
-use super::super::analyze::util::{
-    buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, int_imm, kind_or_bail, not_covered,
-    oref, prim_dtype, repr_text, same, unsupported, AResult, Failure,
-};
+use super::super::analyze::topology::LAUNCH_THREAD;
+use super::super::analyze::util::{buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, int_imm, kind_or_bail, not_covered, oref, prim_dtype, repr_text, same, unsupported, AResult, Failure};
 use super::super::analyze::vector::classify_contiguous_ramp;
 use super::abi;
-use super::{ControlProvenance, Emitter, RustValue, Uniformity};
-use crate::decode::projected_buffer;
+use super::{ControlProvenance, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::{
     dtype_byte_len, is_integer_rust_type, json_string, stmt_rust_scalar_by_dtype,
     v2_memory_type_rust, vector_rust_type,
@@ -105,7 +97,7 @@ impl<'a> Emitter<'a> {
         let plan = self.plan_of(code);
         if plan.dynamic_data_var.is_some() {
             return unsupported(format!(
-                "buffer:{}:dynamic DeclBuffer view is used before declaration",
+                "buffer:{}:dynamic tensor view is used before declaration",
                 plan.name
             ));
         }
@@ -519,6 +511,18 @@ impl<'a> Emitter<'a> {
         Ok(name)
     }
 
+    /// Run `body` with the buffer loader swapped to `site`.
+    pub(super) fn with_load_site<R>(
+        &mut self,
+        site: Option<NestedLoadSite>,
+        body: impl FnOnce(&mut Self) -> AResult<R>,
+    ) -> AResult<R> {
+        let previous = std::mem::replace(&mut self.nested_load_site, site);
+        let result = body(self);
+        self.nested_load_site = previous;
+        result
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load(
         &mut self,
@@ -836,14 +840,6 @@ impl<'a> Emitter<'a> {
             || stmt.as_node::<ContinueObj>().is_some()
         {
             true
-        } else if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
-            let value = oref(evaluate.value.clone());
-            if value.as_node::<tvm_tirx::ir::CallObj>().is_some() && projected_buffer(&value)?.is_none()
-            {
-                super::control::is_loop_transfer(&value)?
-            } else {
-                false
-            }
         } else if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
             let mut found = false;
             for child in sequence.seq.iter() {
@@ -853,8 +849,8 @@ impl<'a> Emitter<'a> {
                 }
             }
             found
-        } else if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
-            self.contains_current_loop_transfer(&attr.body)?
+        } else if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+            self.contains_current_loop_transfer(&Stmt::from(region.body.clone()))?
         } else if let Some(branch) = stmt.as_node::<IfObj>() {
             self.contains_current_loop_transfer(&Stmt::from(branch.then_case.clone()))?
                 || match &branch.else_case {
@@ -865,13 +861,10 @@ impl<'a> Emitter<'a> {
             kind,
             "For"
                 | "While"
+                | "Evaluate"
                 | "AssertStmt"
-                | "AllocBuffer"
-                | "DeclBuffer"
                 | "Bind"
                 | "BufferStore"
-                | "ScopeIdDefStmt"
-                | "TilePrimitiveCall"
         ) {
             false
         } else {
@@ -915,11 +908,11 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         let node = oref(stmt.clone());
         let kind = kind_or_bail(&node)?;
-        if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
-            if ffi_text(&attr.attr_key) == "thread_extent" {
-                return self.emit_thread_extent(attr, previous_sequence_stmt);
+        if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+            if ffi_text(&region.op.name) == LAUNCH_THREAD {
+                return self.emit_launch_thread(region, previous_sequence_stmt);
             }
-            return self.emit_stmt(&attr.body, previous_sequence_stmt);
+            return self.emit_stmt(&Stmt::from(region.body.clone()), previous_sequence_stmt);
         }
         if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
             let statements: Vec<Stmt> = sequence.seq.iter().collect();
@@ -948,6 +941,12 @@ impl<'a> Emitter<'a> {
             self.restore_scope(snapshot);
             return result;
         }
+        if let Some((tensor, decl)) = tensor_decl(stmt)? {
+            return match decl {
+                TensorDecl::View(data) => self.emit_decl_tensor(&tensor, &data),
+                TensorDecl::Alloc | TensorDecl::Tmem(_) => Ok(()),
+            };
+        }
         if let Some(bind) = stmt.as_node::<BindObj>() {
             let value = self.emit_expr(&oref(bind.value.clone()))?;
             let mut value = self.materialize(value, "bound")?;
@@ -971,19 +970,6 @@ impl<'a> Emitter<'a> {
             }
             self.variables.set(var_ref, value);
             return Ok(());
-        }
-        if kind == "AllocBuffer" {
-            return Ok(());
-        }
-        if let Some(declaration) = stmt.as_node::<DeclBufferObj>() {
-            return self.emit_decl_buffer(declaration);
-        }
-        if let Some(definition) = stmt.as_node::<ScopeIdDefStmtObj>() {
-            return self.emit_scope_id(definition);
-        }
-        if stmt.as_node::<TilePrimitiveCallObj>().is_some() {
-            let source_op_id = self.static_op_id(&node)?;
-            return self.emit_tile_call(&node, source_op_id);
         }
         if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
             let value = oref(evaluate.value.clone());
@@ -1042,9 +1028,9 @@ impl<'a> Emitter<'a> {
         ))
     }
 
-    fn emit_decl_buffer(&mut self, stmt: &DeclBufferObj) -> AResult<()> {
+    fn emit_decl_tensor(&mut self, tensor: &Var, data: &Expr) -> AResult<()> {
         let (name, dynamic_data_var, referenced, elem_offset, itemsize, element_count) = {
-            let plan = self.memory_plan.resolve(&stmt.buffer)?;
+            let plan = self.memory_plan.resolve(tensor)?;
             (
                 plan.name.clone(),
                 plan.dynamic_data_var.clone(),
@@ -1088,7 +1074,7 @@ impl<'a> Emitter<'a> {
         let byte_offset = elem_offset * itemsize;
         let byte_len = element_count * itemsize;
         let mut pointer_code = pointer.code.clone();
-        let pointer_dtype = pointer_pointee_dtype(&oref(stmt.data.clone()));
+        let pointer_dtype = pointer_pointee_dtype(&oref(data.clone()));
         let byte_typed = matches!(
             pointer_dtype.as_deref(),
             Some("") | Some("int8") | Some("uint8")
@@ -1103,7 +1089,7 @@ impl<'a> Emitter<'a> {
         self.emit_line(&format!(
             "let {reference} = {pointer_code}.runtime_view(&physical, {pointer_space}, {byte_offset}_usize, {byte_len}_usize, {itemsize}_usize, &ctx, ctx.active_mask())?;"
         ));
-        self.dynamic_buffers.push((stmt.buffer.clone(), reference));
+        self.dynamic_buffers.push((tensor.clone(), reference));
         Ok(())
     }
 
@@ -1138,124 +1124,15 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    fn emit_scope_id(&mut self, stmt: &ScopeIdDefStmtObj) -> AResult<()> {
-        let definition = &stmt.def;
-        let variables: Vec<tvm_tirx::ir::Var> = definition
-            .def_ids
-            .iter()
-            .map(|variable| variable.clone())
-            .collect();
-        let mut extents: Vec<Option<i64>> = Vec::new();
-        if variables.len() == 1 {
-            extents.push(None);
-        } else if let Some(declared) = &definition.extents {
-            for extent in declared.iter() {
-                let Some(value) = int_imm(&oref(extent.clone())) else {
-                    return unsupported("Scope ID extents must be static integers");
-                };
-                extents.push(Some(value));
-            }
-        } else {
-            if variables.is_empty() {
-                return unsupported("Extent-free scope IDs require at least one coordinate");
-            }
-            return unsupported("Multi-coordinate scope IDs require explicit static extents");
-        }
-        if variables.len() != extents.len() || variables.is_empty() {
-            return unsupported("Scope ID variables/extents are inconsistent");
-        }
-        let scope = i64::from(definition.scope.as_raw());
-        let warps = self.warps_per_warpgroup;
-        let (flat_code, uniformity) = match scope {
-            0 => ("ctx.cluster_id() as i64".to_owned(), Uniformity::Uniform),
-            1 => ("ctx.global_cta_id() as i64".to_owned(), Uniformity::Uniform),
-            2 => (
-                "ctx.cta_id_in_cluster() as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            9 => (
-                "(ctx.cta_id_in_cluster() % 2) as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            3 => (
-                format!("(ctx.warp_id_in_cta() / {warps}) as i64"),
-                Uniformity::Uniform,
-            ),
-            4 => (
-                "ctx.warp_id_in_cta() as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            5 => (
-                format!("(ctx.warp_id_in_cta() % {warps}) as i64"),
-                Uniformity::Uniform,
-            ),
-            6 => ("lane as i64".to_owned(), Uniformity::Varying),
-            7 => (
-                "(ctx.warp_id_in_cta() * WARP_SIZE + lane) as i64".to_owned(),
-                Uniformity::Varying,
-            ),
-            8 => (
-                format!("((ctx.warp_id_in_cta() % {warps}) * WARP_SIZE + lane) as i64"),
-                Uniformity::Varying,
-            ),
-            other => {
-                return unsupported(format!(
-                    "Bootstrap scope binding {other} is not implemented"
-                ))
-            }
-        };
-        let mut divisor: i64 = 1;
-        for (variable, extent) in variables.iter().zip(extents.iter()) {
-            let name = ffi_text(&variable.name);
-            let dtype = prim_dtype(&variable.ty).map(dtype_text).unwrap_or_default();
-            let rust_type = stmt_rust_scalar_by_dtype(&dtype);
-            if !rust_type.is_some_and(is_integer_rust_type) {
-                return unsupported(format!(
-                    "Scope ID variable {name} has unsupported dtype {dtype}"
-                ));
-            }
-            let rust_type = rust_type.unwrap();
-            let coordinate_i64 = match extent {
-                None => format!("({flat_code})"),
-                Some(extent) => format!("(({flat_code}) / {divisor}_i64) % {extent}_i64"),
-            };
-            let coordinate = if rust_type == "i64" {
-                coordinate_i64
-            } else {
-                format!("({coordinate_i64}) as {rust_type}")
-            };
-            let value = if uniformity == Uniformity::Uniform {
-                RustValue::new(coordinate, rust_type, Uniformity::Uniform)
-            } else {
-                let prefix = if name.is_empty() {
-                    "scope".to_owned()
-                } else {
-                    format!("scope_{name}")
-                };
-                let rust_name = self.control_name(&prefix);
-                self.emit_line(&format!(
-                    "let {rust_name} = WarpValue::from_fn(|lane| {coordinate});"
-                ));
-                RustValue::new(rust_name, rust_type, Uniformity::Varying)
-            };
-            self.variables.set(oref(variable.clone()), value);
-            if let Some(extent) = extent {
-                divisor *= extent;
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_thread_extent(
+    fn emit_launch_thread(
         &mut self,
-        stmt: &AttrStmtObj,
+        region: &RegionStmtObj,
         previous_sequence_stmt: Option<&Stmt>,
     ) -> AResult<()> {
-        let Some(iteration) = iter_var_of(&stmt.node) else {
-            return not_covered("thread_extent without an IterVar node");
+        let (Ok(tag), Ok(variable)) = (region.args.get(0), region.body_params.get(0)) else {
+            return not_covered("launch_thread without a tag and a thread variable");
         };
-        let thread_tag = ffi_text(&iteration.thread_tag()?);
-        let variable = iteration.var()?.clone();
+        let thread_tag = static_string(&oref(tag), "launch_thread tag")?;
         let dtype = prim_dtype(&variable.ty).map(dtype_text).unwrap_or_default();
         if dtype != "int32" {
             return unsupported(format!(
@@ -1286,7 +1163,7 @@ impl<'a> Emitter<'a> {
         };
         let snapshot = self.scope_snapshot();
         self.variables.set(oref(variable), value);
-        let result = self.emit_stmt(&stmt.body, previous_sequence_stmt);
+        let result = self.emit_stmt(&Stmt::from(region.body.clone()), previous_sequence_stmt);
         self.restore_scope(snapshot);
         result
     }

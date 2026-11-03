@@ -8,9 +8,9 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
-    CallObj, CallSiteLocObj, Expr, ExprObj, FloatImm, FloatImmObj, GlobalVarObj, IntImm, IntImmObj,
-    Location, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, Range, SourceLocObj, TensorLoadObj,
-    TupleGetItemObj, TupleObj, Type, Var, VarObj,
+    CallObj, CallSiteLocObj, Expr, ExprObj, FloatImmObj, GlobalVarObj, IntImm, IntImmObj,
+    Location, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, Range, SourceLocObj,
+    TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var, VarObj,
 };
 use tvm_tirx::ir::prim::{
     AddObj, AndObj, BitwiseAndObj, BitwiseNotObj, BitwiseOrObj, BitwiseXorObj, BroadcastObj,
@@ -19,18 +19,11 @@ use tvm_tirx::ir::prim::{
     SubObj,
 };
 use tvm_tirx::ir::{
-    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
-    SeqStmtObj, Stmt, StmtObj, TensorStoreObj, WhileObj,
+    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, RegionStmtObj,
+    ReturnObj, SeqStmtObj, Stmt, StmtObj, TensorStoreObj, WhileObj,
 };
 use tvm_tirx::tirx::Function;
-use tvm_tirx::tirx::{
-    AllocBufferObj,
-    AttrStmtObj,
-    DeclBufferObj,
-    ScopeIdDefStmtObj,
-    TensorTypeObj,
-    TilePrimitiveCallObj,
-};
+use tvm_tirx::tirx::TensorTypeObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     self, Any, AnyView, DLDataType, DLDataTypeExt, Error, FieldGetter, ObjectCore, ObjectIdentity,
@@ -257,12 +250,8 @@ pub fn kind(node: &ObjectRef) -> Option<&'static str> {
         GlobalVarObj => "GlobalVar",
         OpaqueExprObj => "OpaqueExpr",
         SeqStmtObj => "SeqStmt",
-        AttrStmtObj => "AttrStmt",
+        RegionStmtObj => "RegionStmt",
         BindObj => "Bind",
-        AllocBufferObj => "AllocBuffer",
-        DeclBufferObj => "DeclBuffer",
-        ScopeIdDefStmtObj => "ScopeIdDefStmt",
-        TilePrimitiveCallObj => "TilePrimitiveCall",
         EvaluateObj => "Evaluate",
         IfObj => "IfThenElse",
         AssertStmtObj => "AssertStmt",
@@ -397,6 +386,12 @@ pub fn is_tensor_var(var: &Var) -> bool {
 }
 
 /// The body of a function definition. A declaration has none, so it cannot be analyzed.
+/// `node` as a `Bind` of a scalar, not a tensor, variable.
+pub fn scalar_bind<T: ObjectRefCore>(node: &T) -> Option<&BindObj> {
+    node.as_node::<BindObj>()
+        .filter(|bind| !is_tensor_var(&bind.var))
+}
+
 pub fn function_body(func: &Function) -> AResult<Stmt> {
     match &func.body {
         Some(body) => Ok(body.clone().into()),
@@ -454,10 +449,6 @@ pub fn int_const(dtype: &str, value: i64) -> tvm_ffi::Result<IntImm> {
 }
 
 /// A floating-point constant, checked as the old `FloatImm::new(dtype, value)` was.
-pub fn float_const(dtype: &str, value: f64) -> tvm_ffi::Result<FloatImm> {
-    FloatImm::from_dtype(DLDataType::try_from_str(dtype)?, value, Location::unknown())
-}
-
 /// The primitive type of `dtype`, checked as the old `PrimType::new(dtype)` was.
 pub fn prim_type(dtype: &str) -> tvm_ffi::Result<PrimType> {
     PrimType::from_dtype(DLDataType::try_from_str(dtype)?)

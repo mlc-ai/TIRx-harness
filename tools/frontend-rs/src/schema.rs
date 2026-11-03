@@ -2,7 +2,7 @@
 //! Python shares with it (exported once per process), and the operation
 //! registry (`registry.rs`) whose coverage they require.
 
-use crate::analyze::util::{json_object, json_strings};
+use crate::analyze::util::json_object;
 use std::collections::{HashMap, HashSet};
 
 use tvm_tirx::tvm_ffi::{Any, Array, Map, Result, String as FfiString};
@@ -28,8 +28,6 @@ pub struct Schema {
     pub supported_buffer_dtypes: HashSet<String>,
     pub supported_parameter_scalar_dtypes: HashSet<String>,
     pub scalar_dtype_bits: HashMap<String, i64>,
-    pub numerically_irrelevant_attrs: HashSet<String>,
-    pub semantic_attrs: HashSet<String>,
     pub serial_loop_annotations: HashSet<String>,
     pub runtime_frontend_node_kinds: HashSet<String>,
     pub compile_only_frontend_node_kinds: HashSet<String>,
@@ -92,22 +90,6 @@ const EXTRACTABLE_VECTOR_DTYPES: &[&str] = &[
 
 const REINTERPRET_NUMERIC_DECODE_PAIRS: &[(&str, &str)] = &[("uint16", "float16")];
 
-const NUMERICALLY_IRRELEVANT_ATTRS: &[&str] = &[
-    "tirx.device_entry",
-    // Register limits constrain GPU occupancy only; they do not alter the
-    // scalar or memory semantics that NumSim executes.
-    "tirx.max_registers",
-    "tirx.launch_bounds_min_blocks_per_sm",
-    "tirx.launch_bounds_max_blocks_per_cluster",
-    // The required block size is a launch contract, not a numerical
-    // operation; NumSim executes the declared thread extent directly.
-    "tirx.required_block_size",
-];
-const SEMANTIC_ATTRS: &[&str] = &[
-    "thread_extent",
-    "tirx.dyn_smem_bytes",
-    "tirx.pool_max_bytes",
-];
 const SERIAL_LOOP_ANNOTATIONS: &[&str] = &["tirx.pragma_unroll", "tirx.disable_unroll"];
 pub const INTEGER_BINARY_NODE_KINDS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Mod", "FloorDiv", "FloorMod", "Min", "Max",
@@ -146,18 +128,14 @@ const RUNTIME_FRONTEND_NODE_KINDS: &[&str] = &[
     "Return",
     "Select",
     "Shuffle",
-    "TilePrimitiveCall",
     "Var",
     "While",
 ];
 const COMPILE_ONLY_FRONTEND_NODE_KINDS: &[&str] = &[
-    "AllocBuffer",
-    "AttrStmt",
+    "RegionStmt",
     // Operand view; its footprint and effects belong to the consuming tile op.
     "TensorRegion",
-    "DeclBuffer",
     "Ramp",
-    "ScopeIdDefStmt",
     "SeqStmt",
     "StringImm",
 ];
@@ -195,8 +173,6 @@ impl Schema {
             supported_buffer_dtypes: crate::dtypes::with_capability("buffer"),
             supported_parameter_scalar_dtypes: crate::dtypes::with_capability("scalar"),
             scalar_dtype_bits: crate::dtypes::scalar_bits(),
-            numerically_irrelevant_attrs: owned_set(NUMERICALLY_IRRELEVANT_ATTRS),
-            semantic_attrs: owned_set(SEMANTIC_ATTRS),
             serial_loop_annotations: owned_set(SERIAL_LOOP_ANNOTATIONS),
             runtime_frontend_node_kinds: integer_binary_node_kinds
                 .iter()
@@ -246,14 +222,6 @@ impl Schema {
                             ])
                         })
                         .collect(),
-                ),
-            ),
-            (
-                "tile_ops",
-                json_strings(
-                    crate::analyze::tile_forms::TILE_OPS
-                        .iter()
-                        .map(|kind| kind.op_name()),
                 ),
             ),
             (

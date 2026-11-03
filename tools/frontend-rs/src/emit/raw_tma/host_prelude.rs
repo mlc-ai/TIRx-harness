@@ -1,16 +1,16 @@
 //! Promote canonical host-created TensorMaps to implicit device parameters.
 
+use crate::decode::{projected_buffer, tensor_decl, TensorDecl};
 use tvm_tirx::ir::Location;
-use tvm_tirx::tirx::TensorMapTypeObj;
+use tvm_tirx::tirx::{TensorMapTypeObj, TensorType};
 
 use std::collections::HashSet;
 
 use crate::analyze::buffers::{call_op_name, BufferBindings};
 use crate::analyze::util::{
-    as_buffer, dtype_of, dtype_text, ffi_text, function_body, int_const, int_imm, kind, oref, prim,
-    same, unsupported, AResult, Json,
+    as_buffer, buffer_dtype, dtype_of, dtype_text, ffi_error, ffi_text, function_body, int_const,
+    int_imm, kind, oref, prim, same, scalar_bind, unsupported, AResult, Json,
 };
-use crate::decode::projected_buffer;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
@@ -18,18 +18,21 @@ use tvm_tirx::ir::{
     CallObj,
     DictAttrs,
     Expr,
-    IntImm,
     Op,
     PtrTypeObj,
     StringImm,
+    TensorLoadObj,
     Var,
 };
 use tvm_tirx::ir::prim::Add;
 use tvm_tirx::backend::cuda::TensorMapEncodeTiledAttrObj;
-use tvm_tirx::ir::{AssertStmtObj, BindObj, EvaluateObj, SeqStmt, SeqStmtObj, Stmt, Type};
-use tvm_tirx::tirx::{AttrStmtObj, DeclBufferObj, Function};
+use tvm_tirx::ir::{AssertStmtObj, BindObj, EvaluateObj, RegionStmtObj, SeqStmt, SeqStmtObj, Stmt, Type};
+use tvm_tirx::tirx::Function;
+use crate::analyze::topology::{is_launch_entry, LAUNCH_THREAD};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCast, ObjectRefCore, String as FfiString};
+use tvm_tirx::tvm_ffi::{
+    Any, DLDataType, DLDataTypeExt, Map, ObjectRefCast, ObjectRefCore, String as FfiString,
+};
 
 use super::{implicit_tensor_map_metadata, scalar_parameters, IMPLICIT_TENSOR_MAP_ATTR};
 
@@ -90,7 +93,7 @@ impl Context<'_> {
         let Some(call) = bind.value.as_node::<CallObj>() else {
             return Ok(None);
         };
-        if call_op_name(call)?.as_deref() != Some("tirx.tvm_stack_alloca")
+        if call_op_name(call)?.as_deref() != Some("tirx.stack_alloca")
             || call
                 .args
                 .get(0)
@@ -140,12 +143,22 @@ impl Context<'_> {
                     continue;
                 }
             }
-            let Some(buffer) = projected_buffer(&expression)? else {
-                return unsupported(
-                    "host TensorMap global address must derive from a typed-buffer data projection",
-                );
+            let source = match element_address(&expression)? {
+                Some((source, element_bytes)) => {
+                    offsets.push(int_const("int64", element_bytes)?.into());
+                    source
+                }
+                None => match projected_buffer(&expression)? {
+                    Some(source) => source,
+                    None => {
+                        return unsupported(
+                            "host TensorMap global address must derive from a typed-buffer data projection",
+                        )
+                    }
+                },
             };
-            let root = bindings.storage_key(&buffer)?;
+            offsets.extend(bindings.root_byte_offset(&source)?);
+            let root = bindings.storage_key(&source)?;
             if let Some(buffer) = as_buffer(&root) {
                 break buffer;
             }
@@ -266,6 +279,46 @@ impl Context<'_> {
     }
 }
 
+/// `(tensor, byte offset)` of `address_of(tensor[indices])` with static indices
+/// into a tensor with the default row-major layout.
+fn element_address(expression: &ObjectRef) -> AResult<Option<(Var, i64)>> {
+    let Some(call) = expression.as_node::<CallObj>() else {
+        return Ok(None);
+    };
+    if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
+        return Ok(None);
+    }
+    let element = call.args.get(0)?;
+    let Some(load) = element.as_node::<TensorLoadObj>() else {
+        return Ok(None);
+    };
+    let Some(source) = as_buffer(&oref(load.source.clone())) else {
+        return Ok(None);
+    };
+    let tensor = source.ty.clone().try_cast::<TensorType>().map_err(|_| {
+        ffi_error("a tensor variable's type is a TensorType")
+    })?;
+    if !tensor.has_default_layout(None)? {
+        return unsupported(format!(
+            "host TensorMap global address into {:?} requires its default layout",
+            ffi_text(&source.name)
+        ));
+    }
+    let dtype = DLDataType::try_from_str(&buffer_dtype(&source))?;
+    let element_bits = i64::from(dtype.bits) * i64::from(dtype.lanes);
+    let mut offset = 0;
+    for (extent, index) in tensor.shape.iter().zip(load.indices.iter()) {
+        let (Some(extent), Some(index)) = (int_imm(&oref(extent)), int_imm(&oref(index))) else {
+            return unsupported("host TensorMap global address requires static element indices");
+        };
+        offset = offset * extent + index;
+    }
+    if (offset * element_bits) % 8 != 0 {
+        return unsupported("host TensorMap global address must be byte aligned");
+    }
+    Ok(Some((source, offset * element_bits / 8)))
+}
+
 fn string_imm(value: &Expr) -> Option<String> {
     value
         .as_node::<StringImmObj>()
@@ -273,11 +326,8 @@ fn string_imm(value: &Expr) -> Option<String> {
 }
 
 fn is_device_entry(statement: &Stmt) -> bool {
-    statement.as_node::<AttrStmtObj>().is_some_and(|attribute| {
-        matches!(
-            attribute.attr_key.as_str(),
-            "tirx.device_entry" | "thread_extent"
-        )
+    statement.as_node::<RegionStmtObj>().is_some_and(|region| {
+        is_launch_entry(region) || region.op.name.as_str() == LAUNCH_THREAD
     })
 }
 
@@ -330,14 +380,14 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         }
         return Ok(Some(Call::new(
             Some(&call.ty),
-            Op::get("tirx.tvm_call_packed")?,
+            Op::get("tirx.call_packed")?,
             args,
             None,
             Vec::<Type>::new(),
             call.loc.clone(),
         )?));
     }
-    if call_op_name(&call)?.as_deref() == Some("tirx.tvm_call_packed")
+    if call_op_name(&call)?.as_deref() == Some("tirx.call_packed")
         && call
             .args
             .get(0)
@@ -436,9 +486,9 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
                         "host assertion before tirx.device_entry must simplify to true",
                     );
                 }
-            } else if statement.as_node::<DeclBufferObj>().is_some() {
+            } else if tensor_decl(statement)?.is_some_and(|(_, decl)| matches!(decl, TensorDecl::View(_))) {
                 // The complete buffer binding table below keeps these aliases.
-            } else if let Some(binding) = statement.as_node::<BindObj>() {
+            } else if let Some(binding) = scalar_bind(statement) {
                 let value = crate::substitute(oref(binding.value.clone()), replacements)?;
                 if crate::post_order_nodes(value.clone())?
                     .iter()

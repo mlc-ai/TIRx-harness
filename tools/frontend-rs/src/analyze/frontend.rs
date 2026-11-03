@@ -7,15 +7,15 @@ use tvm_tirx::ir::Location;
 use tvm_tirx::ir::StringImm;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{CastObj, RampObj, ShuffleObj};
-use tvm_tirx::ir::{Evaluate, ForObj, IfObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj};
-use tvm_tirx::tirx::{AttrStmtObj, Function, TilePrimitiveCallObj};
+use tvm_tirx::ir::{Evaluate, ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj};
+use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiString, WalkOrder};
 
 use super::buffers::{call_op_name, BufferBindings};
 use super::expression_bindings::ExpressionBindings;
 use super::memory::{build_memory_plan, MemoryPlan, MemorySpace};
-use super::topology::{extract_topology, validate_attr_stmt, validate_for, LaunchTopology};
+use super::topology::{extract_topology, validate_for, validate_region, LaunchTopology};
 use super::util::{
     as_buffer, buffer_dtype, buffer_name, buffer_scope, dtype_of, dtype_text, ffi_text,
     kind_or_bail, node_span, not_covered, oref, prim_dtype, repr_of, repr_text, runtime_kind,
@@ -74,7 +74,7 @@ fn node_text(node: &ObjectRef) -> AResult<String> {
     if let Some(seq) = node.as_node::<SeqStmtObj>() {
         return Ok(format!("SeqStmt({} statements)", seq.seq.len()));
     }
-    let mut text = if node.as_node::<AttrStmtObj>().is_some()
+    let mut text = if node.as_node::<RegionStmtObj>().is_some()
         || node.as_node::<ForObj>().is_some()
         || node.as_node::<WhileObj>().is_some()
         || node.as_node::<IfObj>().is_some()
@@ -130,8 +130,6 @@ pub struct KernelPlan {
     pub supported: bool,
     pub statements: Vec<Stmt>,
     pub nodes: Vec<ObjectRef>,
-    /// The parsed tile call per op id.
-    pub tile_calls: Vec<Option<super::tile_forms::ParsedTileCall>>,
     pub buffer_bindings: BufferBindings,
     pub memory_plan: Option<MemoryPlan>,
     pub expression_bindings: Option<ExpressionBindings>,
@@ -168,7 +166,7 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
         .iter()
         .collect();
     let buffer_bindings = BufferBindings::build(&statements)?;
-    ctx.record_tmem_addresses(&buffer_bindings);
+    ctx.record_tensor_decls(&buffer_bindings)?;
     let params: Vec<Var> = func.params.iter().collect();
 
     let mut facts = KernelFacts::default();
@@ -197,7 +195,7 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
     let (buffers, buffer_names) = buffer_entries(ctx, func, &mut unsupported_items)?;
     let ((scalars, scalar_specs), (pointers, pointer_specs)) =
         scalar_and_pointer_entries(ctx, &params, &mut unsupported_items)?;
-    let requires_implicit_tmem = (facts.tile_uses_tmem || tmem_requirements.uses_tmem)
+    let requires_implicit_tmem = tmem_requirements.uses_tmem
         && memory_plan.as_ref().is_some_and(|plan| {
             !plan
                 .backings
@@ -243,7 +241,6 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
         supported,
         statements,
         nodes,
-        tile_calls: facts.tile_calls,
         buffer_bindings,
         memory_plan,
         expression_bindings,
@@ -288,9 +285,6 @@ struct KernelFacts {
     /// `op#<id>:<kind>` for every node kind the frontend does not support.
     unsupported_node_kinds: Vec<String>,
     semantic_unsupported: Vec<String>,
-    tile_calls: Vec<Option<super::tile_forms::ParsedTileCall>>,
-    /// Whether a tile lowering touches TMEM.
-    tile_uses_tmem: bool,
     /// The unsupported memory or expression-binding analysis.
     analysis_failure: Option<(String, Vec<String>)>,
 }
@@ -328,31 +322,7 @@ impl KernelFacts {
         }
         self.source_entries
             .push(source_entry(node, &runtime_kind(node)?, op_id)?);
-        self.tile_calls.push(None);
-        check_node(ctx, node, kind, op_id, &mut self.semantic_unsupported)?;
-        self.record_tile_call(ctx, node, op_id)
-    }
-
-    /// A TilePrimitiveCall's lowered op and TMEM semantics.
-    fn record_tile_call(&mut self, ctx: &Ctx, node: &ObjectRef, op_id: i64) -> AResult<()> {
-        let Some(call) = node.as_node::<TilePrimitiveCallObj>() else {
-            return Ok(());
-        };
-        let resolved = super::tile_forms::tile_op_name(call)
-            .and_then(|_| super::tile_forms::resolve_tile_call(ctx, node));
-        let operation = match resolved {
-            Ok(resolved) => resolved,
-            Err(Failure::Unsupported { message, .. }) => {
-                self.semantic_unsupported
-                    .push(format!("op#{op_id}:{message}"));
-                return Ok(());
-            }
-            Err(failure) => return Err(with_node_span(failure, node)),
-        };
-        self.tile_uses_tmem =
-            self.tile_uses_tmem || super::tile_forms::tile_lowering_uses_tmem(&operation);
-        self.tile_calls[op_id as usize] = Some(operation);
-        Ok(())
+        check_node(ctx, node, kind, op_id, &mut self.semantic_unsupported)
     }
 }
 
@@ -376,8 +346,8 @@ fn check_node(
             }
         }
     }
-    if let Some(attr) = node.as_node::<AttrStmtObj>() {
-        if let Some(error) = validate_attr_stmt(ctx, attr)? {
+    if let Some(region) = node.as_node::<RegionStmtObj>() {
+        if let Some(error) = validate_region(region)? {
             unsupported.push(format!("op#{op_id}:{error}"));
         }
     }

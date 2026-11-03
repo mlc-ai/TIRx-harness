@@ -1,7 +1,7 @@
 //! Descriptor encoding lookups and bit assembly for TCGEN helper calls.
 
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::cuda_arch::{cuda_arch, CUDA_ARCH_ATTR};
+use crate::analyze::cuda_arch::{cuda_arch, CUDA_ARCH_FIELD};
 use crate::analyze::util::{
     dtype_of, oref, prim, repr_text, simplify, static_string, unsupported, AResult, Failure,
 };
@@ -617,8 +617,8 @@ const TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH: &[(&str, &str)] = &[
 pub fn require_tcgen_descriptor_layout(func: &Function) -> AResult<&'static str> {
     let Some(arch) = cuda_arch(func)? else {
         return unsupported(format!(
-            "TCGEN descriptors require PrimFunc attribute {:?} to select exact SM100/SM103/SM107 descriptor semantics",
-            CUDA_ARCH_ATTR));
+            "TCGEN descriptors require {CUDA_ARCH_FIELD} to select exact SM100/SM103/SM107 descriptor semantics"
+        ));
     };
     match TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH
         .iter()

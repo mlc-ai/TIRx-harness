@@ -4,7 +4,7 @@
 
 use tvm_tirx::sym::{Analyzer, ProofStrength};
 use tvm_tirx::ir::prim::sub;
-use tvm_tirx::ir::{Expr, IntImm, Location, Range, Var};
+use tvm_tirx::ir::{Expr, Location, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;

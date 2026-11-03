@@ -5,7 +5,7 @@ use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::ptx::DecodedPtx;
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::util::{int_const, oref, prim_type, AResult};
+use crate::analyze::util::{oref, AResult};
 
 pub enum PointerCall {
     Address(ObjectRef),
@@ -42,9 +42,6 @@ pub fn pointer_call(call: &CallObj) -> AResult<PointerCall> {
             | "tirx.cuda.smem_addr_from_u64"
             | "tirx.cuda.sm100_mbarrier_addr",
         ) if !call.args.is_empty() => PointerCall::Forward(oref(call.args.get(0)?)),
-        Some("tirx.tvm_access_ptr") if call.args.len() > 1 => {
-            PointerCall::Forward(oref(call.args.get(1)?))
-        }
         Some("prim.if_then_else") if call.args.len() == 3 => {
             PointerCall::Select(oref(call.args.get(1)?), oref(call.args.get(2)?))
         }
@@ -84,8 +81,8 @@ pub fn register_pointer_sources(decoded: &DecodedPtx) -> AResult<Vec<ObjectRef>>
 mod tests {
     use super::super::ptx::PtxOperand;
     use super::*;
-    use crate::analyze::util::same;
-    use tvm_tirx::ir::{Call, Expr, IntImm, Location, Op, PrimType, Type};
+    use crate::analyze::util::{int_const, prim_type, same};
+    use tvm_tirx::ir::{Call, Expr, Location, Op, Type};
 
     fn call(name: &str, args: Vec<Expr>) -> Call {
         let ty: Type = prim_type("uint64").unwrap().into();
@@ -123,9 +120,6 @@ mod tests {
                 PointerCall::Opaque
             ));
         }
-        assert!(
-            matches!(pointer_call(&call("tirx.tvm_access_ptr", vec![a.clone(), b.clone()])).unwrap(), PointerCall::Forward(v) if same(&v, &oref(b.clone())))
-        );
         let select = call("prim.if_then_else", vec![a.clone(), a.clone(), b.clone()]);
         assert!(
             matches!(pointer_call(&select).unwrap(), PointerCall::Select(x, y) if same(&x, &oref(a.clone())) && same(&y, &oref(b.clone())))

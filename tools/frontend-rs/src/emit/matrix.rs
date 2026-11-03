@@ -15,7 +15,7 @@ use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, v2_memory_type_rust, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm_tirx::ir::{CallObj, Expr, FloatImmObj, IntImm, IntImmObj, TensorLoadObj, Var, VarObj};
+use tvm_tirx::ir::{CallObj, Expr, FloatImmObj, IntImmObj, TensorLoadObj, Var, VarObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -264,7 +264,7 @@ pub fn resolve_legacy_matrix_call(
             &MMA_ACCUMULATOR_DTYPES, &result_dtype
         ));
     }
-    if op_name == "tirx.cuda.mma_fill" || op_name == "tirx.mma_fill_legacy" {
+    if op_name == "tirx.cuda.mma_fill" {
         if args.len() != 3 {
             return unsupported(format!("{op_name} expects 3 arguments, got {}", args.len()));
         }
@@ -1322,8 +1322,8 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         match call.op_name.as_str() {
             "tirx.ptx_legacy.mma" => self.emit_legacy_mma(call, source_op_id),
-            "tirx.cuda.mma_fill" | "tirx.mma_fill_legacy" => self.emit_mma_fill(call, source_op_id),
-            "tirx.cuda.mma_store" | "tirx.mma_store_legacy" => self.emit_mma_store(call, source_op_id),
+            "tirx.cuda.mma_fill" => self.emit_mma_fill(call, source_op_id),
+            "tirx.cuda.mma_store" => self.emit_mma_store(call, source_op_id),
             other => {
                 crate::analyze::util::not_covered(format!("statement call {other} has no lowering"))
             }

@@ -1143,7 +1143,7 @@ impl<'a> Emitter<'a> {
         // `self.buffer_load(expr.source, indices, source_node=expr, ...)`: the
         // kernel emitter swaps the loader around tile and TMEM lowerings.
         let value = match self.nested_load_site.clone() {
-            None | Some(NestedLoadSite::Exact) => self.emit_buffer_load(
+            None => self.emit_buffer_load(
                 &source,
                 &indices,
                 None,
@@ -1163,40 +1163,6 @@ impl<'a> Emitter<'a> {
                 None,
                 site,
             )?,
-            Some(NestedLoadSite::ByBuffer(op_id)) => {
-                let site = self.implicit_source_op_id(&source, op_id)?;
-                self.emit_buffer_load(
-                    &source,
-                    &indices,
-                    None,
-                    register_access_mask,
-                    false,
-                    result_dtype,
-                    None,
-                    site,
-                )?
-            }
-            Some(NestedLoadSite::AtLane(lane)) => self.emit_buffer_load_at_lane(
-                &source,
-                &indices,
-                &lane,
-                None,
-                false,
-                result_dtype,
-                Some(expr),
-                None,
-            )?,
-            Some(NestedLoadSite::AtLaneSite(lane, site)) => self.emit_buffer_load_at_lane(
-                &source,
-                &indices,
-                &lane,
-                None,
-                false,
-                result_dtype,
-                None,
-                site,
-            )?,
-            Some(NestedLoadSite::Reject(message)) => return unsupported(message),
         };
         self.instrument(expr, "TensorLoad", &[], value)
     }

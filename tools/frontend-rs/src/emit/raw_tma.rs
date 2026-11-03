@@ -20,7 +20,7 @@ use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, ControlProvenance, Emitter, RustValue, Uniformity, Variables};
 use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, phase_binding_name};
-use tvm_tirx::ir::{Call, CallObj, Expr, Location, Op, PrimType, PtrTypeObj, Type, Var};
+use tvm_tirx::ir::{Call, CallObj, Expr, Location, Op, PtrTypeObj, Type, Var};
 use tvm_tirx::ir::prim::SelectObj;
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;

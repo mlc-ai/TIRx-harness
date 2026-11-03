@@ -8,14 +8,14 @@ use std::collections::BTreeSet;
 use tvm_tirx::ir::TensorRegionObj;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
-use tvm_tirx::ir::{BindObj, TensorStoreObj};
+use tvm_tirx::ir::TensorStoreObj;
 
 use tvm_tirx::tvm_ffi::{object::ObjectRef, ObjectRefCore};
 
 use super::frontend::KernelPlan;
 use super::util::{
-    as_buffer, as_var, dtype_of, enum_name, ffi_text, int_imm, oref, same, tensor_var, AResult,
-    IdMap, IdSet,
+    as_buffer, as_var, dtype_of, enum_name, int_imm, oref, same, scalar_bind, tensor_var,
+    AResult, IdMap, IdSet,
 };
 use super::Ctx;
 use crate::decode::pointers::{
@@ -100,7 +100,7 @@ impl<'a> PointerTargets<'a> {
             writes.insert(key, Vec::new());
         }
         for node in &plan.nodes {
-            if let Some(bind) = node.as_node::<BindObj>() {
+            if let Some(bind) = scalar_bind(node) {
                 result
                     .bindings
                     .set(oref(bind.var.clone()), oref(bind.value.clone()));

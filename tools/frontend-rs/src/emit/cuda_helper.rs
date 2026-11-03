@@ -12,7 +12,7 @@ use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::{json_string, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{CallObj, IntImmObj, Location, PrimType, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, IntImmObj, Location, PtrTypeObj, TensorLoadObj};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;

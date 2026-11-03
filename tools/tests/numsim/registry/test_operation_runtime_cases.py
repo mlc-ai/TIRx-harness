@@ -21,10 +21,6 @@ def _registered_targets() -> set[str]:
         for path in registry["contextual_op_paths"]
         if path["op"]["support"] != "rejected"
     )
-    for ir_name in registry["tile_ops"]:
-        target_id = f"tile:{ir_name}"
-        assert target_id not in targets
-        targets.add(target_id)
     return targets
 
 

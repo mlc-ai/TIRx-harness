@@ -1,10 +1,10 @@
 //! Artifact split of large regions into private helpers.  Capture attempts,
 //! thresholds and restore points decide the emitted text.
 
-use tvm_tirx::ir::{BindObj, ForObj, IfObj, SeqStmtObj, Stmt, WhileObj};
-use tvm_tirx::tirx::{AttrStmtObj, ScopeIdDefStmtObj};
+use tvm_tirx::ir::{ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, WhileObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
+use crate::analyze::util::scalar_bind;
 
 use super::super::analyze::util::{ffi_error, ffi_text, ident, int_imm, oref, AResult, Failure};
 use super::{Emitter, RustValue, SplitArgument, SplitEffects, SplitHelper, Uniformity, Variables};
@@ -99,10 +99,9 @@ fn is_rust_identifier(text: &str) -> bool {
 
 /// Statement kinds that never join a captured run.
 fn is_run_excluded(stmt: &Stmt) -> bool {
-    stmt.as_node::<AttrStmtObj>().is_some()
+    stmt.as_node::<RegionStmtObj>().is_some()
         || stmt.as_node::<SeqStmtObj>().is_some()
-        || stmt.as_node::<ScopeIdDefStmtObj>().is_some()
-        || stmt.as_node::<BindObj>().is_some()
+        || scalar_bind(stmt).is_some()
 }
 
 pub struct Checkpoint {

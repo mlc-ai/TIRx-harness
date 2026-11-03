@@ -56,11 +56,6 @@ pub mod stmt;
 pub mod sync;
 pub mod tcgen05;
 pub mod tcgen_descriptor;
-pub mod tile;
-pub mod tile_async_copy;
-pub mod tile_common;
-pub mod tile_gemm_async;
-pub mod tile_tcgen05;
 pub mod tmem;
 pub mod wait_until;
 
@@ -818,15 +813,5 @@ fn validate_integer_expression(
 /// The buffer loader swapped in around one emission.
 #[derive(Clone)]
 pub enum NestedLoadSite {
-    /// `emit_buffer_load`: the load's own source node (the default loader,
-    /// handed over explicitly).
-    Exact,
     Site(Option<i64>),
-    ByBuffer(i64),
-    /// `emit_buffer_load_at_lane(buffer, indices, lane, source_node=<load>)`.
-    AtLane(String),
-    /// `emit_(implicit_)buffer_load_at_lane(buffer, indices, lane, source_op_id=...)`.
-    AtLaneSite(String, Option<i64>),
-    /// Reject a runtime load while capturing a pure closure.
-    Reject(String),
 }

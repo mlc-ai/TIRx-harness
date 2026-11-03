@@ -1,14 +1,15 @@
 //! Static buffer layout inspection.
 
-use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{Expr, IntImm, Var};
+use tvm_tirx::ir::prim::{eq, floordiv, floormod};
+use tvm_tirx::sym::{Analyzer, ProofStrength};
+use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TileLayout};
 use tvm_tirx::tvm_ffi::{
     self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
 };
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, enum_name, ffi_text, int_const, int_imm_expr,
+    buffer_dtype, buffer_name, buffer_scope, dtype_text, enum_name, ffi_text, int_const, int_imm_expr,
     not_covered, oref, prim, prim_expr, repr_of, simplify, static_int as shared_static_int,
     unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
 };
@@ -21,7 +22,7 @@ pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<Expr> {
     let operator = name.strip_prefix("_Op").expect("primitive constructor prefix");
     let full = format!("prim._Op{operator}");
     let function = tvm_ffi::Function::get_global(&full)?;
-    let result: Any = function.call_tuple((lhs, rhs, Any::new()))?;
+    let result: Any = function.call_tuple((lhs, rhs, tvm_tirx::ir::Location::unknown()))?;
     Ok(prim_expr(result)?)
 }
 
@@ -51,13 +52,6 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
         &Map::new(),
     )
     .into())
-}
-
-/// Query the target TIRx layout contract shared by validation and emission.
-pub fn tile_layout_is_trivial(layout: &TileLayout) -> AResult<bool> {
-    let result: Any =
-        tvm_ffi::cached_global_func!("tirx.TileLayoutIsTrivial").call_tuple((layout.clone(),))?;
-    Ok(bool::try_from(result)?)
 }
 
 #[derive(Clone)]
@@ -363,6 +357,7 @@ pub fn inspect_buffer_layout(
     buffer: &Var,
     shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
     tmem_address: Option<tvm_tirx::ir::Expr>,
+    byte_offset: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     let name = buffer_name(buffer);
     let buffer_type = buffer.tensor_type();
@@ -410,10 +405,49 @@ pub fn inspect_buffer_layout(
         i64::from(data_type.bits) / 8
     };
     let scope = buffer_scope(buffer);
-    // A TensorType has neither an element offset nor strides: a view's offset and
-    // strides are part of its layout.
-    let (elem_offset, dynamic_elem_offset, packed_nibble_offset): (i64, Option<Expr>, i64) =
-        (0, None, 0);
+    // A declared view starts `byte_offset` bytes into its storage root, a whole
+    // number of storage elements (bytes for packed float4); a TensorType has no
+    // strides, which belong to its layout.
+    let (elem_offset, dynamic_elem_offset): (i64, Option<Expr>) = match byte_offset {
+        None => (0, None),
+        Some(bytes) => {
+            let bytes = simplify(analyzer, &bytes)?;
+            match int_imm_expr(&bytes) {
+                Some(value) if value < 0 => {
+                    return unsupported(format!(
+                        "buffer:{name}:negative byte offset {value} is not implemented"
+                    ))
+                }
+                Some(value) if value % itemsize == 0 => (value / itemsize, None),
+                Some(value) => {
+                    return unsupported(format!(
+                        "buffer:{name}:byte offset {value} is not a multiple of the {itemsize}-byte element"
+                    ))
+                }
+                None if packed_nibble => {
+                    return unsupported(format!(
+                        "buffer:{name}:runtime elem_offset for packed float4 storage is unsupported"
+                    ))
+                }
+                None => {
+                    let dtype = dtype_text(bytes.dtype());
+                    let element = Expr::from(int_const(&dtype, itemsize)?);
+                    let aligned = eq(
+                        floormod(bytes.clone(), element.clone())?,
+                        Expr::from(int_const(&dtype, 0)?),
+                    )?;
+                    if !analyzer.can_prove(&aligned, ProofStrength::Default)? {
+                        return unsupported(format!(
+                            "buffer:{name}:runtime byte offset {} is not provably a multiple of the {itemsize}-byte element",
+                            repr_of(&bytes)?
+                        ));
+                    }
+                    (0, Some(simplify(analyzer, &floordiv(bytes, element)?)?))
+                }
+            }
+        }
+    };
+    let packed_nibble_offset: i64 = 0;
     let explicit_strides: Option<Vec<i64>> = None;
     let static_shape = shape
         .iter()

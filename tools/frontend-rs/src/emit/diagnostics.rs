@@ -3,8 +3,7 @@
 use tvm_tirx::ir::Location;
 use tvm_tirx::ir::{CallObj, Expr};
 use tvm_tirx::ir::prim::LetObj;
-use tvm_tirx::ir::{BindObj, Evaluate, ForObj, Stmt, WhileObj};
-use tvm_tirx::tirx::AttrStmtObj;
+use tvm_tirx::ir::{BindObj, Evaluate, ForObj, RegionStmtObj, Stmt, WhileObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     structural_visit, Any, Array, ObjectRefCast, ObjectRefCore, Result, StructuralView,
@@ -26,10 +25,12 @@ pub struct State {
 }
 
 // Stop at direct executed children. In particular, never enter type/layout
-// metadata or AttrStmt.node, which is an annotation target.
+// metadata or a region's attributes and parameters.
 fn statement_children(stmt: &Stmt) -> Result<Vec<ObjectRef>> {
-    if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
-        return Ok(vec![oref(attr.value.clone()), oref(attr.body.clone())]);
+    if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+        let mut children: Vec<ObjectRef> = region.args.iter().map(oref).collect();
+        children.push(oref(region.body.clone()));
+        return Ok(children);
     }
     let root = oref(stmt.clone());
     let mut visitor = VisitCallbacks::new(

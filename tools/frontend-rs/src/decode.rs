@@ -2,10 +2,11 @@
 
 use std::cell::RefCell;
 
-use tvm_tirx::ir::{CallObj, Var};
+use tvm_tirx::ir::prim::{add, AddObj, CastObj};
+use tvm_tirx::ir::{BindObj, CallObj, Expr, Op, Stmt, Var};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::ObjectRefCore;
+use tvm_tirx::tvm_ffi::{ObjectRefCast, ObjectRefCore};
 
 use crate::analyze::buffers::call_op_name;
 pub mod ptx;
@@ -13,7 +14,8 @@ pub mod pointers;
 
 use self::ptx::{DecodedPtx, PtxDecode};
 use crate::analyze::util::{
-    as_buffer, dtype_of, ffi_error, not_covered, oref, unsupported, AResult, Failure, IdMap,
+    as_buffer, buffer_name, dtype_of, ffi_error, ffi_text, is_tensor_var, not_covered, oref, same,
+    unsupported, AResult, Failure, IdMap,
 };
 use crate::analyze::Ctx;
 use crate::emit::ptx_addr::validate_decoded_ptx_addr_operands;
@@ -159,13 +161,122 @@ impl Cache {
     }
 }
 
-/// The typed buffer behind `tirx.buffer_data`.
+pub const TENSOR_DATA_PTR: &str = "tirx.tensor_data_ptr";
+pub const DECL_TENSOR: &str = "tirx.decl_tensor";
+
+/// The tensor whose data pointer `tirx.tensor_data_ptr` reads.
 pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<Var>> {
     let Some(call) = node.as_node::<CallObj>() else {
         return Ok(None);
     };
-    if call_op_name(call)?.as_deref() != Some("tirx.buffer_data") || call.args.len() != 1 {
+    if call_op_name(call)?.as_deref() != Some(TENSOR_DATA_PTR) || call.args.len() != 1 {
         return Ok(None);
     }
     Ok(as_buffer(&oref(call.args.get(0)?)))
+}
+
+/// How a `Bind` of a tensor variable introduces it.
+pub enum TensorDecl {
+    /// `tirx.alloc_tensor` without a placement: new storage.
+    Alloc,
+    /// `tirx.decl_tensor(data)`: a view of existing data.
+    View(Expr),
+    /// `tirx.cuda.decl_tmem(address)`: a TMEM view at a column address.
+    Tmem(Expr),
+}
+
+/// The tensor `stmt` binds and how, or `None` for any other statement.
+pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
+    let Some(bind) = stmt.as_node::<BindObj>() else {
+        return Ok(None);
+    };
+    if !is_tensor_var(&bind.var) {
+        return Ok(None);
+    }
+    let call = bind.value.as_node::<CallObj>();
+    let op = call.and_then(|call| call.op.clone().try_cast::<Op>().ok());
+    let decl = match (op.map(|op| ffi_text(&op.name)).as_deref(), call) {
+        (Some("tirx.alloc_tensor"), Some(call)) if call.args.is_empty() => TensorDecl::Alloc,
+        (Some("tirx.alloc_tensor"), Some(_)) => {
+            return unsupported(format!(
+                "buffer:{}:alloc_tensor placement is not modeled",
+                buffer_name(&bind.var)
+            ))
+        }
+        (Some(DECL_TENSOR), Some(call)) if call.args.len() == 1 => {
+            TensorDecl::View(call.args.get(0)?)
+        }
+        (Some("tirx.cuda.decl_tmem"), Some(call)) if call.args.len() == 1 => {
+            TensorDecl::Tmem(call.args.get(0)?)
+        }
+        _ => {
+            return unsupported(format!(
+                "buffer:{}:a tensor must be bound by alloc_tensor, decl_tensor or cuda.decl_tmem",
+                buffer_name(&bind.var)
+            ))
+        }
+    };
+    Ok(Some((bind.var.clone(), decl)))
+}
+
+/// The tensor whose data pointer `data` offsets, with the byte offsets that
+/// `tirx.ptr_byte_offset` layers add to it, outermost first.
+pub fn data_source(data: &Expr) -> AResult<Option<(Var, Vec<Expr>)>> {
+    let mut current = data.clone();
+    let mut offsets = Vec::new();
+    while let Some(call) = current.as_node::<CallObj>() {
+        if call_op_name(call)?.as_deref() != Some("tirx.ptr_byte_offset") || call.args.len() != 2 {
+            break;
+        }
+        let base = call.args.get(0)?;
+        offsets.push(call.args.get(1)?);
+        current = base;
+    }
+    Ok(projected_buffer(&oref(current))?.map(|tensor| (tensor, offsets)))
+}
+
+/// `address` with `uint32(reinterpret(tensor_data_ptr(parent), uint64))`, the column
+/// address of `parent`, replaced by the address recorded for `parent`.
+pub fn resolve_tmem_address(address: &Expr, known: &[(Var, Expr)]) -> AResult<Option<Expr>> {
+    if let Some(sum) = address.as_node::<AddObj>() {
+        return match resolve_tmem_address(&sum.a, known)? {
+            Some(base) => Ok(Some(add(base, sum.b.clone())?)),
+            None => Ok(None),
+        };
+    }
+    match data_pointer_tensor(address)? {
+        Some(parent) => Ok(known
+            .iter()
+            .rev()
+            .find(|(tensor, _)| same(tensor, &parent))
+            .map(|(_, address)| address.clone())),
+        None => Ok(Some(address.clone())),
+    }
+}
+
+/// The tensor whose data pointer `expr` reinterprets as a TMEM column address.
+fn data_pointer_tensor(expr: &Expr) -> AResult<Option<Var>> {
+    let Some(cast) = expr.as_node::<CastObj>() else {
+        return Ok(None);
+    };
+    let Some(reinterpret) = cast.value.as_node::<CallObj>() else {
+        return Ok(None);
+    };
+    if call_op_name(reinterpret)?.as_deref() != Some("tirx.reinterpret") {
+        return Ok(None);
+    }
+    let Some(pointer) = reinterpret.args.iter().next() else {
+        return Ok(None);
+    };
+    let Some(data_pointer) = pointer.as_node::<CallObj>() else {
+        return Ok(None);
+    };
+    if call_op_name(data_pointer)?.as_deref() != Some("tirx.tensor_data_ptr") {
+        return Ok(None);
+    }
+    Ok(data_pointer
+        .args
+        .iter()
+        .next()
+        .and_then(|tensor| as_buffer(&oref(tensor))))
 }
