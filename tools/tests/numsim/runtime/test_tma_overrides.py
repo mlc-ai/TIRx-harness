@@ -3,12 +3,12 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 ROUTES = ("g2cta", "g2cluster", "s2g", "reduce", "prefetch", "evict_last", "priority")
 FORMS = ("address", "dim_b8", "dim_b16", "stride_b8", "stride_b16")
@@ -60,7 +60,10 @@ def override_kernel(
     tokens.append("override::global_address")
     if form != "address":
         tokens.append("override::global_dim_stride" if rank == 2 else "override::global_dim")
-    args = ["T.address_of(input_map)", f'T.reinterpret("uint64", replacement.ptr_to([{offset}]))']
+    args = [
+        "T.address_of(input_map)",
+        f'T.reinterpret(replacement.ptr_to([{offset}]), ty="uint64")',
+    ]
     if form != "address":
         dtype = "uint8" if form.endswith("b8") else "uint16"
         args += [f'T.cast({dimension}, "{dtype}")']
@@ -100,16 +103,15 @@ def override_kernel(
 """
     observed = "replacement[4 + lane]" if read_early else "shared[lane]"
     drain = "    if lane == 0:\n        T.ptx.cp.async_.bulk.wait_group(0)" if read_early else ""
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(input_map: T.TensorMap(), replacement: T.Buffer((32772,), "float32"),
-           output: T.Buffer(({size + 2 if report is not None else size},), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer(({size},), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(input_map: T.Ptr(T.TensorMap), replacement: T.Tensor((32772,), "float32"),
+           output: T.Tensor(({size + 2 if report is not None else size},), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared(({size},), "float32")
+    barrier = T.alloc_shared((1,), "uint64")
     {'ready = T.alloc_local((1,), "uint32")' if report is not None else ""}
     {'reported = T.alloc_local((1,), "uint32")' if report is not None else ""}
     if lane < {size}:
@@ -160,7 +162,7 @@ def multiissuer_override_case(route, form, issuer=-1):
     dtype = "uint8" if form == "stride_b8" else "uint16"
     operands = [
         "T.address_of(input_map)",
-        'T.reinterpret("uint64", replacement.ptr_to([lane * 16]))',
+        'T.reinterpret(replacement.ptr_to([lane * 16]), ty="uint64")',
         f'T.cast(4 - lane, "{dtype}")',
         f'T.cast(2, "{dtype}")',
         "T.uint32(1 + lane)",
@@ -186,16 +188,15 @@ def multiissuer_override_case(route, form, issuer=-1):
         T.ptx.cp.async_.bulk.wait_group(0)
 """
     )
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(input_map: T.TensorMap(), replacement: T.Buffer((32800,), "float32"),
-           issuer: T.int32, output: T.Buffer((2, 8), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "float32", scope="shared", align=128)
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def kernel(input_map: T.Ptr(T.TensorMap), replacement: T.Tensor((32800,), "float32"),
+           issuer: T.int32, output: T.Tensor((2, 8), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "float32", align=128)
+    barriers = T.alloc_shared((2,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     coordinate = T.alloc_local((1,), "int32")
     if lane < 2:

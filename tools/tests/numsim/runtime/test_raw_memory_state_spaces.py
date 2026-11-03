@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import tvm
-from tvm.script import tirx as T
+import tvm_tirx
+from tvm_tirx.script import tirx as T
 
 
 @pytest.mark.parametrize(
@@ -18,13 +18,12 @@ from tvm.script import tirx as T
 )
 def test_target_ptx_dialect_rejects_symbol_only_state_spaces(instruction: str, space: str):
     source = f"""
-@T.prim_func
-def invalid(source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def invalid(source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     {instruction}
 """
-    with pytest.raises(tvm.error.DiagnosticError, match="not a valid modifier") as caught:
-        tvm.script.from_source(source, extra_vars={"T": T})
+    with pytest.raises(ValueError, match="not a valid modifier") as caught:
+        tvm_tirx.script.from_source(source, extra_vars={"T": T})
     assert space in str(caught.value)

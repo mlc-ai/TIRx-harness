@@ -5,15 +5,14 @@ import pytest
 
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def discard_kernel(*, restore=True, offset=0, predicate=True):
-    @T.prim_func
-    def kernel(data: T.Buffer((64,), "uint32"), output: T.Buffer((2,), "uint32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(data: T.Tensor((64,), "uint32"), output: T.Tensor((2,), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         if lane == 0:
             T.ptx.discard.global_.L2(data.ptr_to([offset]), pred=predicate)
             if restore:

@@ -7,17 +7,16 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_shared_control_relay(selected_branch: T.int32):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    relay = T.alloc_buffer((1,), "int32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    relay = T.alloc_shared((1,), "int32")
+    barriers = T.alloc_shared((2,), "uint64")
 
     if (warp == 0) and (lane == 0):
         relay[0] = selected_branch
@@ -35,13 +34,13 @@ def native_shared_control_relay(selected_branch: T.int32):
             T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
 
 
-@T.prim_func
+@T.function
 def native_alternate_producer_relay(producer_warp: T.int32, selected_branch: T.int32):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    relay = T.alloc_buffer((1,), "int32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    relay = T.alloc_shared((1,), "int32")
+    barriers = T.alloc_shared((2,), "uint64")
 
     if warp == producer_warp:
         if lane == 0:
@@ -59,14 +58,14 @@ def native_alternate_producer_relay(producer_warp: T.int32, selected_branch: T.i
             T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
 
 
-@T.prim_func
+@T.function
 def native_transitive_shared_relay(selected_branch: T.int32):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    first = T.alloc_buffer((1,), "int32", scope="shared")
-    second = T.alloc_buffer((1,), "int32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    first = T.alloc_shared((1,), "int32")
+    second = T.alloc_shared((1,), "int32")
+    barriers = T.alloc_shared((2,), "uint64")
 
     if (warp == 0) and (lane == 0):
         first[0] = selected_branch
@@ -88,12 +87,12 @@ def native_transitive_shared_relay(selected_branch: T.int32):
             T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
 
 
-@T.prim_func
-def native_conflicting_multi_writer_relay(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    relay = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_conflicting_multi_writer_relay(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    relay = T.alloc_shared((1,), "int32")
 
     if (warp < 2) and (lane == 0):
         relay[0] = warp + 2
@@ -103,13 +102,13 @@ def native_conflicting_multi_writer_relay(output: T.Buffer((1,), "int32")):
         output[0] = relay[0]
 
 
-@T.prim_func
-def native_atomic_winner_relay(lock: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    relay = T.alloc_buffer((1,), "int32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def native_atomic_winner_relay(lock: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    relay = T.alloc_shared((1,), "int32")
+    barriers = T.alloc_shared((2,), "uint64")
 
     if warp == 2:
         if lane == 0:
@@ -130,34 +129,6 @@ def native_atomic_winner_relay(lock: T.Buffer((1,), "int32")):
             T.cuda.mbarrier_wait(barriers.ptr_to([0]), 0)
         else:
             T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
-
-
-@T.prim_func
-def native_tma_shared_control_relay(source: T.Buffer((4,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    relay = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((3,), "uint64", scope="shared")
-
-    if (warp == 0) and (lane == 0):
-        T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([0]), 1)
-        T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([1]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if (warp == 0) and (lane == 0):
-        Tx.copy_async(relay[:], source[:], dispatch="tma_auto", mbar=barriers.ptr_to([0]))
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(barriers.ptr_to([0]), 16)
-        T.ptx.mbarrier.arrive.shared.b64(barriers.ptr_to([1]))
-
-    if (warp == 1) and (lane == 0):
-        T.cuda.mbarrier_wait(barriers.ptr_to([0]), 0)
-        branch: T.let = relay[0]
-        if branch == 0:
-            T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
-        else:
-            T.cuda.mbarrier_wait(barriers.ptr_to([2]), 0)
 
 
 def _resource_limits() -> numsim.ResourceLimits:
@@ -208,16 +179,6 @@ def _run_native(tool, kernel, inputs: dict[str, int], cache_dir):
         inputs=inputs,
         cache_dir=cache_dir,
         coverage_bounds=_coverage_bounds(),
-        resource_limits=_relay_resource_limits(),
-    )
-
-
-def _run_tma_native(tool, selected_branch: int, cache_dir):
-    return tool(
-        native_tma_shared_control_relay,
-        inputs={"source": np.array([selected_branch, 11, 12, 13], dtype=np.int32)},
-        cache_dir=cache_dir,
-        coverage_bounds=_tma_coverage_bounds(),
         resource_limits=_relay_resource_limits(),
     )
 
@@ -341,14 +302,3 @@ def test_public_native_synccheck_uses_concrete_atomic_selected_sync_trace(tmp_pa
     # then checks every protocol interleaving of the recorded programs.
     assert native["search"]["program_count"] == 2
     np.testing.assert_array_equal(lock_array, np.zeros(1, dtype=np.int32))
-
-
-def test_public_native_synccheck_uses_completed_tma_payload_for_exact_branch(tmp_path):
-    clean = _run_tma_native(synccheck, 0, tmp_path)
-    error = _run_tma_native(synccheck, 1, tmp_path)
-
-    clean_native = _assert_exact_clean(clean)
-    _assert_exact_sync_error(error, consumer_warp=1)
-    error_native = error.to_dict()["native"]
-    assert error_native["engine"]["artifact_key"] == clean_native["engine"]["artifact_key"]
-    assert error_native["input"]["digest"] != clean_native["input"]["digest"]

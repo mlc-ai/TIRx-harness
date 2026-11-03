@@ -5,14 +5,13 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def gate_intrinsics(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    T.cta_id([1])
-    lane = T.thread_id([32])
+@T.function
+def gate_intrinsics(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.linear_thread_id()
 
     if lane == 0:
         value: T.float32 = T.float32(-0.5)

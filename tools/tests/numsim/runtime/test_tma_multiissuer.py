@@ -7,10 +7,10 @@ helper emits bra.uni and must not poll independently completing lane barriers.
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 TMA_MULTIISSUER_CASES = [
     (False, "cta"),
@@ -44,17 +44,15 @@ def tma_multiissuer_case(gather, route, sparse=False, *, wait=True, overlap=Fals
     instruction += f".cta_group::{group}"
     coordinates = "0, lane * 4 + 2, lane * 4, lane * 4 + 3, lane * 4 + 1" if gather else "lane * 8"
     payload = 128 if gather else 32
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(tensor_map: T.TensorMap(), output: T.Buffer(({ctas}, 32, 32), "float32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([{ctas}])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1024,), "float32", scope="shared", align=128)
-    barriers = T.alloc_buffer((32,), "uint64", scope="shared")
+@T.function
+def kernel(tensor_map: T.Ptr(T.TensorMap), output: T.Tensor(({ctas}, 32, 32), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=(1) * {ctas}, block=32, cluster={ctas}))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1024,), "float32", align=128)
+    barriers = T.alloc_shared((32,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     for i in T.serial(32):
         shared[lane * 32 + i] = T.float32(-7)

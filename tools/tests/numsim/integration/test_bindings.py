@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import tvm_tirx
 from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.cases import TensorMap
 from tirx_harness.numsim.errors import NumSimExecutionError
@@ -67,16 +68,14 @@ def test_tensor_map_numpy_is_copyable_descriptor_state(tmp_path) -> None:
     payload = prepared.to_payload()
     assert payload["output_allocations"] == sorted(prepared.descriptor_allocations)
 
-    import tvm
     from tirx_harness import numsim, racecheck, synccheck
-    from tvm.script import tirx as T
+    from tvm_tirx.script import tirx as T
 
-    disable = tvm.script.from_source(
-        """@T.prim_func
-def disable(descriptor: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    disable = tvm_tirx.script.from_source(
+        """@T.function
+def disable(descriptor: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx["tensormap_replace.tile.swizzle_mode.global.b1024.b32"](descriptor.ptr_to([0]), 0)
         T.ptx.fence.proxy.tensormap__generic.release.gpu()

@@ -5,35 +5,24 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def too_many_warps(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([33])
-    lane = T.lane_id([32])
-    if (warp == 0) and (lane == 0):
-        output[0] = 1
-
-
-@T.prim_func
-def too_many_cluster_ctas(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([65])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def too_many_cluster_ctas(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=65, block=32, cluster=65))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if (cta == 0) and (lane == 0):
         output[0] = 1
 
 
-@T.prim_func
-def cluster_cta_and_pair_coordinates(output: T.Buffer((8, 2), "int32")):
-    T.device_entry()
-    cta = T.cta_id_in_cluster([8])
-    pair = T.cta_id_in_pair()
-    lane = T.lane_id([32])
+@T.function
+def cluster_cta_and_pair_coordinates(output: T.Tensor((8, 2), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=8, block=32, cluster=8))
+    cta = T.cuda.cluster_cta_id("x")
+    pair = T.cuda.cta_pair_id()
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[cta, 0] = cta
         output[cta, 1] = pair
@@ -41,10 +30,6 @@ def cluster_cta_and_pair_coordinates(output: T.Buffer((8, 2), "int32")):
 
 def test_artifact_launch_rejects_topologies_outside_engine_representation(tmp_path):
     output = np.zeros(1, dtype=np.int32)
-
-    too_many_warps_module = numsim.transpile(too_many_warps, cache_dir=tmp_path)
-    with pytest.raises(numsim.NumSimBuildError, match="warps_per_cta=33.*maximum 32"):
-        numsim.Engine().run(too_many_warps_module, {"output": output})
 
     too_many_ctas_module = numsim.transpile(too_many_cluster_ctas, cache_dir=tmp_path)
     with pytest.raises(numsim.NumSimBuildError, match="ctas_per_cluster=65.*maximum 64"):

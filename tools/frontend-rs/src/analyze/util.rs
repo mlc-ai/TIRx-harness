@@ -9,8 +9,8 @@ use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
     CallObj, CallSiteLocObj, Expr, ExprObj, FloatImmObj, GlobalVarObj, IntImm, IntImmObj,
-    Location, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, Range, SourceLocObj,
-    TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var, VarObj,
+    Location, MissingTypeObj, NoneTypeObj, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj,
+    Range, SourceLocObj, TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var, VarObj,
 };
 use tvm_tirx::ir::prim::{
     AddObj, AndObj, BitwiseAndObj, BitwiseNotObj, BitwiseOrObj, BitwiseXorObj, BroadcastObj,
@@ -358,6 +358,10 @@ pub fn dtype_of(node: &ObjectRef) -> AResult<String> {
     if let Some(buffer) = ty.as_node::<TensorTypeObj>() {
         // Python renders the PrimType object itself here.
         return repr_of(&buffer.dtype);
+    }
+    // tvm-tirx types a void call as Missing or None: no dtype, like a void call.
+    if ty.as_node::<MissingTypeObj>().is_some() || ty.as_node::<NoneTypeObj>().is_some() {
+        return Ok(String::new());
     }
     not_covered("dtype_of on an expression with an opaque type")
 }

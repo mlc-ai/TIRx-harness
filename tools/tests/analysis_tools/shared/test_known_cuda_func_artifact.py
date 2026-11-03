@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _COMBINE_SOURCE = r"""
 __device__ __forceinline__ float combine_int_frac_ex2(float x_rounded, float frac_ex2) {
@@ -68,120 +68,102 @@ def _unpack_float2(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return low, high
 
 
-@T.prim_func
+@T.function
 def known_combine_int_frac_ex2(
-    rounded: T.Buffer((32,), "float32"),
-    fraction: T.Buffer((32,), "float32"),
-    output: T.Buffer((32,), "float32"),
+    rounded: T.Tensor((32,), "float32"),
+    fraction: T.Tensor((32,), "float32"),
+    output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.func_call(
-        "combine_int_frac_ex2",
-        rounded[lane],
-        fraction[lane],
-        source_code=_COMBINE_SOURCE,
-        return_type="float32",
+        "combine_int_frac_ex2", rounded[lane], fraction[lane], _COMBINE_SOURCE, ty="float32"
     )
 
 
-@T.prim_func
-def modified_combine_int_frac_ex2(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_combine_int_frac_ex2(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "combine_int_frac_ex2",
             T.float32(0),
             T.float32(1),
-            source_code=_COMBINE_SOURCE.replace("return out;", "out += 1.0f; return out;"),
-            return_type="float32",
+            _COMBINE_SOURCE.replace("return out;", "out += 1.0f; return out;"),
+            ty="float32",
         )
 
 
-@T.prim_func
+@T.function
 def known_shl_u32_clamp(
-    values: T.Buffer((8,), "uint32"),
-    shifts: T.Buffer((8,), "uint32"),
-    output: T.Buffer((8,), "uint32"),
+    values: T.Tensor((8,), "uint32"),
+    shifts: T.Tensor((8,), "uint32"),
+    output: T.Tensor((8,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 8:
         output[lane] = T.cuda.func_call(
-            "shl_u32_clamp",
-            values[lane],
-            shifts[lane],
-            source_code=_SHL_U32_CLAMP_SOURCE,
-            return_type="uint32",
+            "shl_u32_clamp", values[lane], shifts[lane], _SHL_U32_CLAMP_SOURCE, ty="uint32"
         )
 
 
-@T.prim_func
-def known_gdn_lg2_approx_ftz(values: T.Buffer((8,), "float32"), output: T.Buffer((8,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def known_gdn_lg2_approx_ftz(values: T.Tensor((8,), "float32"), output: T.Tensor((8,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 8:
         output[lane] = T.cuda.func_call(
-            "gdn_lg2_approx_ftz",
-            values[lane],
-            source_code=_GDN_LG2_APPROX_FTZ_SOURCE,
-            return_type="float32",
+            "gdn_lg2_approx_ftz", values[lane], _GDN_LG2_APPROX_FTZ_SOURCE, ty="float32"
         )
 
 
-@T.prim_func
-def modified_gdn_lg2_approx_ftz(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_gdn_lg2_approx_ftz(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "gdn_lg2_approx_ftz",
             T.float32(1),
-            source_code=_GDN_LG2_APPROX_FTZ_SOURCE.replace("approx.ftz", "approx"),
-            return_type="float32",
+            _GDN_LG2_APPROX_FTZ_SOURCE.replace("approx.ftz", "approx"),
+            ty="float32",
         )
 
 
-@T.prim_func
+@T.function
 def known_fma_scale_sub_f32x2(
-    scores: T.Buffer((8,), "uint64"),
-    scales: T.Buffer((8,), "uint64"),
-    lse: T.Buffer((8,), "uint64"),
-    output: T.Buffer((8,), "uint64"),
+    scores: T.Tensor((8,), "uint64"),
+    scales: T.Tensor((8,), "uint64"),
+    lse: T.Tensor((8,), "uint64"),
+    output: T.Tensor((8,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 8:
         output[lane] = T.cuda.func_call(
             "tvm_builtin_fma_scale_sub_f32x2",
             scores[lane],
             scales[lane],
             lse[lane],
-            source_code=_FMA_SCALE_SUB_F32X2_SOURCE,
-            return_type="uint64",
+            _FMA_SCALE_SUB_F32X2_SOURCE,
+            ty="uint64",
         )
 
 
-@T.prim_func
-def modified_fma_scale_sub_f32x2(output: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_fma_scale_sub_f32x2(output: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "tvm_builtin_fma_scale_sub_f32x2",
             T.uint64(0),
             T.uint64(0),
             T.uint64(0),
-            source_code=_FMA_SCALE_SUB_F32X2_SOURCE.replace("-lse_pair.x", "+lse_pair.x"),
-            return_type="uint64",
+            _FMA_SCALE_SUB_F32X2_SOURCE.replace("-lse_pair.x", "+lse_pair.x"),
+            ty="uint64",
         )
 
 

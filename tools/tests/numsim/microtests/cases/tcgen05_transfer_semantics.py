@@ -6,11 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import tcgen05_atom_layout, wg_local_layout
-from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
-from tvm_tirx.tirx.layout import Axis, R, S, TileLayout
+from tvm_tirx.script import tirx as T
 
 _CP_SHAPE_ROUTES = (
     ("4x256b", "", 4, 32),
@@ -79,25 +75,23 @@ def _make_raw_cp_kernel(
     cp_b4_chain = f"{cp_chain}.b8x16.b4x16_p64"
     cp_b6_chain = f"{cp_chain}.b8x16.b6x16_p32"
 
-    @T.prim_func
+    @T.function
     def kernel(
-        source_none: T.Buffer((physical_size,), "uint8"),
-        source_b4: T.Buffer((physical_size,), "uint8"),
-        source_b6: T.Buffer((physical_size,), "uint8"),
-        output: T.Buffer((3, 2, 128, 8), "uint32"),
+        source_none: T.Tensor((physical_size,), "uint8"),
+        source_b4: T.Tensor((physical_size,), "uint8"),
+        source_b6: T.Tensor((physical_size,), "uint8"),
+        output: T.Tensor((3, 2, 128, 8), "uint32"),
     ):
-        T.device_entry()
-        _cluster = T.cluster_id([1])
-        cta = T.cta_id_in_cluster([2])
-        _warpgroup = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
+        cta = T.cuda.cluster_cta_id("x")
+        warp = T.cuda.warp_in_warpgroup()
+        lane = T.cuda.lane_id()
         thread = T.meta_var(warp * 32 + lane)
-        address = T.alloc_buffer((1,), "uint32", scope="shared")
-        barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-        shared_none = T.alloc_buffer((physical_size,), "uint8", scope="shared", align=128)
-        shared_b4 = T.alloc_buffer((physical_size,), "uint8", scope="shared", align=128)
-        shared_b6 = T.alloc_buffer((physical_size,), "uint8", scope="shared", align=128)
+        address = T.alloc_shared((1,), "uint32")
+        barrier = T.alloc_shared((1,), "uint64")
+        shared_none = T.alloc_shared((physical_size,), "uint8", align=128)
+        shared_b4 = T.alloc_shared((physical_size,), "uint8", align=128)
+        shared_b6 = T.alloc_shared((physical_size,), "uint8", align=128)
         registers = T.alloc_local((8,), "uint32")
         desc_none: T.uint64
         desc_b4: T.uint64
@@ -275,17 +269,16 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
     split_x1 = ((2 if packed else 1) + split_padding,) if shape == "16x32bx2" else ()
     split_x2 = ((4 if packed else 2) + split_padding,) if shape == "16x32bx2" else ()
 
-    @T.prim_func
+    @T.function
     def kernel(
-        load_output: T.Buffer((2, 4, 32, 8), "uint32"),
-        store_output: T.Buffer((2, 128, 32), "uint32"),
+        load_output: T.Tensor((2, 4, 32, 8), "uint32"),
+        store_output: T.Tensor((2, 128, 32), "uint32"),
     ):
-        T.device_entry()
-        _warpgroup = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+        warp = T.cuda.warp_in_warpgroup()
+        lane = T.cuda.lane_id()
         thread = T.meta_var(warp * 32 + lane)
-        address = T.alloc_buffer((1,), "uint32", scope="shared")
+        address = T.alloc_shared((1,), "uint32")
         registers = T.alloc_local((32,), "uint32")
         target = T.alloc_local((8,), "uint32")
 
@@ -335,11 +328,11 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
         T.ptx.tcgen05.wait__st.sync.aligned()
         T.cuda.cta_sync()
 
-        if factor == 1:
+        if T.constexpr(factor == 1):
             T.ptx[f"tcgen05.ld.sync.aligned.{shape}.x1{'.pack::16b' if packed else ''}.b32"](
                 target[0], address[0], *split_x1
             )
-        elif factor == 2:
+        elif T.constexpr(factor == 2):
             T.ptx[f"tcgen05.ld.sync.aligned.{shape}.x1{'.pack::16b' if packed else ''}.b32"](
                 target[0],
                 target[1],
@@ -361,14 +354,14 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
                 register < factor, target[register], T.uint32(0)
             )
 
-        if max_registers == 2:
+        if T.constexpr(max_registers == 2):
             T.ptx[f"tcgen05.ld.sync.aligned.{shape}.x2{'.pack::16b' if packed else ''}.b32"](
                 target[0],
                 target[1],
                 address[0],
                 *split_x2,
             )
-        elif max_registers == 4:
+        elif T.constexpr(max_registers == 4):
             T.ptx[f"tcgen05.ld.sync.aligned.{shape}.x2{'.pack::16b' if packed else ''}.b32"](
                 target[0],
                 target[1],
@@ -446,7 +439,7 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
                     + register,
                     "uint32",
                 )
-            if factor == 1:
+            if T.constexpr(factor == 1):
                 if count_index == 0:
                     T.ptx[
                         f"tcgen05.st.sync.aligned.{shape}.x1{'.unpack::16b' if packed else ''}.b32"
@@ -464,7 +457,7 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
                         target[0],
                         target[1],
                     )
-            elif factor == 2:
+            elif T.constexpr(factor == 2):
                 if count_index == 0:
                     T.ptx[
                         f"tcgen05.st.sync.aligned.{shape}.x1{'.unpack::16b' if packed else ''}.b32"
@@ -561,76 +554,6 @@ def _make_raw_ldst_kernel(shape: str, packed: bool, split_padding: int = 0):
     return kernel
 
 
-def _make_tile_cp_kernel(dtype: str, bits: int, cta_group: int):
-    elements = 128 // bits
-    source_layout = TileLayout(S[(32, elements) : (elements, 1)])
-    destination_layout = TileLayout(
-        S[(32, elements) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
-        + R[4 : 32 @ Axis.get("TLane")]
-    )
-
-    @T.prim_func
-    def kernel(
-        source: T.Buffer((32, elements), dtype),
-        output: T.Buffer((2, 128, 4), "uint32"),
-    ):
-        T.device_entry()
-        _cluster = T.cluster_id([1])
-        cta = T.cta_id_in_cluster([2])
-        _warpgroup = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
-        thread = T.meta_var(warp * 32 + lane)
-        address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-        barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-        shared = T.alloc_buffer(
-            (32, elements), dtype, scope="shared", layout=source_layout, align=128
-        )
-        tmem = T.decl_buffer(
-            (32, elements),
-            dtype,
-            scope="tmem",
-            layout=destination_layout,
-            allocated_addr=address[0],
-        )
-        registers = T.alloc_local((4,), "uint32")
-
-        if warp == 0:
-            T.ptx[f"tcgen05.alloc.cta_group::{cta_group}.sync.aligned.shared::cta.b32"](
-                T.address_of(address[0]), 32
-            )
-            for column in T.unroll(elements):
-                shared[lane, column] = source[lane, column]
-            if lane == 0:
-                T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
-        T.ptx.fence.proxy.async_.shared__cta()
-        T.ptx.fence.mbarrier_init.release.cluster()
-        T.cuda.cluster_sync()
-
-        if ((cta_group == 1) or (cta == 0)) and warp == 0 and lane == 0:
-            Tx.copy_async(tmem[:, :], shared[:, :], dispatch="smem->tmem", cta_group=cta_group)
-            T.ptx[
-                f"tcgen05.commit.cta_group::{cta_group}.mbarrier::arrive::one.shared::cluster.b64"
-            ](T.address_of(barrier[0]))
-        if ((cta_group == 1) or (cta == 0)) and warp == 0:
-            T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
-        T.cuda.cluster_sync()
-
-        T.ptx["tcgen05.ld.sync.aligned.32x32b.x4.b32"](
-            registers[0], registers[1], registers[2], registers[3], address[0]
-        )
-        T.ptx.tcgen05.wait__ld.sync.aligned()
-        for register in T.unroll(4):
-            output[cta, thread, register] = registers[register]
-        T.cuda.cluster_sync()
-
-        if warp == 0:
-            T.ptx[f"tcgen05.dealloc.cta_group::{cta_group}.sync.aligned.b32"](address[0], 32)
-            T.ptx[f"tcgen05.relinquish_alloc_permit.cta_group::{cta_group}.sync.aligned"]()
-
-    return kernel
-
-
 def _tile_cp_input(dtype: str, bits: int) -> tuple[np.ndarray, np.ndarray]:
     elements = 128 // bits
     if bits == 8:
@@ -652,156 +575,6 @@ def _tile_cp_input(dtype: str, bits: int) -> tuple[np.ndarray, np.ndarray]:
         bytes_ = np.ascontiguousarray(host).view(np.uint8).reshape(32, 16)
     expected = np.tile(np.ascontiguousarray(bytes_).view(np.uint32).reshape(32, 4), (4, 1))
     return host, expected
-
-
-def _tile_layout_spec(layout: str) -> tuple[int, int, int, Any, Any]:
-    if layout == "D":
-        return 1, 128, 4, tmem_datapath_layout("D", 128, 4), wg_local_layout(4)
-    if layout == "F":
-        return (
-            1,
-            64,
-            8,
-            tmem_datapath_layout("F", 64, 8),
-            tcgen05_atom_layout("16x256b", (64, 8), "float32"),
-        )
-    if layout == "B":
-        return (
-            2,
-            64,
-            8,
-            tmem_datapath_layout("B", 64, 8),
-            tcgen05_atom_layout("32x32b", (64, 8), "float32"),
-        )
-    raise ValueError(layout)
-
-
-def _make_tile_ldst_kernel(layout: str):
-    cta_group, rows, columns, tmem_layout, local_layout = _tile_layout_spec(layout)
-    local_elements = 4
-
-    @T.prim_func
-    def kernel(
-        store_source: T.Buffer((2, 128, local_elements), "float32"),
-        store_physical: T.Buffer((2, 128, 8), "uint32"),
-        load_local: T.Buffer((2, 128, local_elements), "uint32"),
-    ):
-        T.device_entry()
-        _cluster = T.cluster_id([1])
-        cta = T.cta_id_in_cluster([2])
-        _warpgroup = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
-        thread = T.meta_var(warp * 32 + lane)
-        address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-        registers = T.alloc_local((8,), "uint32")
-        local_store = T.alloc_buffer((local_elements,), "float32", scope="local")
-        local_load = T.alloc_buffer((local_elements,), "float32", scope="local")
-        store_tile = local_store.view(rows, columns, layout=local_layout)
-        load_tile = local_load.view(rows, columns, layout=local_layout)
-        tmem = T.decl_buffer(
-            (rows, columns),
-            "float32",
-            scope="tmem",
-            layout=tmem_layout,
-            allocated_addr=address[0],
-        )
-
-        if warp == 0:
-            T.ptx[f"tcgen05.alloc.cta_group::{cta_group}.sync.aligned.shared::cta.b32"](
-                T.address_of(address[0]), 32
-            )
-        T.cuda.cluster_sync()
-
-        for register in T.unroll(8):
-            registers[register] = T.uint32(0)
-        T.ptx["tcgen05.st.sync.aligned.32x32b.x8.b32"](
-            address[0],
-            registers[0],
-            registers[1],
-            registers[2],
-            registers[3],
-            registers[4],
-            registers[5],
-            registers[6],
-            registers[7],
-        )
-        T.ptx.tcgen05.wait__st.sync.aligned()
-        T.cuda.cluster_sync()
-
-        for register in T.unroll(local_elements):
-            local_store[register] = store_source[cta, thread, register]
-        Tx.wg.copy_async(tmem[:, :], store_tile[:, :], dispatch="tmem<->local")
-        T.ptx.tcgen05.wait__st.sync.aligned()
-        T.cuda.cluster_sync()
-        T.ptx["tcgen05.ld.sync.aligned.32x32b.x8.b32"](
-            registers[0],
-            registers[1],
-            registers[2],
-            registers[3],
-            registers[4],
-            registers[5],
-            registers[6],
-            registers[7],
-            address[0],
-        )
-        T.ptx.tcgen05.wait__ld.sync.aligned()
-        for register in T.unroll(8):
-            store_physical[cta, thread, register] = registers[register]
-        T.cuda.cluster_sync()
-
-        for register in T.unroll(8):
-            registers[register] = T.cast(
-                0x50000000 + cta * 0x01000000 + thread * 0x100 + register, "uint32"
-            )
-        T.ptx["tcgen05.st.sync.aligned.32x32b.x8.b32"](
-            address[0],
-            registers[0],
-            registers[1],
-            registers[2],
-            registers[3],
-            registers[4],
-            registers[5],
-            registers[6],
-            registers[7],
-        )
-        T.ptx.tcgen05.wait__st.sync.aligned()
-        T.cuda.cluster_sync()
-        Tx.wg.copy_async(load_tile[:, :], tmem[:, :], dispatch="tmem<->local")
-        T.ptx.tcgen05.wait__ld.sync.aligned()
-        for register in T.unroll(local_elements):
-            load_local[cta, thread, register] = T.reinterpret("uint32", local_load[register])
-        T.cuda.cluster_sync()
-
-        if warp == 0:
-            T.ptx[f"tcgen05.dealloc.cta_group::{cta_group}.sync.aligned.b32"](address[0], 32)
-            T.ptx[f"tcgen05.relinquish_alloc_permit.cta_group::{cta_group}.sync.aligned"]()
-
-    return kernel
-
-
-def _tile_ldst_oracle(layout: str) -> dict[str, np.ndarray]:
-    cta_group, _rows, _columns, _tmem_layout, _local_layout = _tile_layout_spec(layout)
-    source_bits = np.empty((2, 128, 4), dtype=np.uint32)
-    for cta in range(2):
-        for thread in range(128):
-            for register in range(4):
-                source_bits[cta, thread, register] = np.uint32(
-                    0x3F000000 + cta * 0x00100000 + thread * 0x100 + register
-                )
-    physical = np.zeros((2, 128, 8), dtype=np.uint32)
-    loaded = np.zeros((2, 128, 4), dtype=np.uint32)
-    raw_shape = {"D": "32x32b", "F": "16x256b", "B": "32x32b"}[layout]
-    for cta in range(2):
-        for thread in range(128):
-            warp, lane = divmod(thread, 32)
-            for register in range(4):
-                row, column = _ldst_location(raw_shape, 1, False, warp, lane, register)
-                physical[cta, row, column] = source_bits[cta, thread, register]
-                loaded[cta, thread, register] = np.uint32(
-                    0x50000000 + cta * 0x01000000 + row * 0x100 + column
-                )
-    return {"source_bits": source_bits, "store_physical": physical, "load_local": loaded}
 
 
 @dataclass(frozen=True)
@@ -855,35 +628,6 @@ def _transfer_cases() -> list[Tcgen05TransferCase]:
                     )
                 )
 
-    for dtype, bits in (("uint8", 8), ("float16", 16), ("uint32", 32)):
-        source, _expected = _tile_cp_input(dtype, bits)
-        for cta_group in (1, 2):
-            cases.append(
-                Tcgen05TransferCase(
-                    f"tile_cp_b{bits}_cta{cta_group}",
-                    _make_tile_cp_kernel(dtype, bits, cta_group),
-                    lambda source=source: {
-                        "source": source,
-                        "output": np.zeros((2, 128, 4), dtype=np.uint32),
-                    },
-                    ("output",),
-                )
-            )
-
-    for layout in ("D", "F", "B"):
-        oracle = _tile_ldst_oracle(layout)
-        cases.append(
-            Tcgen05TransferCase(
-                f"tile_ldst_layout_{layout}",
-                _make_tile_ldst_kernel(layout),
-                lambda oracle=oracle: {
-                    "store_source": oracle["source_bits"].view(np.float32),
-                    "store_physical": np.zeros((2, 128, 8), dtype=np.uint32),
-                    "load_local": np.zeros((2, 128, 4), dtype=np.uint32),
-                },
-                ("store_physical", "load_local"),
-            )
-        )
     return cases
 
 

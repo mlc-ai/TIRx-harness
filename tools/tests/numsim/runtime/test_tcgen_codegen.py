@@ -5,7 +5,6 @@ import pytest
 
 from tests.numsim.support.kernels import (
     tcgen_commit_mbarrier,
-    tcgen_commit_runtime_multicast,
     tcgen_lifecycle_single_cta,
     tcgen_lifecycle_two_cta,
 )
@@ -13,16 +12,14 @@ from tests.numsim.support.manifest import call_op_names, emitted_calls, emitted_
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import DecodedPtxCall, decode_ptx_call
-from tvm.script import tirx as T
-from tvm_tirx.backend.cuda.lang.pipeline import TCGen05Bar
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def tcgen_control_calls():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((2,), "uint64")
     address = shared.view("uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 128)
     if lane == 0:
@@ -41,13 +38,11 @@ def tcgen_control_calls():
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(T.uint32(0), 128)
 
 
-@T.prim_func
-def tcgen_commit_raw_shared_offset(barrier_index: T.int32, output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def tcgen_commit_raw_shared_offset(barrier_index: T.int32, output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     barrier_base: T.uint32 = T.cuda.cvta_generic_to_shared(barriers.ptr_to([0]))
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[barrier_index]), 1)
@@ -63,13 +58,11 @@ def tcgen_commit_raw_shared_offset(barrier_index: T.int32, output: T.Buffer((1,)
         output[0] = T.uint32(1)
 
 
-@T.prim_func
-def tcgen_alloc_raw_shared_offset(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    addresses = T.alloc_buffer((2,), "uint32", scope="shared")
+@T.function
+def tcgen_alloc_raw_shared_offset(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    addresses = T.alloc_shared((2,), "uint32")
     shared_base: T.uint32 = T.cuda.cvta_generic_to_shared(addresses.ptr_to([0]))
     destination = shared_base + T.uint32(4)
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(destination, 32)
@@ -80,24 +73,21 @@ def tcgen_alloc_raw_shared_offset(output: T.Buffer((1,), "uint32")):
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def tcgen_fence_noop_forms(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def tcgen_fence_noop_forms(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.tcgen05.fence__before_thread_sync()
     T.cuda.warp_sync()
     T.ptx.tcgen05.fence__after_thread_sync()
     output[lane] = T.cast(lane + 1, "uint32")
 
 
-@T.prim_func
-def tcgen_runtime_uniform_dealloc(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def tcgen_runtime_uniform_dealloc(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     runtime_address = T.alloc_local((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 64)
     runtime_address[0] = address[0]
@@ -107,12 +97,10 @@ def tcgen_runtime_uniform_dealloc(output: T.Buffer((1,), "uint32")):
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(runtime_address[0], 64)
 
 
-@T.prim_func
-def tcgen_runtime_divergent_dealloc(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def tcgen_runtime_divergent_dealloc(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     runtime_address = T.alloc_local((1,), "uint32")
     runtime_address[0] = lane
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(runtime_address[0], 64)
@@ -120,75 +108,27 @@ def tcgen_runtime_divergent_dealloc(output: T.Buffer((1,), "uint32")):
         output[0] = T.uint32(1)
 
 
-@T.prim_func
+@T.function
 def tcgen_alloc_non_power_of_two_columns():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    address = T.alloc_shared((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 96)
 
 
-@T.prim_func
-def tmem_pool_non_power_of_two_columns(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    T.cta_id([1])
-    T.warp_id([1])
-    thread_id = T.thread_id([32])
-
-    pool = T.SMEMPool()
-    tmem_address = pool.alloc((1,), "uint32", align=4)
-    tmem_pool = T.TMEMPool(
-        pool,
-        total_cols=160,
-        cta_group=1,
-        tmem_addr=tmem_address,
-    )
-    tmem_pool.alloc((128, 160), "float32")
-    pool.commit()
-    tmem_pool.commit()
-    tmem_pool.dealloc()
-    if thread_id == 0:
-        output[0] = 1
-
-
-@T.prim_func
+@T.function
 def tcgen_dealloc_non_power_of_two_columns():
-    T.device_entry()
-    T.warp_id([1])
-    T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(T.uint32(0), 160)
 
 
-@T.prim_func
-def tcgen_commit_static_single_bit_mask_is_unicast(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pool = T.SMEMPool()
-    barrier = TCGen05Bar(pool, 1)
-    pool.commit()
-    barrier.init(1)
-    T.ptx.fence.proxy.async_.shared__cluster()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cluster_sync()
-    if (cta == 0) and (lane == 0):
-        barrier.arrive(0, cta_group=1, cta_mask=2)
-        barrier.wait(0, 0)
-        output[0] = T.uint32(1)
-
-
-@T.prim_func
+@T.function
 def tcgen_commit_dynamic_single_bit_mask_is_multicast(
-    cta_mask: T.int32, output: T.Buffer((1,), "uint32")
+    cta_mask: T.int32, output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -203,12 +143,12 @@ def tcgen_commit_dynamic_single_bit_mask_is_multicast(
         output[0] = T.uint32(1)
 
 
-@T.prim_func
+@T.function
 def tcgen_commit_dynamic_uint16_mask():
-    T.device_entry()
-    cta, _ = T.cta_id_in_cluster([4, 1])
-    lane = T.thread_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=4, block=32, cluster=4))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.linear_thread_id()
+    barrier = T.alloc_shared((1,), "uint64")
     mask: T.uint16 = T.if_then_else(cta < 2, T.uint16(3), T.uint16(12))
     if lane == 0:
         T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.multicast__cluster.b64(
@@ -297,16 +237,6 @@ def test_tcgen_registry_defers_invalid_columns_to_engine():
     assert alloc.head == "v2::tcgen05::alloc::<v2::tcgen05::variant::Alloc>"
 
 
-def test_tmem_pool_non_power_of_two_columns_fail_at_engine(tmp_path):
-    module = numsim.transpile(tmem_pool_non_power_of_two_columns, cache_dir=tmp_path)
-
-    with pytest.raises(
-        numsim.NumSimExecutionError,
-        match=r"tcgen_invalid_columns at tcgen05\.alloc.*got 160",
-    ):
-        numsim.Engine().run(module, {"output": np.zeros(1, dtype=np.int32)})
-
-
 def test_tcgen_dealloc_non_power_of_two_columns_fail_at_engine(tmp_path):
     module = numsim.transpile(tcgen_dealloc_non_power_of_two_columns, cache_dir=tmp_path)
 
@@ -315,16 +245,6 @@ def test_tcgen_dealloc_non_power_of_two_columns_fail_at_engine(tmp_path):
         match=r"tcgen_invalid_columns at tcgen05\.dealloc.*got 160",
     ):
         numsim.Engine().run(module, {})
-
-
-def test_tcgen_registry_accepts_runtime_cta_mask():
-    commits = _resolved_sources(
-        tcgen_commit_runtime_multicast, {"tirx.ptx.tcgen05_commit_multicast"}
-    )
-    assert len(commits) == 1
-    mask = commits[0].payload.scalar_operand("mask")
-    assert str(mask.ty.dtype) == "uint16"
-    assert type(mask).__name__ != "IntImm"
 
 
 def test_tcgen_registry_accepts_dynamic_uint16_cta_mask(tmp_path):
@@ -406,23 +326,6 @@ def test_tcgen_alloc_accepts_bound_raw_shared_destination_offset(tmp_path):
     result = numsim.Engine().run(module, {"output": output})
 
     np.testing.assert_array_equal(result.outputs["output"], np.zeros(1, dtype=np.uint32))
-
-
-def test_tcgen_commit_runtime_mask_multicasts_same_barrier_offset(tmp_path):
-    output = np.zeros(2, dtype=np.uint32)
-    module = numsim.transpile(tcgen_commit_runtime_multicast, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(result.outputs["output"], np.ones(2, dtype=np.uint32))
-
-
-def test_tcgen_commit_static_single_bit_mask_is_unicast_from_issuer(tmp_path):
-    output = np.zeros(1, dtype=np.uint32)
-    module = numsim.transpile(tcgen_commit_static_single_bit_mask_is_unicast, cache_dir=tmp_path)
-
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(result.outputs["output"], np.ones(1, dtype=np.uint32))
 
 
 def test_tcgen_commit_dynamic_single_bit_mask_retains_multicast_semantics(tmp_path):

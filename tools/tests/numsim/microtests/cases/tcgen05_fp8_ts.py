@@ -3,8 +3,7 @@
 import numpy as np
 from tests.numsim.microtests.cases.tcgen05_mma_forms import _F8_BYTES_B16_SMEM_LAYOUT
 
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import S, TileLayout
 
 
@@ -15,25 +14,25 @@ def fp8_ts_kernel(m=64, d_f16=False, publish=True):
     b_shape = (32, 16) if d_f16 else (16, 32)
     b_layout = TileLayout(S[b_shape]) if d_f16 else _F8_BYTES_B16_SMEM_LAYOUT
 
-    @T.prim_func
+    @T.function
     def kernel(
-        a_words: T.Buffer((4, 32, 8), "uint32"),
-        b: T.Buffer(b_shape, "uint8"),
-        output: T.Buffer((m, 16), "uint32"),
+        a_words: T.Tensor((4, 32, 8), "uint32"),
+        b: T.Tensor(b_shape, "uint8"),
+        output: T.Tensor((m, 16), "uint32"),
         issue: T.uint32,
     ):
-        T.device_entry()
-        _wg = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
-        address = T.alloc_buffer((1,), "uint32", scope="shared")
-        barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-        shared_b = T.alloc_buffer(b_shape, "uint8", scope="shared", layout=b_layout, align=256)
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+        warp = T.cuda.warp_in_warpgroup()
+        lane = T.cuda.lane_id()
+        address = T.alloc_shared((1,), "uint32")
+        barrier = T.alloc_shared((1,), "uint64")
+        shared_b = T.alloc_shared(b_shape, "uint8", layout=b_layout, align=256)
         registers = T.alloc_local((16,), "uint32")
         descriptor: T.uint32
         descriptor_b: T.uint64
         if warp == 0 and lane == 0:
-            Tx.copy(shared_b[:, :], b[:, :])
+            for _i0_0, _i0_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+                shared_b[_i0_0, _i0_1] = b[_i0_0, _i0_1]
         if warp == 0:
             T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(
                 T.address_of(address[0]), 32

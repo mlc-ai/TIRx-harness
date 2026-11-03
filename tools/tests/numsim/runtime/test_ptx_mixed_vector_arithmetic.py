@@ -3,22 +3,21 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_mixed_vector_all_forms(
-    low_f16: T.Buffer((32,), "uint32"),
-    low_bf16: T.Buffer((32,), "uint32"),
-    wide_a: T.Buffer((32,), "uint64"),
-    wide_b: T.Buffer((32,), "uint64"),
-    wide_c: T.Buffer((32,), "uint64"),
-    output_wide: T.Buffer((28, 32), "uint64"),
-    output_low: T.Buffer((8, 32), "uint32"),
+    low_f16: T.Tensor((32,), "uint32"),
+    low_bf16: T.Tensor((32,), "uint32"),
+    wide_a: T.Tensor((32,), "uint64"),
+    wide_b: T.Tensor((32,), "uint64"),
+    wide_c: T.Tensor((32,), "uint64"),
+    output_wide: T.Tensor((28, 32), "uint64"),
+    output_low: T.Tensor((8, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     T.ptx["add.f32x2.f16x2.f32x2"](output_wide[0, lane], low_f16[lane], wide_c[lane])
     T.ptx["add.rn.f32x2.f16x2.f32x2"](output_wide[1, lane], low_f16[lane], wide_c[lane])

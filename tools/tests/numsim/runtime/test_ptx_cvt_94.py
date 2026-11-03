@@ -5,17 +5,16 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx94_cvt_forms(
-    output_u16: T.Buffer((32, 6), "uint16"),
-    output_u32: T.Buffer((32, 2), "uint32"),
+    output_u16: T.Tensor((32, 6), "uint16"),
+    output_u32: T.Tensor((32, 2), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     T.ptx["cvt.rz.satfinite.scaled::n1::ue8m0.e2m3x2.f32"](
         output_u16[lane, 0], T.float32(2.125), T.float32(-2.375), T.uint8(128)
@@ -36,11 +35,10 @@ def ptx94_cvt_forms(
     )
 
 
-@T.prim_func
-def ptx94_pzo_forms(output: T.Buffer((32, 4), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def ptx94_pzo_forms(output: T.Tensor((32, 4), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["cvt.rz.satfinite.e4m3x2.f32"](output[lane, 0], T.float32(-1e-30), T.float32(-0.0))
     T.ptx["cvt.rz.satfinite.pzo.e4m3x2.f32"](output[lane, 1], T.float32(-1e-30), T.float32(-0.0))
     T.ptx["cvt.rn.satfinite.scaled::n1::ue8m0.e2m3x2.bf16x2"](

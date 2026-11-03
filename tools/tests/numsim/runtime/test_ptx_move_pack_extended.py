@@ -4,34 +4,32 @@ import ml_dtypes
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def cvt_pack_u16_s16(
-    a: T.Buffer((32,), "int32"),
-    b: T.Buffer((32,), "int32"),
-    output: T.Buffer((2, 32), "uint32"),
+    a: T.Tensor((32,), "int32"),
+    b: T.Tensor((32,), "int32"),
+    output: T.Tensor((2, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.cvt_pack.sat.u16.s32(output[0, lane], a[lane], b[lane])
     T.ptx.cvt_pack.sat.s16.s32(output[1, lane], a[lane], b[lane])
 
 
-@T.prim_func
+@T.function
 def cvt_pack_subbyte(
-    a: T.Buffer((32,), "int32"),
-    b: T.Buffer((32,), "int32"),
-    c: T.Buffer((32,), "float32"),
-    output: T.Buffer((6, 32), "uint32"),
+    a: T.Tensor((32,), "int32"),
+    b: T.Tensor((32,), "int32"),
+    c: T.Tensor((32,), "float32"),
+    output: T.Tensor((6, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.cvt_pack.sat.u2.s32.b32(output[0, lane], a[lane], b[lane], c[lane])
     T.ptx.cvt_pack.sat.s2.s32.b32(output[1, lane], a[lane], b[lane], c[lane])
     T.ptx.cvt_pack.sat.u4.s32.b32(output[2, lane], a[lane], b[lane], c[lane])
@@ -40,14 +38,13 @@ def cvt_pack_subbyte(
     T.ptx.cvt_pack.sat.s8.s32.b32(output[5, lane], a[lane], b[lane], c[lane])
 
 
-@T.prim_func
+@T.function
 def mov_pack_b16x4(
-    source: T.Buffer((32, 4), "int16"),
-    output: T.Buffer((32,), "float64"),
+    source: T.Tensor((32, 4), "int16"),
+    output: T.Tensor((32,), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mov.b64(
         output[lane],
         source[lane, 0],
@@ -57,15 +54,14 @@ def mov_pack_b16x4(
     )
 
 
-@T.prim_func
+@T.function
 def mov_unpack_b16x4(
-    source: T.Buffer((32,), "float64"),
-    output: T.Buffer((32, 4), "int16"),
-    sink_output: T.Buffer((32, 2), "int16"),
+    source: T.Tensor((32,), "float64"),
+    output: T.Tensor((32, 4), "int16"),
+    sink_output: T.Tensor((32, 2), "int16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mov.b64(
         output[lane, 0],
         output[lane, 1],
@@ -82,14 +78,13 @@ def mov_unpack_b16x4(
     )
 
 
-@T.prim_func
+@T.function
 def mov_pack_b32x4(
-    source: T.Buffer((32, 4), "float32"),
-    output: T.Buffer((32, 4), "uint32"),
+    source: T.Tensor((32, 4), "float32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed = T.alloc_local((1,), "uint128")
     T.ptx.mov.b128(
         packed[0],
@@ -101,14 +96,13 @@ def mov_pack_b32x4(
     T.ptx["st.global.b128"](output.ptr_to([lane, 0]), packed[0])
 
 
-@T.prim_func
+@T.function
 def mov_unpack_b32x4(
-    source: T.Buffer((32, 2), "uint64"),
-    output: T.Buffer((32, 4), "float32"),
+    source: T.Tensor((32, 2), "uint64"),
+    output: T.Tensor((32, 4), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed = T.alloc_local((1,), "uint128")
     T.ptx.mov.b128(packed[0], source[lane, 0], source[lane, 1])
     T.ptx.mov.b128(
@@ -120,14 +114,13 @@ def mov_unpack_b32x4(
     )
 
 
-@T.prim_func
+@T.function
 def mov_unpack_b64x2(
-    source: T.Buffer((32, 2), "uint64"),
-    output: T.Buffer((32, 2), "float64"),
+    source: T.Tensor((32, 2), "uint64"),
+    output: T.Tensor((32, 2), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed = T.alloc_local((1,), "uint128")
     T.ptx.mov.b128(packed[0], source[lane, 0], source[lane, 1])
     T.ptx.mov.b128(output[lane, 0], output[lane, 1], packed[0])
@@ -170,17 +163,16 @@ def _move_words() -> np.ndarray:
 
 
 def _make_mov_b16x4_roundtrip(dtype: str):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def mov_b16x4_roundtrip(",
-                f'    source: T.Buffer((32, 4), "{dtype}"),',
-                f'    output: T.Buffer((32, 4), "{dtype}"),',
+                f'    source: T.Tensor((32, 4), "{dtype}"),',
+                f'    output: T.Tensor((32, 4), "{dtype}"),',
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 '    packed = T.alloc_local((1,), "uint64")',
                 "    T.ptx.mov.b64(",
                 "        packed[0],",

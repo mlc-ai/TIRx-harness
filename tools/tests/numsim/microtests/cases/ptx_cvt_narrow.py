@@ -40,29 +40,28 @@ from tests.numsim.microtests.cases.ptx_cvt_narrow_goldens import (
     UE8X2_SOURCE,
 )
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 VALUE_COUNT = 256
 
 
-@T.prim_func
+@T.function
 def narrow_cvt_sm100_forms(
-    f32_source: T.Buffer((256,), "float32"),
-    f16x2_source: T.Buffer((256,), "uint32"),
-    bf16x2_source: T.Buffer((256,), "uint32"),
-    f4x2_source: T.Buffer((256,), "uint16"),
-    ue8x2_source: T.Buffer((256,), "uint16"),
-    rbits_source: T.Buffer((256,), "uint32"),
-    pack_f4: T.Buffer((4, 256), "uint8"),
-    unpack_f4: T.Buffer((2, 256), "uint32"),
-    stochastic_f8: T.Buffer((4, 256), "uint32"),
-    stochastic_f4: T.Buffer((2, 256), "uint16"),
-    exponent: T.Buffer((8, 256), "uint16"),
-    from_exponent: T.Buffer((1, 256), "uint32"),
+    f32_source: T.Tensor((256,), "float32"),
+    f16x2_source: T.Tensor((256,), "uint32"),
+    bf16x2_source: T.Tensor((256,), "uint32"),
+    f4x2_source: T.Tensor((256,), "uint16"),
+    ue8x2_source: T.Tensor((256,), "uint16"),
+    rbits_source: T.Tensor((256,), "uint32"),
+    pack_f4: T.Tensor((4, 256), "uint8"),
+    unpack_f4: T.Tensor((2, 256), "uint32"),
+    stochastic_f8: T.Tensor((4, 256), "uint32"),
+    stochastic_f4: T.Tensor((2, 256), "uint16"),
+    exponent: T.Tensor((8, 256), "uint16"),
+    from_exponent: T.Tensor((1, 256), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for step in range(8):
         index: T.let = step * 32 + lane
         second: T.let = (index + 1) % 256
@@ -113,19 +112,18 @@ def narrow_cvt_sm100_forms(
         T.ptx["cvt.rn.bf16x2.ue8m0x2"](from_exponent[0, index], ue8x2_source[index])
 
 
-@T.prim_func
+@T.function
 def narrow_cvt_bf16x2_forms(
-    bf16x2_source: T.Buffer((256,), "uint32"),
-    f4x2_source: T.Buffer((256,), "uint16"),
-    f8x2_source: T.Buffer((256,), "uint16"),
-    scale_source: T.Buffer((256,), "uint16"),
-    pack_f4: T.Buffer((2, 256), "uint8"),
-    unpack_f4: T.Buffer((4, 256), "uint32"),
-    scaled: T.Buffer((12, 256), "uint32"),
+    bf16x2_source: T.Tensor((256,), "uint32"),
+    f4x2_source: T.Tensor((256,), "uint16"),
+    f8x2_source: T.Tensor((256,), "uint16"),
+    scale_source: T.Tensor((256,), "uint16"),
+    pack_f4: T.Tensor((2, 256), "uint8"),
+    unpack_f4: T.Tensor((4, 256), "uint32"),
+    scaled: T.Tensor((12, 256), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for step in range(8):
         index: T.let = step * 32 + lane
         packed_f4: T.let = T.cast(f4x2_source[index], "uint8")

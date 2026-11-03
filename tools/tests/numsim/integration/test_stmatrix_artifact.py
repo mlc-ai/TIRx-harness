@@ -3,24 +3,23 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_stmatrix_layout(
-    output_b8: T.Buffer((128,), "uint8"), output_b16: T.Buffer((256,), "uint16")
+    output_b8: T.Tensor((128,), "uint8"), output_b16: T.Tensor((256,), "uint16")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_b8 = T.alloc_buffer((8, 16), "uint8", scope="shared")
-    shared_b16 = T.alloc_buffer((4, 8, 8), "uint16", scope="shared")
-    source_b8 = T.alloc_buffer((1,), "uint32", scope="local")
-    source_b16 = T.alloc_buffer((4,), "uint32", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_b8 = T.alloc_shared((8, 16), "uint8")
+    shared_b16 = T.alloc_shared((4, 8, 8), "uint16")
+    source_b8 = T.alloc_local((1,), "uint32")
+    source_b16 = T.alloc_local((4,), "uint32")
     source_b8[0] = (
         T.cast(lane * 4, "uint32")
         | T.shift_left(T.cast(lane * 4 + 1, "uint32"), T.uint32(8))
@@ -51,17 +50,16 @@ def raw_stmatrix_layout(
         output_b16[linear] = shared_b16[linear // 64, linear % 64 // 8, linear % 8]
 
 
-@T.prim_func
+@T.function
 def raw_stmatrix_x2_forms(
-    output_b8: T.Buffer((256,), "uint8"), output_b16: T.Buffer((128,), "uint16")
+    output_b8: T.Tensor((256,), "uint8"), output_b16: T.Tensor((128,), "uint16")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_b8 = T.alloc_buffer((2, 8, 16), "uint8", scope="shared")
-    shared_b16 = T.alloc_buffer((2, 8, 8), "uint16", scope="shared")
-    source_b8 = T.alloc_buffer((2,), "uint32", scope="local")
-    source_b16 = T.alloc_buffer((2,), "uint32", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_b8 = T.alloc_shared((2, 8, 16), "uint8")
+    shared_b16 = T.alloc_shared((2, 8, 8), "uint16")
+    source_b8 = T.alloc_local((2,), "uint32")
+    source_b16 = T.alloc_local((2,), "uint32")
     for matrix in T.unroll(0, 2):
         source_b8[matrix] = (
             T.cast(matrix * 128 + lane * 4, "uint32")
@@ -106,15 +104,14 @@ def _analyze_stmatrix_form(count, space, shape, dtype, transpose):
     parameters = ", ".join(f"value_{index}: T.uint32" for index in range(count))
     operands = ", ".join(f"value_{index}" for index in range(count))
     source = f'''
-@T.prim_func
+@T.function
 def store_matrix({parameters}):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32, 16), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32, 16), "uint8")
     T.ptx["{chain}"](T.address_of(shared[lane, 0]), {operands})
 '''
-    return analyze(tvm.script.from_source(source, extra_vars={"T": T}))
+    return analyze(tvm_tirx.script.from_source(source, extra_vars={"T": T}))
 
 
 @pytest.mark.parametrize("count", [1, 2, 4])

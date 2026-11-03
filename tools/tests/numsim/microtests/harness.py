@@ -165,8 +165,6 @@ def _torch_tensor_map(
     import torch
     import tvm_ffi
 
-    import tvm
-
     logical_dtype = value.logical_dtype or value.array.dtype.name
     if base is None:
         if logical_dtype != value.array.dtype.name:
@@ -225,7 +223,7 @@ def _torch_tensor_map(
             opaque = np.ctypeslib.as_array((ctypes.c_uint8 * 128).from_address(descriptor_address))
             device_image = torch.from_numpy(opaque.copy()).to("cuda")
         if value.inactive_swizzle_atomicity:
-            from tvm.script import tirx as T
+            from tvm_tirx.script import tirx as T
 
             # CUDA's encoder has no inactive-atomicity argument. Initialize
             # that independent field through PTX, never by guessing CUDA's
@@ -234,14 +232,13 @@ def _torch_tensor_map(
                 asm volatile("tensormap.replace.tile.swizzle_atomicity.global.b1024.b32 [%0], {value.inactive_swizzle_atomicity};"
                              :: "l"(p) : "memory");
             }}"""
-            initialize = tvm.script.from_source(
-                """@T.prim_func
-def initialize(image: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+            initialize = tvm_tirx.script.from_source(
+                """@T.function
+def initialize(image: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        T.cuda.func_call("set_atomicity", image.ptr_to([0]), source_code=source, return_type="void")
+        T.cuda.func_call("set_atomicity", image.ptr_to([0]), source)
 """,
                 {"T": T, "source": source},
             )

@@ -10,14 +10,8 @@ from typing import Any
 import numpy as np
 from tests.numsim.microtests.harness import PairedBuffer
 
-from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
-    sf_smem_layout,
-    sf_tmem_layout,
-)
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import wg_local_layout
-from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _F16_SMEM_LAYOUT = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
@@ -33,35 +27,32 @@ _F8_BYTES_A128_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_
 _F8_BYTES_B16_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (16, 32))
 _FP4_A_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (128, 32))
 _FP4_B_SMEM_LAYOUT = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (8, 32))
-_MXF8_SCALE_SMEM_LAYOUT = sf_smem_layout(128, SF_K=4, sf_per_mma=1)
-_MXF8_SCALE_TMEM_LAYOUT = sf_tmem_layout(128, SF_K=4, sf_per_mma=1)
-_NVFP4_SCALE_SMEM_LAYOUT = sf_smem_layout(128, SF_K=4, sf_per_mma=4)
-_NVFP4_SCALE_TMEM_LAYOUT = sf_tmem_layout(128, SF_K=4, sf_per_mma=4)
 
 
-@T.prim_func
+@T.function
 def raw_f16_ss_m64_layout_f_valid_descriptor(
-    a: T.Buffer((64, 16), "float16"),
-    b: T.Buffer((8, 16), "float16"),
-    output: T.Buffer((4, 32, 4), "float32"),
-    descriptors: T.Buffer((3,), "uint64"),
+    a: T.Tensor((64, 16), "float16"),
+    b: T.Tensor((8, 16), "float16"),
+    output: T.Tensor((4, 32, 4), "float32"),
+    descriptors: T.Tensor((3,), "uint64"),
 ):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((64, 16), "float16", layout=_F16_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((8, 16), "float16", layout=_F16_SMEM_LAYOUT)
     registers = T.alloc_local((4,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i0_0, _i0_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i0_0, _i0_1] = a[_i0_0, _i0_1]
+        for _i1_0, _i1_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i1_0, _i1_1] = b[_i1_0, _i1_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -123,7 +114,7 @@ def raw_f16_ss_m64_layout_f_valid_descriptor(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:
@@ -131,29 +122,30 @@ def raw_f16_ss_m64_layout_f_valid_descriptor(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_e4m3_ss_m64_layout_f_valid_descriptor(
-    a: T.Buffer((64, 32), "float8_e4m3fn"),
-    b: T.Buffer((8, 32), "float8_e4m3fn"),
-    output: T.Buffer((4, 32, 4), "float32"),
-    descriptors: T.Buffer((3,), "uint64"),
+    a: T.Tensor((64, 32), "float8_e4m3fn"),
+    b: T.Tensor((8, 32), "float8_e4m3fn"),
+    output: T.Tensor((4, 32, 4), "float32"),
+    descriptors: T.Tensor((3,), "uint64"),
 ):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 32), "float8_e4m3fn", scope="shared", layout=_FP8_A_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 32), "float8_e4m3fn", scope="shared", layout=_FP8_B_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((64, 32), "float8_e4m3fn", layout=_FP8_A_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((8, 32), "float8_e4m3fn", layout=_FP8_B_SMEM_LAYOUT)
     registers = T.alloc_local((4,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i2_0, _i2_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i2_0, _i2_1] = a[_i2_0, _i2_1]
+        for _i3_0, _i3_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i3_0, _i3_1] = b[_i3_0, _i3_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -215,7 +207,7 @@ def raw_e4m3_ss_m64_layout_f_valid_descriptor(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:
@@ -223,31 +215,32 @@ def raw_e4m3_ss_m64_layout_f_valid_descriptor(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_e5m2_ss_m64_layout_f_valid_descriptor(
-    a: T.Buffer((64, 32), "uint8"),
-    b: T.Buffer((8, 32), "uint8"),
-    output: T.Buffer((4, 32, 4), "float32"),
-    descriptors: T.Buffer((3,), "uint64"),
+    a: T.Tensor((64, 32), "uint8"),
+    b: T.Tensor((8, 32), "uint8"),
+    output: T.Tensor((4, 32, 4), "float32"),
+    descriptors: T.Tensor((3,), "uint64"),
 ):
     """`kind::f8f6f4` with both operands E5M2 and a float32 destination."""
 
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 32), "uint8", scope="shared", layout=_F8_BYTES_A64_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 32), "uint8", scope="shared", layout=_F8_BYTES_B8_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((64, 32), "uint8", layout=_F8_BYTES_A64_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((8, 32), "uint8", layout=_F8_BYTES_B8_SMEM_LAYOUT)
     registers = T.alloc_local((4,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i4_0, _i4_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i4_0, _i4_1] = a[_i4_0, _i4_1]
+        for _i5_0, _i5_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i5_0, _i5_1] = b[_i5_0, _i5_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -313,7 +306,7 @@ def raw_e5m2_ss_m64_layout_f_valid_descriptor(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:
@@ -321,31 +314,32 @@ def raw_e5m2_ss_m64_layout_f_valid_descriptor(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_e4m3_e5m2_ss_m64_layout_f_valid_descriptor(
-    a: T.Buffer((64, 32), "uint8"),
-    b: T.Buffer((8, 32), "uint8"),
-    output: T.Buffer((4, 32, 4), "float32"),
-    descriptors: T.Buffer((3,), "uint64"),
+    a: T.Tensor((64, 32), "uint8"),
+    b: T.Tensor((8, 32), "uint8"),
+    output: T.Tensor((4, 32, 4), "float32"),
+    descriptors: T.Tensor((3,), "uint64"),
 ):
     """`kind::f8f6f4` with an E4M3 A and an E5M2 B: the operand dtypes are independent."""
 
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 32), "uint8", scope="shared", layout=_F8_BYTES_A64_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 32), "uint8", scope="shared", layout=_F8_BYTES_B8_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((64, 32), "uint8", layout=_F8_BYTES_A64_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((8, 32), "uint8", layout=_F8_BYTES_B8_SMEM_LAYOUT)
     registers = T.alloc_local((4,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i6_0, _i6_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i6_0, _i6_1] = a[_i6_0, _i6_1]
+        for _i7_0, _i7_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i7_0, _i7_1] = b[_i7_0, _i7_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -411,7 +405,7 @@ def raw_e4m3_e5m2_ss_m64_layout_f_valid_descriptor(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:
@@ -419,12 +413,12 @@ def raw_e4m3_e5m2_ss_m64_layout_f_valid_descriptor(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_e5m2_e4m3_f16_d_ss_m128_layout_d(
-    a: T.Buffer((128, 32), "uint8"),
-    b: T.Buffer((16, 32), "uint8"),
-    seed: T.Buffer((4, 32, 16), "uint32"),
-    output: T.Buffer((4, 32, 16), "uint32"),
+    a: T.Tensor((128, 32), "uint8"),
+    b: T.Tensor((16, 32), "uint8"),
+    seed: T.Tensor((4, 32, 16), "uint32"),
+    output: T.Tensor((4, 32, 16), "uint32"),
 ):
     """`kind::f8f6f4` with an E5M2 A, an E4M3 B, and a *float16* destination.
 
@@ -434,22 +428,23 @@ def raw_e5m2_e4m3_f16_d_ss_m128_layout_d(
     half is written as zero rather than preserved.
     """
 
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((128, 32), "uint8", scope="shared", layout=_F8_BYTES_A128_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((16, 32), "uint8", scope="shared", layout=_F8_BYTES_B16_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((128, 32), "uint8", layout=_F8_BYTES_A128_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((16, 32), "uint8", layout=_F8_BYTES_B16_SMEM_LAYOUT)
     registers = T.alloc_local((16,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i8_0, _i8_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i8_0, _i8_1] = a[_i8_0, _i8_1]
+        for _i9_0, _i9_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i9_0, _i9_1] = b[_i9_0, _i9_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -556,12 +551,12 @@ def raw_e5m2_e4m3_f16_d_ss_m128_layout_d(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_f16_f16_d_ss_m128_layout_d(
-    a: T.Buffer((128, 16), "float16"),
-    b: T.Buffer((16, 16), "float16"),
-    seed: T.Buffer((4, 32, 16), "uint32"),
-    output: T.Buffer((4, 32, 16), "uint32"),
+    a: T.Tensor((128, 16), "float16"),
+    b: T.Tensor((16, 16), "float16"),
+    seed: T.Tensor((4, 32, 16), "uint32"),
+    output: T.Tensor((4, 32, 16), "uint32"),
 ):
     """`kind::f16` with F16 multiplicands and a *float16* destination.
 
@@ -580,22 +575,23 @@ def raw_f16_f16_d_ss_m128_layout_d(
     F32-destination cases.
     """
 
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((128, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((16, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((128, 16), "float16", layout=_F16_SMEM_LAYOUT)
+    shared_b = T.alloc_shared((16, 16), "float16", layout=_F16_SMEM_LAYOUT)
     registers = T.alloc_local((16,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
     descriptor_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
+        for _i10_0, _i10_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i10_0, _i10_1] = a[_i10_0, _i10_1]
+        for _i11_0, _i11_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i11_0, _i11_1] = b[_i11_0, _i11_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -702,20 +698,19 @@ def raw_f16_f16_d_ss_m128_layout_d(
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def raw_tf32_ts_m128_layout_d_valid_descriptor(
-    a: T.Buffer((128, 8), "float32"),
-    b_physical: T.Buffer((512,), "uint8"),
-    output: T.Buffer((4, 32, 16), "float32"),
-    descriptors: T.Buffer((3,), "uint64"),
+    a: T.Tensor((128, 8), "float32"),
+    b_physical: T.Tensor((512,), "uint8"),
+    output: T.Tensor((4, 32, 16), "float32"),
+    descriptors: T.Tensor((3,), "uint64"),
 ):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    shared_b = T.alloc_buffer((512,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barriers = T.alloc_shared((2,), "uint64")
+    shared_b = T.alloc_shared((512,), "uint8")
     a_registers = T.alloc_local((8,), "uint32")
     d_registers = T.alloc_local((16,), "uint32")
     instruction_descriptor: T.uint32
@@ -734,7 +729,7 @@ def raw_tf32_ts_m128_layout_d_valid_descriptor(
     T.cuda.cta_sync()
 
     for k in T.unroll(8):
-        a_registers[k] = T.reinterpret("uint32", a[warp * 32 + lane, k])
+        a_registers[k] = T.reinterpret(a[warp * 32 + lane, k], ty="uint32")
     T.ptx["tcgen05.st.sync.aligned.32x32b.x8.b32"](
         address[0],
         a_registers[0],
@@ -813,439 +808,7 @@ def raw_tf32_ts_m128_layout_d_valid_descriptor(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(16):
-        output[warp, lane, register] = T.reinterpret("float32", d_registers[register])
-    T.cuda.cta_sync()
-
-    if warp == 0:
-        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
-        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
-
-
-@T.prim_func
-def tile_f16_ss_m64_layout_f(
-    a: T.Buffer((64, 16), "float16"),
-    b: T.Buffer((8, 16), "float16"),
-    output: T.Buffer((4, 32, 4), "float32"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 16), "float16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    accumulator = T.decl_buffer(
-        (64, 8),
-        "float32",
-        scope="tmem",
-        layout=tmem_datapath_layout("F", 64, 8),
-        allocated_addr=address[0],
-    )
-    registers = T.alloc_local((4,), "uint32")
-
-    if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
-    if warp == 0:
-        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
-        if lane == 0:
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.gemm_async(
-            accumulator[:, :],
-            shared_a[:, :],
-            shared_b[:, :],
-            accum=False,
-            dispatch="tcgen05",
-        )
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barrier[0])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
-    T.cuda.cta_sync()
-
-    T.ptx["tcgen05.ld.sync.aligned.16x256b.x1.b32"](
-        registers[0], registers[1], registers[2], registers[3], address[0]
-    )
-    T.ptx.tcgen05.wait__ld.sync.aligned()
-    for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
-    T.cuda.cta_sync()
-
-    if warp == 0:
-        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
-        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
-
-
-@T.prim_func
-def tile_f16_ts_m128_cta_group2_tmem_a(
-    a: T.Buffer((2, 128, 16), "float16"),
-    b: T.Buffer((2, 16, 16), "float16"),
-    output: T.Buffer((2, 4, 32, 32), "float32"),
-):
-    """One ``Tx.gemm_async(..., cta_group=2)`` whose A operand is TMEM.
-
-    M=128 per CTA (256 across the pair), N=32 across the pair (16 B rows per
-    CTA), K=16. TMEM A is staged the way ``flash_attention4`` stages its P
-    operand: ``tmem_pool.alloc`` picks the TMEM layout, a ``wg_local_layout``
-    view picks the register layout, and a plain ``Tx.wg.copy_async`` moves it.
-    """
-
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2], preferred=[2])
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-
-    pool = T.SMEMPool()
-    tmem_addr = pool.alloc((1,), "uint32", align=4)
-    completion = pool.alloc((1,), "uint64", align=8)
-    pool.move_base_to(1024)
-    shared_b = pool.alloc_tcgen05_mma_AB(
-        (16, 16), "float16", swizzle_mode=SwizzleMode.SWIZZLE_32B_ATOM
-    )
-    pool.commit()
-
-    tmem_pool = T.TMEMPool(pool, total_cols=128, cta_group=2, tmem_addr=tmem_addr)
-    a_tmem = tmem_pool.alloc((128, 16), "float16")
-    accumulator = tmem_pool.alloc((128, 32), "float32")
-
-    T.ptx.mbarrier.init.shared.b64(T.address_of(completion[0]), 1)
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cluster_sync()
-    tmem_pool.commit()
-
-    if warp == 0 and lane == 0:
-        Tx.copy(shared_b[:, :], b[cta, :, :])
-
-    # Each CTA stages the 128 A rows it owns into its own TMEM.
-    a_reg_buf_f32: T.f32[8]
-    a_reg_buf = T.decl_buffer((16,), dtype="float16", data=a_reg_buf_f32.data)
-    a_reg = a_reg_buf.view(128, 16, layout=wg_local_layout(16))
-    Tx.wg.copy(a_reg[:, :], a[cta, :, :])
-    Tx.wg.copy_async(a_tmem[:, :], a_reg[:, :])
-    T.ptx.tcgen05.wait__st.sync.aligned()
-    T.ptx.tcgen05.fence__before_thread_sync()
-    T.cuda.cluster_sync()
-    T.ptx.tcgen05.fence__after_thread_sync()
-
-    if cta == 0 and warp == 0 and lane == 0:
-        Tx.gemm_async(
-            accumulator[:, :],
-            a_tmem[:, :],
-            shared_b[:, :],
-            accum=False,
-            dispatch="tcgen05",
-            cta_group=2,
-        )
-        T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(completion[0])
-        )
-    if cta == 0 and warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(completion[0]), 0)
-    T.cuda.cluster_sync()
-
-    out_buf_f32: T.f32[32]
-    out_reg = out_buf_f32.view(128, 32, layout=wg_local_layout(32))
-    Tx.wg.copy_async(out_reg[:, :], accumulator[:, :])
-    T.ptx.tcgen05.wait__ld.sync.aligned()
-    for col in T.serial(32):
-        output[cta, warp, lane, col] = out_buf_f32[col]
-    T.cuda.cluster_sync()
-    tmem_pool.dealloc()
-
-
-@T.prim_func
-def tile_bf16_ss_m64_layout_f(
-    a: T.Buffer((64, 16), "bfloat16"),
-    b: T.Buffer((8, 16), "bfloat16"),
-    output: T.Buffer((4, 32, 4), "float32"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 16), "bfloat16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 16), "bfloat16", scope="shared", layout=_F16_SMEM_LAYOUT)
-    accumulator = T.decl_buffer(
-        (64, 8),
-        "float32",
-        scope="tmem",
-        layout=tmem_datapath_layout("F", 64, 8),
-        allocated_addr=address[0],
-    )
-    registers = T.alloc_local((4,), "uint32")
-
-    if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
-    if warp == 0:
-        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
-        if lane == 0:
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.gemm_async(
-            accumulator[:, :],
-            shared_a[:, :],
-            shared_b[:, :],
-            accum=False,
-            dispatch="tcgen05",
-        )
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barrier[0])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
-    T.cuda.cta_sync()
-
-    T.ptx["tcgen05.ld.sync.aligned.16x256b.x1.b32"](
-        registers[0], registers[1], registers[2], registers[3], address[0]
-    )
-    T.ptx.tcgen05.wait__ld.sync.aligned()
-    for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
-    T.cuda.cta_sync()
-
-    if warp == 0:
-        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
-        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
-
-
-@T.prim_func
-def tile_mxf8f6f4_e4m3_e8m0_ss_m128_layout_d(
-    a: T.Buffer((128, 32), "float8_e4m3fn"),
-    b: T.Buffer((8, 32), "float8_e4m3fn"),
-    scale_a: T.Buffer((128, 4), "float8_e8m0fnu"),
-    scale_b: T.Buffer((128, 4), "float8_e8m0fnu"),
-    output: T.Buffer((4, 32, 8), "float32"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((128, 32), "float8_e4m3fn", scope="shared", layout=_FP8_A_SMEM_LAYOUT)
-    shared_b = T.alloc_buffer((8, 32), "float8_e4m3fn", scope="shared", layout=_FP8_B_SMEM_LAYOUT)
-    shared_scale_a = T.alloc_buffer(
-        (128, 4), "float8_e8m0fnu", scope="shared", layout=_MXF8_SCALE_SMEM_LAYOUT
-    )
-    shared_scale_b = T.alloc_buffer(
-        (128, 4), "float8_e8m0fnu", scope="shared", layout=_MXF8_SCALE_SMEM_LAYOUT
-    )
-    accumulator = T.decl_buffer(
-        (128, 8),
-        "float32",
-        scope="tmem",
-        layout=tmem_datapath_layout("D", 128, 8),
-        allocated_addr=address[0],
-    )
-    scale_a_tmem = T.decl_buffer(
-        (128, 4),
-        "float8_e8m0fnu",
-        scope="tmem",
-        layout=_MXF8_SCALE_TMEM_LAYOUT,
-        allocated_addr=address[0] + T.uint32(16),
-    )
-    scale_b_tmem = T.decl_buffer(
-        (128, 4),
-        "float8_e8m0fnu",
-        scope="tmem",
-        layout=_MXF8_SCALE_TMEM_LAYOUT,
-        allocated_addr=address[0] + T.uint32(20),
-    )
-    registers = T.alloc_local((8,), "uint32")
-
-    if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[:, :])
-        Tx.copy(shared_b[:, :], b[:, :])
-        Tx.copy(shared_scale_a[:, :], scale_a[:, :])
-        Tx.copy(shared_scale_b[:, :], scale_b[:, :])
-    if warp == 0:
-        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
-        if lane == 0:
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[1]), 1)
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.copy_async(scale_a_tmem[:, :], shared_scale_a[:, :], cta_group=1)
-        Tx.copy_async(scale_b_tmem[:, :], shared_scale_b[:, :], cta_group=1)
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barriers[0])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.gemm_async(
-            accumulator[:, :],
-            shared_a[:, :],
-            shared_b[:, :],
-            SFA=scale_a_tmem[:, :],
-            SFB=scale_b_tmem[:, :],
-            accum=False,
-            dispatch="tcgen05",
-        )
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barriers[1])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barriers[1]), 0)
-    T.cuda.cta_sync()
-
-    T.ptx["tcgen05.ld.sync.aligned.32x32b.x8.b32"](
-        registers[0],
-        registers[1],
-        registers[2],
-        registers[3],
-        registers[4],
-        registers[5],
-        registers[6],
-        registers[7],
-        address[0],
-    )
-    T.ptx.tcgen05.wait__ld.sync.aligned()
-    for register in T.unroll(8):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
-    T.cuda.cta_sync()
-
-    if warp == 0:
-        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
-        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
-
-
-@T.prim_func
-def tile_nvfp4_e2m1_e4m3_ss_m128_layout_d(
-    a_packed: T.Buffer((128, 32), "uint8"),
-    b_packed: T.Buffer((8, 32), "uint8"),
-    scale_a: T.Buffer((128, 4), "float8_e4m3fn"),
-    scale_b: T.Buffer((128, 4), "float8_e4m3fn"),
-    output: T.Buffer((4, 32, 8), "float32"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    shared_a_packed = T.alloc_buffer(
-        (128, 32), "uint8", scope="shared", layout=_FP4_A_SMEM_LAYOUT, align=1024
-    )
-    shared_b_packed = T.alloc_buffer(
-        (8, 32), "uint8", scope="shared", layout=_FP4_B_SMEM_LAYOUT, align=1024
-    )
-    shared_a = shared_a_packed.view("float4_e2m1fn")
-    shared_b = shared_b_packed.view("float4_e2m1fn")
-    shared_scale_a = T.alloc_buffer(
-        (128, 4),
-        "float8_e4m3fn",
-        scope="shared",
-        layout=_NVFP4_SCALE_SMEM_LAYOUT,
-        align=1024,
-    )
-    shared_scale_b = T.alloc_buffer(
-        (128, 4),
-        "float8_e4m3fn",
-        scope="shared",
-        layout=_NVFP4_SCALE_SMEM_LAYOUT,
-        align=1024,
-    )
-    accumulator = T.decl_buffer(
-        (128, 8),
-        "float32",
-        scope="tmem",
-        layout=tmem_datapath_layout("D", 128, 8),
-        allocated_addr=address[0],
-    )
-    scale_a_tmem = T.decl_buffer(
-        (128, 4),
-        "float8_e4m3fn",
-        scope="tmem",
-        layout=_NVFP4_SCALE_TMEM_LAYOUT,
-        allocated_addr=address[0] + T.uint32(16),
-    )
-    scale_b_tmem = T.decl_buffer(
-        (128, 4),
-        "float8_e4m3fn",
-        scope="tmem",
-        layout=_NVFP4_SCALE_TMEM_LAYOUT,
-        allocated_addr=address[0] + T.uint32(24),
-    )
-    registers = T.alloc_local((8,), "uint32")
-
-    if warp == 0 and lane == 0:
-        Tx.copy(shared_a_packed[:, :], a_packed[:, :])
-        Tx.copy(shared_b_packed[:, :], b_packed[:, :])
-        Tx.copy(shared_scale_a[:, :], scale_a[:, :])
-        Tx.copy(shared_scale_b[:, :], scale_b[:, :])
-    if warp == 0:
-        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
-        if lane == 0:
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[1]), 1)
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.copy_async(scale_a_tmem[:, :], shared_scale_a[:, :], cta_group=1)
-        Tx.copy_async(scale_b_tmem[:, :], shared_scale_b[:, :], cta_group=1)
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barriers[0])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-    T.cuda.cta_sync()
-
-    if warp == 0 and lane == 0:
-        Tx.gemm_async(
-            accumulator[:, :],
-            shared_a[:, :],
-            shared_b[:, :],
-            SFA=scale_a_tmem[:, :],
-            SFB=scale_b_tmem[:, :],
-            accum=False,
-            dispatch="tcgen05",
-        )
-        T.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
-            T.address_of(barriers[1])
-        )
-    if warp == 0:
-        T.cuda.mbarrier_wait(T.address_of(barriers[1]), 0)
-    T.cuda.cta_sync()
-
-    T.ptx["tcgen05.ld.sync.aligned.32x32b.x8.b32"](
-        registers[0],
-        registers[1],
-        registers[2],
-        registers[3],
-        registers[4],
-        registers[5],
-        registers[6],
-        registers[7],
-        address[0],
-    )
-    T.ptx.tcgen05.wait__ld.sync.aligned()
-    for register in T.unroll(8):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(d_registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:
@@ -1570,38 +1133,21 @@ class Tcgen05MmaFormCase:
 
 
 TCGEN05_MMA_FORM_CASES = (
-    Tcgen05MmaFormCase("tile_f16_layout_f", tile_f16_ss_m64_layout_f, _make_tile_f16_arguments),
     Tcgen05MmaFormCase(
         "raw_f16_valid_descriptor",
         raw_f16_ss_m64_layout_f_valid_descriptor,
         _make_raw_f16_arguments,
     ),
-    Tcgen05MmaFormCase("tile_bf16_layout_f", tile_bf16_ss_m64_layout_f, _make_tile_bf16_arguments),
     Tcgen05MmaFormCase(
         "raw_e4m3_valid_descriptor",
         raw_e4m3_ss_m64_layout_f_valid_descriptor,
         _make_raw_e4m3_arguments,
     ),
     Tcgen05MmaFormCase(
-        "tile_mxf8_block_scaled",
-        tile_mxf8f6f4_e4m3_e8m0_ss_m128_layout_d,
-        _make_mxf8_arguments,
-    ),
-    Tcgen05MmaFormCase(
-        "tile_nvfp4_block_scaled",
-        tile_nvfp4_e2m1_e4m3_ss_m128_layout_d,
-        _make_nvfp4_arguments,
-    ),
-    Tcgen05MmaFormCase(
         "raw_tf32_valid_descriptor",
         raw_tf32_ts_m128_layout_d_valid_descriptor,
         _make_tf32_arguments,
         max_ulp=16,
-    ),
-    Tcgen05MmaFormCase(
-        "tile_cta_group2_tmem_a",
-        tile_f16_ts_m128_cta_group2_tmem_a,
-        _make_tile_cta_group2_tmem_a_arguments,
     ),
     Tcgen05MmaFormCase(
         "raw_e5m2_valid_descriptor",

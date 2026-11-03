@@ -138,6 +138,8 @@ const COMPILE_ONLY_FRONTEND_NODE_KINDS: &[&str] = &[
     "Ramp",
     "SeqStmt",
     "StringImm",
+    // alloc_tensor placement; `decode::tensor_decl` models or rejects it.
+    "Tuple",
 ];
 
 fn owned_set(values: &[&str]) -> HashSet<String> {

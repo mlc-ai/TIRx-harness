@@ -4,17 +4,16 @@ import numpy as np
 import pytest
 
 from tests.numsim.support.execution import assert_rejected, run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def readonly_kernel(*, before=False, after=False, disjoint=False, predicate=True):
     write_offset = 32 if disjoint else 0
 
-    @T.prim_func
-    def kernel(data: T.Buffer((64,), "uint32"), output: T.Buffer((32,), "uint32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(data: T.Tensor((64,), "uint32"), output: T.Tensor((32,), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         value = T.alloc_local((1,), "uint32")
         value[0] = T.uint32(123)
         if before:

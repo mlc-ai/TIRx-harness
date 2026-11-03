@@ -4,7 +4,7 @@ import numpy as np
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _TMEM_8 = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
@@ -12,16 +12,15 @@ _TMEM_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol")
 _TMEM_32 = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
+@T.function
 def ptx_mma_tf32_m16n8k8(
-    a: T.Buffer((16, 8), "float32"),
-    b: T.Buffer((8, 8), "float32"),
-    c: T.Buffer((16, 8), "float32"),
-    output: T.Buffer((16, 8), "float32"),
+    a: T.Tensor((16, 8), "float32"),
+    b: T.Tensor((8, 8), "float32"),
+    c: T.Tensor((16, 8), "float32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((4,), "float32")
@@ -65,16 +64,15 @@ def ptx_mma_tf32_m16n8k8(
     output[group + 8, thread * 2 + 1] = d_regs[3]
 
 
-@T.prim_func
+@T.function
 def ptx_mma_f16_m16n8k16(
-    a: T.Buffer((16, 16), "float16"),
-    b: T.Buffer((16, 8), "float16"),
-    c: T.Buffer((16, 8), "float32"),
-    output: T.Buffer((16, 8), "float32"),
+    a: T.Tensor((16, 16), "float16"),
+    b: T.Tensor((16, 8), "float16"),
+    c: T.Tensor((16, 8), "float32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((8,), "float16")
@@ -121,15 +119,14 @@ def ptx_mma_f16_m16n8k16(
     output[group + 8, thread * 2 + 1] = d_regs[3]
 
 
-@T.prim_func
+@T.function
 def ptx_mma_f16_m16n8k16_zero_c(
-    a: T.Buffer((16, 16), "float16"),
-    b: T.Buffer((16, 8), "float16"),
-    output: T.Buffer((16, 8), "float32"),
+    a: T.Tensor((16, 16), "float16"),
+    b: T.Tensor((16, 8), "float16"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((8,), "float16")
@@ -171,11 +168,10 @@ def ptx_mma_f16_m16n8k16_zero_c(
     output[group + 8, thread * 2 + 1] = d_regs[3]
 
 
-@T.prim_func
-def ptx_mma_f16_m16n8k16_mixed_c(output: T.Buffer((4, 32), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def ptx_mma_f16_m16n8k16_mixed_c(output: T.Tensor((4, 32), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     d = T.alloc_local((4,), "float32")
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((2,), "uint32")
@@ -205,16 +201,15 @@ def ptx_mma_f16_m16n8k16_mixed_c(output: T.Buffer((4, 32), "float32")):
         output[i, lane] = d[i]
 
 
-@T.prim_func
+@T.function
 def ptx_mma_legacy_f16_m16n8k16(
-    a: T.Buffer((16, 16), "float16"),
-    b: T.Buffer((16, 8), "float16"),
-    c: T.Buffer((16, 8), "float32"),
-    output: T.Buffer((16, 8), "float32"),
+    a: T.Tensor((16, 16), "float16"),
+    b: T.Tensor((16, 8), "float16"),
+    c: T.Tensor((16, 8), "float32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((8,), "float16")
@@ -249,7 +244,6 @@ def ptx_mma_legacy_f16_m16n8k16(
         accumulator.data,
         0,
         False,
-        dtype="float32",
     )
 
     output[group, thread * 2] = accumulator[0]
@@ -258,14 +252,13 @@ def ptx_mma_legacy_f16_m16n8k16(
     output[group + 8, thread * 2 + 1] = accumulator[3]
 
 
-@T.prim_func
+@T.function
 def mma_fragment_fill_and_store(
-    filled: T.Buffer((2, 32, 8), "float32"),
-    stored: T.Buffer((2, 16, 16), "float32"),
+    filled: T.Tensor((2, 32, 8), "float32"),
+    stored: T.Tensor((2, 16, 16), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     current_fragment = T.alloc_local((8,), "float32")
     legacy_fragment = T.alloc_local((8,), "float32")
     current_fill = T.alloc_local((8,), "float32")
@@ -276,8 +269,8 @@ def mma_fragment_fill_and_store(
         current_fill[local_id] = T.float32(1)
         legacy_fill[local_id] = T.float32(2)
 
-    T.evaluate(T.cuda.mma_fill(8, current_fill.data, 0, dtype="float32"))
-    T.evaluate(T.cuda.mma_fill_legacy(8, legacy_fill.data, 0, dtype="float32"))
+    T.evaluate(T.cuda.mma_fill(8, current_fill.data, 0, ty="float32"))
+    T.evaluate(T.cuda.mma_fill(8, legacy_fill.data, 0, ty="float32"))
     T.evaluate(
         T.cuda.mma_store(
             16,
@@ -286,18 +279,18 @@ def mma_fragment_fill_and_store(
             current_fragment.data,
             0,
             16,
-            dtype="float32",
+            ty="float32",
         )
     )
     T.evaluate(
-        T.cuda.mma_store_legacy(
+        T.cuda.mma_store(
             16,
             16,
             stored.ptr_to([1, 0, 0]),
             legacy_fragment.data,
             0,
             16,
-            dtype="float32",
+            ty="float32",
         )
     )
     for local_id in T.serial(8):
@@ -305,17 +298,16 @@ def mma_fragment_fill_and_store(
         filled[1, lane, local_id] = legacy_fill[local_id]
 
 
-@T.prim_func
+@T.function
 def ptx_mma_sp_f16_m16n8k16(
-    packed_a: T.Buffer((16, 8), "float16"),
-    b: T.Buffer((16, 8), "float16"),
-    c: T.Buffer((16, 8), "float32"),
-    metadata_words: T.Buffer((32,), "uint32"),
-    output: T.Buffer((16, 8), "float32"),
+    packed_a: T.Tensor((16, 8), "float16"),
+    b: T.Tensor((16, 8), "float16"),
+    c: T.Tensor((16, 8), "float32"),
+    metadata_words: T.Tensor((32,), "uint32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((4,), "float16")

@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 from .test_bulk_copy_scopes import assert_complete_elements
 
@@ -25,15 +25,14 @@ def g2s_case(scope, writers="warps", cluster=False):
         if cluster
         else ""
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(source: T.Buffer((16,), "uint32"), destination: T.Buffer((8,), "uint32"), enabled: T.int32):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([{2 if writers == "ctas" else 1}])
-    warp = T.warp_id([{2 if writers == "warps" else 1}])
-    lane = T.lane_id([32])
+@T.function
+def kernel(source: T.Tensor((16,), "uint32"), destination: T.Tensor((8,), "uint32"), enabled: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=(1) * {2 if writers == "ctas" else 1}, block={2 if writers == "warps" else 1} * 32, cluster={2 if writers == "ctas" else 1}))
+    cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     actor = {actor}
     shared = T.alloc_shared((8,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=16)

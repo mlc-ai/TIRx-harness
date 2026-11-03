@@ -18,27 +18,25 @@ from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def export_global_pointer_words(
-    source: T.Buffer((32,), "uint32"), pointers: T.Buffer((32,), "uint64")
+    source: T.Tensor((32,), "uint32"), pointers: T.Tensor((32,), "uint64")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pointers[lane] = T.reinterpret("uint64", source.ptr_to([lane]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    pointers[lane] = T.reinterpret(source.ptr_to([lane]), ty="uint64")
 
 
-@T.prim_func
+@T.function
 def consume_global_pointer_words(
-    pointers: T.Buffer((32,), "uint64"), output: T.Buffer((32,), "uint32")
+    pointers: T.Tensor((32,), "uint64"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", pointers[lane]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(pointers[lane], ty="handle"))
 
 
 def test_pointer_words_keep_allocation_binding_across_phases(tmp_path):

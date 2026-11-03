@@ -5,15 +5,14 @@ from pathlib import Path
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def tcgen_matrix_descriptor_swizzle1(output: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared", align=128)
+@T.function
+def tcgen_matrix_descriptor_swizzle1(output: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8", align=128)
     descriptor: T.uint64
     if lane == 0:
         T.cuda.tcgen05.encode_matrix_descriptor(
@@ -26,14 +25,12 @@ def tcgen_matrix_descriptor_swizzle1(output: T.Buffer((1,), "uint64")):
         output[0] = descriptor
 
 
-@T.prim_func
-def tcgen_matrix_descriptor_cluster_rank(output: T.Buffer((2,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared", align=128)
+@T.function
+def tcgen_matrix_descriptor_cluster_rank(output: T.Tensor((2,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8", align=128)
     descriptor: T.uint64
     if lane == 0:
         T.cuda.tcgen05.encode_matrix_descriptor(
@@ -46,13 +43,11 @@ def tcgen_matrix_descriptor_cluster_rank(output: T.Buffer((2,), "uint64")):
         output[cta] = descriptor
 
 
-@T.prim_func
-def tcgen_lifecycle_columns256(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def tcgen_lifecycle_columns256(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 256)
     if lane == 0:
         output[0] = address[0]
@@ -60,14 +55,12 @@ def tcgen_lifecycle_columns256(output: T.Buffer((1,), "uint32")):
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(T.uint32(0), 256)
 
 
-@T.prim_func
-def tcgen_commit_uint32_predicate(output: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def tcgen_commit_uint32_predicate(output: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()

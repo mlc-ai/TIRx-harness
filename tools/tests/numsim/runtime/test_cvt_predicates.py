@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.microtests.cases.ptx_cvt_scalar import (
     SCALAR_CVT_COLUMNS,
     scalar_cvt_arguments,
@@ -16,8 +16,8 @@ from tests.numsim.microtests.cases.ptx_cvt_scalar_goldens import (
 from tests.numsim.runtime.test_ptx_cvt_packed_forms import _cvt_call
 from tests.numsim.support.execution import run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.script import tirx as T
 from tvm_tirx.backend.cuda.ptx.table import TABLE, operand_dtypes
+from tvm_tirx.script import tirx as T
 
 
 def scalar_predicate_case(name):
@@ -86,12 +86,11 @@ def scalar_predicate_case(name):
                     expected[row, lane, :dbytes] = list(value.to_bytes(dbytes, "little"))
                 elif mode == 1:
                     expected[row, lane, :dbytes] = 0
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer(({len(forms)}, 32, 16), "uint8"), output: T.Buffer(({len(expected)}, 32, 16), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor(({len(forms)}, 32, 16), "uint8"), output: T.Tensor(({len(expected)}, 32, 16), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 {chr(10).join(lines)}
 """,
         {"T": T},
@@ -143,12 +142,11 @@ def stochastic_predicate_case():
                 expected[row, ::2] = golden[::2]
             if mode == 1:
                 expected[row, 1::2] = 0
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer((256,), "float32"), random: T.Buffer((256,), "float32"), output: T.Buffer((18, 256), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor((256,), "float32"), random: T.Tensor((256,), "float32"), output: T.Tensor((18, 256), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for step in range(8):
         i = step * 32 + lane
         source_index = T.Select(lane % 2 == 0, i, 256)

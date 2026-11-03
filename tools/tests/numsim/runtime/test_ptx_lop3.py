@@ -4,23 +4,22 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_lop3_forms(
-    a: T.Buffer((32,), "uint32"),
-    b: T.Buffer((32,), "int32"),
-    c: T.Buffer((32,), "float32"),
-    q: T.Buffer((32,), "uint32"),
-    plain: T.Buffer((32,), "float32"),
-    bool_data: T.Buffer((32,), "int32"),
-    bool_predicate: T.Buffer((32,), "uint32"),
-    sink_predicate: T.Buffer((32,), "uint32"),
+    a: T.Tensor((32,), "uint32"),
+    b: T.Tensor((32,), "int32"),
+    c: T.Tensor((32,), "float32"),
+    q: T.Tensor((32,), "uint32"),
+    plain: T.Tensor((32,), "float32"),
+    bool_data: T.Tensor((32,), "int32"),
+    bool_predicate: T.Tensor((32,), "uint32"),
+    sink_predicate: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.lop3.b32(plain[lane], a[lane], b[lane], c[lane], 0x1A)
     T.ptx.lop3.or_.b32(
         bool_data[lane],

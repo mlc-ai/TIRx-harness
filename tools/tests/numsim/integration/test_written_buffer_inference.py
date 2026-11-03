@@ -6,56 +6,54 @@ import pytest
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.script import tirx as T
 from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_store_through_dynamic_alias(
-    source: T.Buffer((32,), "uint32"), destination: T.Buffer((33,), "uint32")
+    source: T.Tensor((32,), "uint32"), destination: T.Tensor((33,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     alias_data: T.let[T.Var(name="offset_destination", ty=PtrType(PrimType("uint32")))] = (
-        T.ptr_byte_offset(T.reinterpret("handle", destination.ptr_to([0])), T.uint32(4), "uint32")
+        T.ptr_byte_offset(
+            T.reinterpret(destination.ptr_to([0]), ty="handle"), T.uint32(4), ty=T.Ptr("uint32")
+        )
     )
-    alias = T.decl_buffer((32,), "uint32", data=alias_data, scope="global")
+    alias = T.decl_tensor(alias_data, ty_args=[T.Tensor((32,), "uint32", scope="global")])
     T.ptx.st.global_.u32(
-        alias.access_ptr("w", offset=lane),
+        alias.ptr_to([lane]),
         source[lane] + T.uint32(1),
     )
 
 
-@T.prim_func
+@T.function
 def raw_store_through_access_ptr(
-    source: T.Buffer((32,), "uint32"), destination: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), destination: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    T.ptx.st.global_.u32(destination.access_ptr("w", offset=lane), source[lane])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    T.ptx.st.global_.u32(destination.ptr_to([lane]), source[lane])
 
 
-@T.prim_func
-def static_alias_store(storage: T.Buffer((128,), "uint8"), source: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    alias = T.decl_buffer((32,), "float32", data=storage.data, scope="global")
+@T.function
+def static_alias_store(storage: T.Tensor((128,), "uint8"), source: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((32,), "float32", scope="global")])
     alias[lane] = source[lane]
 
 
-@T.prim_func
+@T.function
 def atomic_through_pointer_offset(
-    counter: T.Buffer((2,), "uint32"), old_value: T.Buffer((1,), "uint32")
+    counter: T.Tensor((2,), "uint32"), old_value: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        target = T.ptr_byte_offset(counter.ptr_to([0]), T.uint32(4), "uint32")
+        target = T.ptr_byte_offset(counter.ptr_to([0]), T.uint32(4), ty=T.Ptr("uint32"))
         T.ptx.atom.release.gpu.global_.add.u32(
             old_value[0],
             target,
@@ -63,20 +61,18 @@ def atomic_through_pointer_offset(
         )
 
 
-@T.prim_func
-def unresolved_raw_store(pointer_bits: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def unresolved_raw_store(pointer_bits: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        T.ptx.st.global_.u32(T.reinterpret("handle", pointer_bits[0]), T.uint32(1))
+        T.ptx.st.global_.u32(T.reinterpret(pointer_bits[0], ty="handle"), T.uint32(1))
 
 
-@T.prim_func
-def raw_tcgen_descriptor_store_to_global_output(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_tcgen_descriptor_store_to_global_output(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(output[0]),

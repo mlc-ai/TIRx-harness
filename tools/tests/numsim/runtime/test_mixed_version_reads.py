@@ -2,9 +2,9 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _MODES = ("volatile", "acquire", "relaxed", "cas")
 
@@ -15,13 +15,13 @@ def mixed_version_case(mode="cas", *, late_data=False):
         if mode == "cas"
         else f'T.ptx["ld.{mode}{"" if mode == "volatile" else ".gpu"}.global.b128"](value[0], flag.ptr_to([0]))'
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(flag: T.Buffer((2,), "uint64"), data: T.Buffer((2,), "uint32"), out: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
+@T.function
+def kernel(flag: T.Tensor((2,), "uint64"), data: T.Tensor((2,), "uint32"), out: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((32,), "uint8", align=16)
     value = T.alloc_local((1,), "uint128")
     expected = T.alloc_local((1,), "uint128")

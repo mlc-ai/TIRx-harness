@@ -6,101 +6,95 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
 from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def integer_address_alias(source: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
-    alias = T.decl_buffer((1,), "uint64", data=slot.data, scope="local")
-    slot[0] = T.reinterpret("uint64", source.ptr_to([0]))
-    T.ptx.ld.global_.u32(output[0], T.reinterpret("handle", alias[0]))
+@T.function
+def integer_address_alias(source: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    slot = T.alloc_local((1,), "uint64")
+    alias = T.decl_tensor(slot.data, ty_args=[T.Tensor((1,), "uint64", scope="local")])
+    slot[0] = T.reinterpret(source.ptr_to([0]), ty="uint64")
+    T.ptx.ld.global_.u32(output[0], T.reinterpret(alias[0], ty="handle"))
 
 
-@T.prim_func
+@T.function
 def integer_address_across_alias_views(
-    storage: T.Buffer((64,), "uint32"), output: T.Buffer((32,), "uint32")
+    storage: T.Tensor((64,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     alias_data: T.let[
         T.Var(name="integer_address_alias", ty=PtrType(PrimType("uint32"), "global"))
-    ] = T.ptr_byte_offset(storage.ptr_to([0]), T.uint32(32 * 4), "uint32")
-    alias = T.decl_buffer((32,), "uint32", data=alias_data, scope="global")
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
+    ] = T.ptr_byte_offset(storage.ptr_to([0]), T.uint32(32 * 4), ty=T.Ptr("uint32"))
+    alias = T.decl_tensor(alias_data, ty_args=[T.Tensor((32,), "uint32", scope="global")])
+    slot = T.alloc_local((1,), "uint64")
     if lane % 2 == 0:
-        slot[0] = T.reinterpret("uint64", storage.ptr_to([lane]))
+        slot[0] = T.reinterpret(storage.ptr_to([lane]), ty="uint64")
     else:
-        slot[0] = T.reinterpret("uint64", alias.ptr_to([lane]))
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", slot[0]))
+        slot[0] = T.reinterpret(alias.ptr_to([lane]), ty="uint64")
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(slot[0], ty="handle"))
 
 
-@T.prim_func
+@T.function
 def integer_address_mixed_spaces_subset_global_load(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
+    slot = T.alloc_local((1,), "uint64")
     if lane % 2 == 0:
-        slot[0] = T.reinterpret("uint64", source.ptr_to([lane]))
+        slot[0] = T.reinterpret(source.ptr_to([lane]), ty="uint64")
     else:
-        slot[0] = T.reinterpret("uint64", shared.ptr_to([lane]))
+        slot[0] = T.reinterpret(shared.ptr_to([lane]), ty="uint64")
     if lane % 2 == 0:
-        T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", slot[0]))
+        T.ptx.ld.global_.u32(output[lane], T.reinterpret(slot[0], ty="handle"))
 
 
-@T.prim_func
+@T.function
 def integer_address_mixed_spaces_active_typed_load(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
+    slot = T.alloc_local((1,), "uint64")
     if lane % 2 == 0:
-        slot[0] = T.reinterpret("uint64", source.ptr_to([lane]))
+        slot[0] = T.reinterpret(source.ptr_to([lane]), ty="uint64")
     else:
-        slot[0] = T.reinterpret("uint64", shared.ptr_to([lane]))
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", slot[0]))
+        slot[0] = T.reinterpret(shared.ptr_to([lane]), ty="uint64")
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(slot[0], ty="handle"))
 
 
-@T.prim_func
-def integer_address_mixed_spaces_subset_global_store(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
+@T.function
+def integer_address_mixed_spaces_subset_global_store(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
+    slot = T.alloc_local((1,), "uint64")
     if lane % 2 == 0:
-        slot[0] = T.reinterpret("uint64", output.ptr_to([lane]))
+        slot[0] = T.reinterpret(output.ptr_to([lane]), ty="uint64")
     else:
-        slot[0] = T.reinterpret("uint64", shared.ptr_to([lane]))
+        slot[0] = T.reinterpret(shared.ptr_to([lane]), ty="uint64")
     T.ptx.st.global_.u32(
-        T.reinterpret("handle", slot[0]),
+        T.reinterpret(slot[0], ty="handle"),
         T.cast(lane + 1, "uint32"),
         pred=lane % 2 == 0,
     )
 
 
-@T.prim_func
-def integer_address_arithmetic(source: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    base = T.alloc_buffer((1,), "uint64", scope="local")
-    added = T.alloc_buffer((1,), "uint64", scope="local")
-    reverse_added = T.alloc_buffer((1,), "uint64", scope="local")
-    subtracted = T.alloc_buffer((1,), "uint64", scope="local")
-    invalid_subtract = T.alloc_buffer((1,), "uint64", scope="local")
-    base[0] = T.reinterpret("uint64", source.ptr_to([0]))
+@T.function
+def integer_address_arithmetic(source: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    base = T.alloc_local((1,), "uint64")
+    added = T.alloc_local((1,), "uint64")
+    reverse_added = T.alloc_local((1,), "uint64")
+    subtracted = T.alloc_local((1,), "uint64")
+    invalid_subtract = T.alloc_local((1,), "uint64")
+    base[0] = T.reinterpret(source.ptr_to([0]), ty="uint64")
     added[0] = base[0] + T.uint64(4)
     reverse_added[0] = T.uint64(4) + base[0]
     subtracted[0] = added[0] - T.uint64(4)
@@ -108,57 +102,48 @@ def integer_address_arithmetic(source: T.Buffer((1,), "uint32"), output: T.Buffe
     output[0] = 0
 
 
-@T.prim_func
-def integer_address_presence(source: T.Buffer((1,), "uint32"), output: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    token: T.uint64 = T.reinterpret("uint64", T.address_of(source[0]))
+@T.function
+def integer_address_presence(source: T.Tensor((1,), "uint32"), output: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    token: T.uint64 = T.reinterpret(T.address_of(source[0]), ty="uint64")
     output[0] = T.cast(token != T.uint64(0), "uint32")
     output[1] = T.cast(T.uint64(0) == token, "uint32")
 
 
-@T.prim_func
-def inline_reinterpreted_local_view(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def inline_reinterpreted_local_view(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed = T.alloc_local((1,), "uint64")
-    words = T.decl_buffer(
-        (2,),
-        "uint32",
-        data=T.reinterpret(
-            PtrType(PrimType("uint32")),
-            T.address_of(packed[0]),
-        ),
-        scope="local",
+    words = T.decl_tensor(
+        T.reinterpret(T.address_of(packed[0]), ty=PtrType(PrimType("uint32"))),
+        ty_args=[T.Tensor((2,), "uint32", scope="local")],
     )
     packed[0] = T.uint64(0x1122334455660000) + T.cast(lane, "uint64")
     output[lane] = words[0]
 
 
-@T.prim_func
-def forged_integer_pointer(output: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    integer = T.alloc_buffer((1,), "uint64", scope="local")
-    round_trip = T.alloc_buffer((1,), "uint64", scope="local")
+@T.function
+def forged_integer_pointer(output: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    integer = T.alloc_local((1,), "uint64")
+    round_trip = T.alloc_local((1,), "uint64")
     integer[0] = T.uint64(0x1000)
-    forged_handle: T.let[T.handle] = T.reinterpret("handle", integer[0])
-    round_trip[0] = T.reinterpret("uint64", forged_handle)
+    forged_handle: T.let[T.handle] = T.reinterpret(integer[0], ty="handle")
+    round_trip[0] = T.reinterpret(forged_handle, ty="uint64")
     if lane == 0:
         output[0] = round_trip[0]
 
 
-@T.prim_func
-def loop_and_multiple_stores(source: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    stable = T.alloc_buffer((1,), "uint64", scope="local")
-    mixed = T.alloc_buffer((1,), "uint64", scope="local")
-    cyclic = T.alloc_buffer((1,), "uint64", scope="local")
-    stable[0] = T.reinterpret("uint64", source.ptr_to([0]))
-    mixed[0] = T.reinterpret("uint64", source.ptr_to([0]))
+@T.function
+def loop_and_multiple_stores(source: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    stable = T.alloc_local((1,), "uint64")
+    mixed = T.alloc_local((1,), "uint64")
+    cyclic = T.alloc_local((1,), "uint64")
+    stable[0] = T.reinterpret(source.ptr_to([0]), ty="uint64")
+    mixed[0] = T.reinterpret(source.ptr_to([0]), ty="uint64")
     for _ in T.serial(2):
         stable[0] = stable[0] + T.uint64(4)
         mixed[0] = T.uint64(0)
@@ -166,95 +151,84 @@ def loop_and_multiple_stores(source: T.Buffer((1,), "uint32"), output: T.Buffer(
     output[0] = 0
 
 
-@T.prim_func
+@T.function
 def leading_null_pointer_initializer(
     enabled: T.int32,
-    source: T.Buffer((1,), "uint32"),
-    output: T.Buffer((1,), "uint32"),
+    source: T.Tensor((1,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    slot = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    slot = T.alloc_local((1,), "uint64")
     slot[0] = T.uint64(0)
     if enabled != 0:
-        slot[0] = T.reinterpret("uint64", source.ptr_to([0]))
+        slot[0] = T.reinterpret(source.ptr_to([0]), ty="uint64")
     if enabled != 0:
-        T.ptx.ld.global_.u32(output[0], T.reinterpret("handle", slot[0]))
+        T.ptx.ld.global_.u32(output[0], T.reinterpret(slot[0], ty="handle"))
     else:
         output[0] = 0
 
 
-@T.prim_func
+@T.function
 def raw_loaded_integer_offsets_pointer(
-    source: T.Buffer((32,), "uint32"),
-    offsets: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    offsets: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     loaded_offset = T.alloc_local((1,), "uint32")
     pointer_base = T.alloc_local((1,), "uint64")
     byte_offset = T.alloc_local((1,), "uint64")
     destination = T.alloc_local((1,), "uint64")
     T.ptx.ld.global_.u32(loaded_offset[0], offsets.ptr_to([lane]))
-    pointer_base[0] = T.reinterpret("uint64", output.ptr_to([0]))
+    pointer_base[0] = T.reinterpret(output.ptr_to([0]), ty="uint64")
     byte_offset[0] = T.cast(loaded_offset[0], "uint64") * T.uint64(4)
     destination[0] = pointer_base[0] + byte_offset[0]
-    T.ptx.st.global_.u32(T.reinterpret("handle", destination[0]), source[lane])
+    T.ptx.st.global_.u32(T.reinterpret(destination[0], ty="handle"), source[lane])
 
 
-@T.prim_func
+@T.function
 def raw_shared_integer_address_round_trip(
-    source: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    tokens = T.alloc_buffer((32,), "uint64", scope="shared")
-    loaded = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tokens = T.alloc_shared((32,), "uint64")
+    loaded = T.alloc_local((1,), "uint64")
     T.ptx.st.shared.u64(
         tokens.ptr_to([lane]),
-        T.reinterpret("uint64", source.ptr_to([lane])),
+        T.reinterpret(source.ptr_to([lane]), ty="uint64"),
     )
     T.cuda.warp_sync()
     T.ptx.ld.shared.u64(loaded[0], tokens.ptr_to([31 - lane]))
     T.ptx.ld.global_.u32(
         output[lane],
-        T.reinterpret("handle", loaded[0]),
+        T.reinterpret(loaded[0], ty="handle"),
     )
 
 
-@T.prim_func
+@T.function
 def runtime_sized_global_address_round_trip(
     rows: T.int32,
-    source_ptr: T.handle,
-    output: T.Buffer((1,), "uint32"),
+    source: T.Tensor((rows,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    source = T.match_buffer(source_ptr, (rows,), "uint32")
-    T.device_entry()
-    _warp = T.warp_id([1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     address = T.alloc_local((1,), "uint64")
-    address[0] = T.reinterpret("uint64", source.ptr_to([rows - 1]))
-    T.ptx.ld.global_.u32(output[0], T.reinterpret("handle", address[0]))
+    address[0] = T.reinterpret(source.ptr_to([rows - 1]), ty="uint64")
+    T.ptx.ld.global_.u32(output[0], T.reinterpret(address[0], ty="handle"))
 
 
-@T.prim_func
+@T.function
 def wider_dynamic_view_used_only_for_address(
-    output: T.Buffer((1,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    slot = T.alloc_buffer((1,), "uint32", scope="shared")
-    wide = T.decl_buffer(
-        (1,),
-        "uint64",
-        data=T.reinterpret(
-            PtrType(PrimType("uint64"), "global"),
-            T.address_of(slot[0]),
-        ),
-        scope="global",
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    slot = T.alloc_shared((1,), "uint32")
+    wide = T.decl_tensor(
+        T.reinterpret(T.address_of(slot[0]), ty=PtrType(PrimType("uint64"), "global")),
+        ty_args=[T.Tensor((1,), "uint64", scope="global")],
     )
     output[0] = T.cuda.cvta_generic_to_shared(wide.ptr_to([0]))
 

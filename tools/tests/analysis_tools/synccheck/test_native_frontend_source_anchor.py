@@ -17,8 +17,8 @@ import pytest
 import tvm_tirx.tirx as tirx
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
 from tvm_tirx import ir
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _SOURCE_LINES = pathlib.Path(__file__).read_text().splitlines()
@@ -43,27 +43,24 @@ def _line_containing(needle: str) -> int:
 _OFFENDING_LAYOUT = TileLayout(S[(1, 1) : (1, 1)] + 1 @ Axis.get("laneid"))
 
 
-@T.prim_func
-def unsupported_local_layout(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    lane = T.lane_id([32])
-    local = T.alloc_buffer((1, 1), "int32", scope="local", layout=_OFFENDING_LAYOUT)
+@T.function
+def unsupported_local_layout(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    local = T.alloc_local((1, 1), "int32", layout=_OFFENDING_LAYOUT)
     if lane == 0:
         local[0, 0] = 7
         output[0] = local[0, 0]
 
 
-_ALLOC_LINE = _line_containing('local = T.alloc_buffer((1, 1), "int32"')
+_ALLOC_LINE = _line_containing('local = T.alloc_local((1, 1), "int32"')
 
 
 def _kernel_with_rebuilt_root():
     """Same PrimFunc, root statement recomposed the way a caller's pass would."""
 
-    rebuilt = ir.SeqStmt(
-        [unsupported_local_layout.body, ir.Evaluate(tirx.const(0, "int32"))],
-        span=None,
-    )
-    return unsupported_local_layout.with_body(rebuilt, span=None)
+    rebuilt = ir.SeqStmt([unsupported_local_layout.body, ir.Evaluate(tirx.const(0, "int32"))])
+    return unsupported_local_layout.with_body(rebuilt)
 
 
 def _only_frontend_finding(report):
@@ -88,9 +85,9 @@ def test_rebuilt_root_still_has_no_span():
     """Guard the premise: this is the shape that used to be rejected outright."""
 
     kernel = _kernel_with_rebuilt_root()
-    assert kernel.span is None
-    assert kernel.body.span is None
-    assert unsupported_local_layout.body.span is not None
+    assert isinstance(kernel.loc, ir.UnknownLoc)
+    assert isinstance(kernel.body.loc, ir.UnknownLoc)
+    assert not isinstance(unsupported_local_layout.body.loc, ir.UnknownLoc)
 
 
 @pytest.mark.parametrize("rebuilt", [False, True], ids=["as-parsed", "rebuilt-root"])
@@ -130,24 +127,21 @@ def test_recomposing_the_root_does_not_move_the_reported_location(tmp_path):
     )
 
 
-@T.prim_func
-def call_location_probe(source: T.Buffer((32,), "uint8")):
+@T.function
+def call_location_probe(source: T.Tensor((32,), "uint8")):
     """A valid call whose source location survives a frontend rejection."""
 
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    T.evaluate(T.cuda.ldg(source.ptr_to([31 - lane]), "boolx2"))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    T.evaluate(T.cuda.mov_sreg(32, "nsmid") + T.uint32(source[lane]))
 
 
-_UNMODELED_CALL_LINE = _line_containing('T.cuda.ldg(source.ptr_to([31 - lane]), "boolx2")')
+_UNMODELED_CALL_LINE = _line_containing('T.cuda.mov_sreg(32, "nsmid")')
 
 
 def test_unmodeled_form_is_also_located(tmp_path):
     """UnmodeledTIRxFormError is raised directly and never reaches verify()."""
 
-    # A byte-addressable backing lets instruction emission report the unmodeled
-    # result type instead of failing the global memory plan first.
     report = synccheck(
         call_location_probe,
         inputs={"source": np.zeros((32,), dtype=np.uint8)},
@@ -156,5 +150,5 @@ def test_unmodeled_form_is_also_located(tmp_path):
     )
 
     finding = _only_frontend_finding(report)
-    assert "no exact NumSim packed-bool ABI" in finding.message
+    assert "register 'nsmid' is not modeled at 32 bits" in finding.message
     assert _anchor_span(finding)["line"] == _UNMODELED_CALL_LINE

@@ -9,27 +9,26 @@ from __future__ import annotations
 
 import numpy as np
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 from .ptx_cvt_scalar_goldens import SCALAR_CVT_INPUTS
 
 _LANES = 16
 
 
-@T.prim_func
+@T.function
 def scalar_cvt_float_to_int(
-    source_f32: T.Buffer((16,), "float32"),
-    source_f64: T.Buffer((16,), "float64"),
-    source_f16: T.Buffer((16,), "uint16"),
-    source_bf16: T.Buffer((16,), "uint16"),
-    out_s32: T.Buffer((16, 10), "int32"),
-    out_u32: T.Buffer((16, 2), "uint32"),
-    out_s64: T.Buffer((16, 2), "int64"),
-    out_u8: T.Buffer((16, 2), "uint8"),
+    source_f32: T.Tensor((16,), "float32"),
+    source_f64: T.Tensor((16,), "float64"),
+    source_f16: T.Tensor((16,), "uint16"),
+    source_bf16: T.Tensor((16,), "uint16"),
+    out_s32: T.Tensor((16, 10), "int32"),
+    out_u32: T.Tensor((16, 2), "uint32"),
+    out_s64: T.Tensor((16, 2), "int64"),
+    out_u8: T.Tensor((16, 2), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 16:
         T.ptx["cvt.rni.s32.f32"](out_s32[lane, 0], source_f32[lane])
         T.ptx["cvt.rzi.s32.f32"](out_s32[lane, 1], source_f32[lane])
@@ -49,20 +48,19 @@ def scalar_cvt_float_to_int(
         T.ptx["cvt.rzi.u8.f64"](out_u8[lane, 1], source_f64[lane])
 
 
-@T.prim_func
+@T.function
 def scalar_cvt_rounded_conversions(
-    source_s64: T.Buffer((16,), "int64"),
-    source_u64: T.Buffer((16,), "uint64"),
-    source_f64: T.Buffer((16,), "float64"),
-    source_f32: T.Buffer((16,), "float32"),
-    source_bf16: T.Buffer((16,), "uint16"),
-    out_f32: T.Buffer((16, 16), "float32"),
-    out_f32_integral: T.Buffer((16, 6), "float32"),
-    out_f64: T.Buffer((16, 6), "float64"),
+    source_s64: T.Tensor((16,), "int64"),
+    source_u64: T.Tensor((16,), "uint64"),
+    source_f64: T.Tensor((16,), "float64"),
+    source_f32: T.Tensor((16,), "float32"),
+    source_bf16: T.Tensor((16,), "uint16"),
+    out_f32: T.Tensor((16, 16), "float32"),
+    out_f32_integral: T.Tensor((16, 6), "float32"),
+    out_f64: T.Tensor((16, 6), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 16:
         T.ptx["cvt.rn.f32.s64"](out_f32[lane, 0], source_s64[lane])
         T.ptx["cvt.rz.f32.s64"](out_f32[lane, 1], source_s64[lane])
@@ -96,16 +94,15 @@ def scalar_cvt_rounded_conversions(
         T.ptx["cvt.ftz.f64.f32"](out_f64[lane, 5], source_f32[lane])
 
 
-@T.prim_func
+@T.function
 def scalar_cvt_narrowing(
-    source_f32: T.Buffer((16,), "float32"),
-    out_f16: T.Buffer((16, 8), "uint16"),
-    out_bf16: T.Buffer((16, 8), "uint16"),
-    out_tf32: T.Buffer((16, 10), "uint32"),
+    source_f32: T.Tensor((16,), "float32"),
+    out_f16: T.Tensor((16, 8), "uint16"),
+    out_bf16: T.Tensor((16, 8), "uint16"),
+    out_tf32: T.Tensor((16, 10), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 16:
         T.ptx["cvt.rn.f16.f32"](out_f16[lane, 0], source_f32[lane])
         T.ptx["cvt.rn.relu.f16.f32"](out_f16[lane, 1], source_f32[lane])

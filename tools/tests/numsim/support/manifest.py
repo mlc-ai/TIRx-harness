@@ -16,13 +16,13 @@ from typing import Any, NamedTuple
 
 from tvm_ffi import structural_map
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import PrimFuncSpec, analyze, verify
 from tirx_harness.numsim.transpiler.host_prelude import normalize_host_tensor_map_prelude
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 DEVICE_ENTRY_ATTR = "tirx.device_entry"
 
@@ -30,7 +30,7 @@ DEVICE_ENTRY_ATTR = "tirx.device_entry"
 def parse_kernel(source: str) -> tirx.Function:
     """Parse one TVMScript kernel source."""
 
-    return tvm.script.from_source(source, {"T": T})
+    return tvm_tirx.script.from_source(source, {"T": T})
 
 
 def device_kernel(body: Stmt, params: Sequence[tirx.Var] = ()) -> tirx.Function:

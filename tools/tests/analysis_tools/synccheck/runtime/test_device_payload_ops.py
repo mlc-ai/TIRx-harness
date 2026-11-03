@@ -13,9 +13,6 @@ from tests.numsim.microtests.cases.mma_sync import (
     raw_dense_f16_f32_k16,
     raw_sparse_f16_f32_k32,
 )
-from tests.numsim.microtests.cases.tcgen05_advanced_mma import (
-    tcgen05_block_scaled_mxf4,
-)
 from tests.numsim.microtests.cases.tcgen05_lifecycle_ldst import (
     tcgen05_bf16_mma,
     tcgen05_cp_warpx4,
@@ -37,22 +34,22 @@ from tests.numsim.runtime.test_ptx_register_bits import (
     ptx_selp_b16_bits,
     ptx_typed_move_and_b16_pack,
 )
+from tests.numsim.runtime.test_raw_tcgen_codegen import raw_tcgen_mma_block_scaled_mxf4_mqa
 from tests.numsim.runtime.test_scalar_control import pointer_conversions_and_descriptor
 from tests.numsim.support.kernels import raw_tma_roundtrip
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def dps_f32_protocol_ops(
-    output_f32: T.Buffer((32, 4), "float32"),
-    output_f32x2: T.Buffer((32, 4), "uint64"),
+    output_f32: T.Tensor((32, 4), "float32"),
+    output_f32x2: T.Tensor((32, 4), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     tiny: T.let = T.cuda.uint_as_float(T.uint32(1))
     increment: T.let = T.float32(2**-25)
     nan: T.let = T.cuda.uint_as_float(T.uint32(0x7FC00001))
@@ -76,11 +73,10 @@ def dps_f32_protocol_ops(
     )
 
 
-@T.prim_func
-def dps_f64_protocol_ops(output: T.Buffer((32, 4), "float64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def dps_f64_protocol_ops(output: T.Tensor((32, 4), "float64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value: T.let = T.cast(lane, "float64")
 
     T.ptx.add.rn.f64(output[lane, 0], value, T.float64(2))
@@ -103,7 +99,7 @@ _KERNELS = (
     raw_sparse_f16_f32_k32,
     tcgen05_cp_warpx4,
     tcgen05_bf16_mma,
-    tcgen05_block_scaled_mxf4,
+    raw_tcgen_mma_block_scaled_mxf4_mqa,
     raw_tma_roundtrip,
     raw_tma_prefetch,
     raw_tma_gather4_bar_address,
@@ -118,9 +114,7 @@ _KERNEL_BY_OP = {
     "tirx.cuda.half8tofloat8": "pointer_conversions_and_descriptor",
     "tirx.cuda.runtime_instr_desc": "pointer_conversions_and_descriptor",
     "tirx.cuda.mma_fill": "mma_fragment_fill_and_store",
-    "tirx.mma_fill_legacy": "mma_fragment_fill_and_store",
     "tirx.cuda.mma_store": "mma_fragment_fill_and_store",
-    "tirx.mma_store_legacy": "mma_fragment_fill_and_store",
     "tirx.ptx.abs_half": "ptx_half_abs_and_setp",
     "tirx.ptx.add": "dps_f32_protocol_ops",
     "tirx.ptx.and": "ptx_predicate_data_path",
@@ -143,10 +137,10 @@ _KERNEL_BY_OP = {
     "tirx.ptx.sub": "dps_f32_protocol_ops",
     "tirx.ptx.tcgen05_cp": "tcgen05_cp_warpx4",
     "tirx.cuda.tcgen05_encode_instr_descriptor": "tcgen05_bf16_mma",
-    "tirx.cuda.tcgen05_encode_instr_descriptor_block_scaled": "tcgen05_block_scaled_mxf4",
+    "tirx.cuda.tcgen05_encode_instr_descriptor_block_scaled": "raw_tcgen_mma_block_scaled_mxf4_mqa",
     "tirx.cuda.tcgen05_encode_matrix_descriptor": "tcgen05_cp_warpx4",
     "tirx.ptx.tcgen05_mma_ss": "tcgen05_bf16_mma",
-    "tirx.ptx.tcgen05_mma_block_scale_ss": "tcgen05_block_scaled_mxf4",
+    "tirx.ptx.tcgen05_mma_block_scale_ss": "raw_tcgen_mma_block_scaled_mxf4_mqa",
 }
 
 
@@ -212,7 +206,14 @@ def _arguments_by_kernel() -> dict[str, dict[str, Any]]:
             "output": np.zeros((4, 32, 4), dtype=np.uint32),
         },
         "tcgen05_bf16_mma": {"output": np.zeros((4, 32, 4), dtype=np.float32)},
-        "tcgen05_block_scaled_mxf4": {"output": np.zeros((4, 32, 16), dtype=np.float32)},
+        "raw_tcgen_mma_block_scaled_mxf4_mqa": {
+            "a_physical": np.zeros(8192, dtype=np.uint8),
+            "b_physical": np.zeros(8192, dtype=np.uint8),
+            "scale_a_cells": np.zeros((4, 32), dtype=np.uint32),
+            "scale_b_cells": np.zeros((4, 32), dtype=np.uint32),
+            "issue_second": np.int32(0),
+            "output": np.zeros((128, 128), dtype=np.float32),
+        },
         "raw_tma_roundtrip": {
             "input_map": _tensor_map(
                 tma_roundtrip_source,

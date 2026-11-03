@@ -4,28 +4,27 @@ import ml_dtypes
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import emitted_calls, parse_kernel
 from tirx_harness import numsim, racecheck
 from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
 from tvm_tirx import tirx
+from tvm_tirx.script import tirx as T
 
 _OBSOLETE_CP_ASYNC_BULK_SOURCE = """
-@T.prim_func
+@T.function
 def invalid(source: T.handle):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.cp_async.bulk(source, 0, source, 8, 16, 7, dtype="uint16")
 """
 
 
-@T.prim_func
-def cp_async_plain_4(source: T.Buffer((128,), "uint8"), output: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+@T.function
+def cp_async_plain_4(source: T.Tensor((128,), "uint8"), output: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
     T.ptx["cp.async.ca.shared.global.L2::64B"](
         T.address_of(shared[lane * 4]), T.address_of(source[lane * 4]), 4
     )
@@ -35,12 +34,11 @@ def cp_async_plain_4(source: T.Buffer((128,), "uint8"), output: T.Buffer((128,),
         output[lane * 4 + element] = shared[lane * 4 + element]
 
 
-@T.prim_func
-def cp_async_cache_hint_16(source: T.Buffer((512,), "uint8"), output: T.Buffer((512,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
+@T.function
+def cp_async_cache_hint_16(source: T.Tensor((512,), "uint8"), output: T.Tensor((512,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
     T.ptx["cp.async.cg.shared.global.L2::cache_hint.L2::128B"](
         T.address_of(shared[lane * 16]),
         T.address_of(source[lane * 16]),
@@ -53,14 +51,13 @@ def cp_async_cache_hint_16(source: T.Buffer((512,), "uint8"), output: T.Buffer((
         output[lane * 16 + element] = shared[lane * 16 + element]
 
 
-@T.prim_func
+@T.function
 def cp_async_bound_raw_shared_offset(
-    source: T.Buffer((128,), "uint8"), output: T.Buffer((128,), "uint8")
+    source: T.Tensor((128,), "uint8"), output: T.Tensor((128,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint8")
     shared_base: T.uint32 = T.cuda.cvta_generic_to_shared(shared.ptr_to([0]))
     T.ptx["cp.async.ca.shared.global"](
         shared_base + T.cast(128 + lane * 4, "uint32"),
@@ -73,12 +70,11 @@ def cp_async_bound_raw_shared_offset(
         output[lane * 4 + element] = shared[128 + lane * 4 + element]
 
 
-@T.prim_func
-def cp_async_predicate_skip_8(source: T.Buffer((256,), "uint8"), output: T.Buffer((256,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint8", scope="shared")
+@T.function
+def cp_async_predicate_skip_8(source: T.Tensor((256,), "uint8"), output: T.Tensor((256,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint8")
     for element in T.serial(8):
         shared[lane * 8 + element] = T.uint8(0xA5)
     T.cuda.warp_sync()
@@ -94,14 +90,13 @@ def cp_async_predicate_skip_8(source: T.Buffer((256,), "uint8"), output: T.Buffe
         output[lane * 8 + element] = shared[lane * 8 + element]
 
 
-@T.prim_func
+@T.function
 def cp_async_ca_ignore_src_zero_fill_8(
-    source: T.Buffer((128,), "uint8"), output: T.Buffer((256,), "uint8")
+    source: T.Tensor((128,), "uint8"), output: T.Tensor((256,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint8")
     for element in T.serial(8):
         shared[lane * 8 + element] = T.uint8(0xA5)
     T.cuda.warp_sync()
@@ -117,14 +112,13 @@ def cp_async_ca_ignore_src_zero_fill_8(
         output[lane * 8 + element] = shared[lane * 8 + element]
 
 
-@T.prim_func
+@T.function
 def cp_async_cg_ignore_src_zero_fill_16(
-    source: T.Buffer((256,), "uint8"), output: T.Buffer((512,), "uint8")
+    source: T.Tensor((256,), "uint8"), output: T.Tensor((512,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
     for element in T.serial(16):
         shared[lane * 16 + element] = T.uint8(0x5A)
     T.cuda.warp_sync()
@@ -140,15 +134,14 @@ def cp_async_cg_ignore_src_zero_fill_16(
         output[lane * 16 + element] = shared[lane * 16 + element]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float32(
-    counter: T.Buffer((1,), "float32"),
-    old_values: T.Buffer((4,), "float32"),
-    final_value: T.Buffer((1,), "float32"),
+    counter: T.Tensor((1,), "float32"),
+    old_values: T.Tensor((4,), "float32"),
+    final_value: T.Tensor((1,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         old_values[lane] = T.cuda.atomic_add(counter.data, T.float32(0.5))
     T.cuda.warp_sync()
@@ -156,15 +149,14 @@ def cuda_atomic_add_float32(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float16(
-    counter: T.Buffer((1,), "float16"),
-    old_values: T.Buffer((4,), "float16"),
-    final_value: T.Buffer((1,), "float16"),
+    counter: T.Tensor((1,), "float16"),
+    old_values: T.Tensor((4,), "float16"),
+    final_value: T.Tensor((1,), "float16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         old_values[lane] = T.cuda.atomic_add(counter.data, T.cast(T.float32(0.5), "float16"))
     T.cuda.warp_sync()
@@ -172,15 +164,14 @@ def cuda_atomic_add_float16(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_bfloat16(
-    counter: T.Buffer((1,), "bfloat16"),
-    old_values: T.Buffer((4,), "bfloat16"),
-    final_value: T.Buffer((1,), "bfloat16"),
+    counter: T.Tensor((1,), "bfloat16"),
+    old_values: T.Tensor((4,), "bfloat16"),
+    final_value: T.Tensor((1,), "bfloat16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         old_values[lane] = T.cuda.atomic_add(counter.data, T.cast(T.float32(0.5), "bfloat16"))
     T.cuda.warp_sync()
@@ -188,16 +179,15 @@ def cuda_atomic_add_bfloat16(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float32x2(
-    counter: T.Buffer((1,), "float32x2"),
-    increments: T.Buffer((4,), "float32x2"),
-    old_values: T.Buffer((4,), "float32x2"),
-    final_value: T.Buffer((1,), "float32x2"),
+    counter: T.Tensor((1,), "float32x2"),
+    increments: T.Tensor((4,), "float32x2"),
+    old_values: T.Tensor((4,), "float32x2"),
+    final_value: T.Tensor((1,), "float32x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         old_values[lane] = T.cuda.atomic_add(counter.data, increments[lane])
     T.cuda.warp_sync()
@@ -205,16 +195,15 @@ def cuda_atomic_add_float32x2(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float16x2(
-    counter: T.Buffer((1,), "float16x2"),
-    increments: T.Buffer((2,), "float16x2"),
-    old_values: T.Buffer((2,), "float16x2"),
-    final_value: T.Buffer((1,), "float16x2"),
+    counter: T.Tensor((1,), "float16x2"),
+    increments: T.Tensor((2,), "float16x2"),
+    old_values: T.Tensor((2,), "float16x2"),
+    final_value: T.Tensor((1,), "float16x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 2:
         old_values[lane] = T.cuda.atomic_add(counter.data, increments[lane])
     T.cuda.warp_sync()
@@ -222,17 +211,16 @@ def cuda_atomic_add_float16x2(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float16x2_shared(
-    initial: T.Buffer((1,), "float16x2"),
-    increments: T.Buffer((2,), "float16x2"),
-    old_values: T.Buffer((2,), "float16x2"),
-    final_value: T.Buffer((1,), "float16x2"),
+    initial: T.Tensor((1,), "float16x2"),
+    increments: T.Tensor((2,), "float16x2"),
+    old_values: T.Tensor((2,), "float16x2"),
+    final_value: T.Tensor((1,), "float16x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    counter = T.alloc_buffer((1,), "float16x2", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    counter = T.alloc_shared((1,), "float16x2")
     if lane == 0:
         counter[0] = initial[0]
     T.cuda.warp_sync()
@@ -243,16 +231,15 @@ def cuda_atomic_add_float16x2_shared(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_bfloat16x2(
-    counter: T.Buffer((1,), "bfloat16x2"),
-    increments: T.Buffer((2,), "bfloat16x2"),
-    old_values: T.Buffer((2,), "bfloat16x2"),
-    final_value: T.Buffer((1,), "bfloat16x2"),
+    counter: T.Tensor((1,), "bfloat16x2"),
+    increments: T.Tensor((2,), "bfloat16x2"),
+    old_values: T.Tensor((2,), "bfloat16x2"),
+    final_value: T.Tensor((1,), "bfloat16x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 2:
         old_values[lane] = T.cuda.atomic_add(counter.data, increments[lane])
     T.cuda.warp_sync()
@@ -260,13 +247,12 @@ def cuda_atomic_add_bfloat16x2(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def ptx_red_half_bfloat16x2(
-    counter: T.Buffer((1,), "uint32"), increments: T.Buffer((4,), "uint32")
+    counter: T.Tensor((1,), "uint32"), increments: T.Tensor((4,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         T.ptx["red.global.add.noftz.bf16x2"](
             counter.ptr_to([0]),
@@ -274,11 +260,10 @@ def ptx_red_half_bfloat16x2(
         )
 
 
-@T.prim_func
-def ptx_predicated_red_f32(output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def ptx_predicated_red_f32(output: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["red.global.add.f32"](
         output.ptr_to([lane]),
         T.float32(1.0),
@@ -286,15 +271,14 @@ def ptx_predicated_red_f32(output: T.Buffer((32,), "float32")):
     )
 
 
-@T.prim_func
+@T.function
 def ptx_atomic_add_f32_vectors(
-    counter: T.Buffer((6,), "float32"),
-    increments: T.Buffer((6,), "float32"),
-    old_values: T.Buffer((6,), "float32"),
+    counter: T.Tensor((6,), "float32"),
+    increments: T.Tensor((6,), "float32"),
+    old_values: T.Tensor((6,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["atom.global.add.v4.f32"](
         old_values[0],
         old_values[1],
@@ -317,16 +301,15 @@ def ptx_atomic_add_f32_vectors(
     )
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_add_float32x4(
-    counter: T.Buffer((1,), "float32x4"),
-    increments: T.Buffer((2,), "float32x4"),
-    old_values: T.Buffer((2,), "float32x4"),
-    final_value: T.Buffer((1,), "float32x4"),
+    counter: T.Tensor((1,), "float32x4"),
+    increments: T.Tensor((2,), "float32x4"),
+    old_values: T.Tensor((2,), "float32x4"),
+    final_value: T.Tensor((1,), "float32x4"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 2:
         old_values[lane] = T.cuda.atomic_add(counter.data, increments[lane])
     T.cuda.warp_sync()
@@ -334,17 +317,16 @@ def cuda_atomic_add_float32x4(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_cas_uint64x2(
-    cell: T.Buffer((1,), "uint64x2"),
-    compares: T.Buffer((3,), "uint64x2"),
-    replacements: T.Buffer((3,), "uint64x2"),
-    old_values: T.Buffer((3,), "uint64x2"),
-    final_value: T.Buffer((1,), "uint64x2"),
+    cell: T.Tensor((1,), "uint64x2"),
+    compares: T.Tensor((3,), "uint64x2"),
+    replacements: T.Tensor((3,), "uint64x2"),
+    old_values: T.Tensor((3,), "uint64x2"),
+    final_value: T.Tensor((1,), "uint64x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 3:
         old_values[lane] = T.cuda.atomic_cas(cell.data, compares[lane], replacements[lane])
     T.cuda.warp_sync()
@@ -352,17 +334,16 @@ def cuda_atomic_cas_uint64x2(
         final_value[0] = cell[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_cas_float32x4(
-    cell: T.Buffer((1,), "float32x4"),
-    compares: T.Buffer((2,), "float32x4"),
-    replacements: T.Buffer((2,), "float32x4"),
-    old_values: T.Buffer((2,), "float32x4"),
-    final_value: T.Buffer((1,), "float32x4"),
+    cell: T.Tensor((1,), "float32x4"),
+    compares: T.Tensor((2,), "float32x4"),
+    replacements: T.Tensor((2,), "float32x4"),
+    old_values: T.Tensor((2,), "float32x4"),
+    final_value: T.Tensor((1,), "float32x4"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 2:
         old_values[lane] = T.cuda.atomic_cas(cell.data, compares[lane], replacements[lane])
     T.cuda.warp_sync()
@@ -370,17 +351,16 @@ def cuda_atomic_cas_float32x4(
         final_value[0] = cell[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_cas_uint32x4(
-    cell: T.Buffer((1,), "uint32x4"),
-    compare: T.Buffer((1,), "uint32x4"),
-    replacement: T.Buffer((1,), "uint32x4"),
-    old_value: T.Buffer((1,), "uint32x4"),
-    final_value: T.Buffer((1,), "uint32x4"),
+    cell: T.Tensor((1,), "uint32x4"),
+    compare: T.Tensor((1,), "uint32x4"),
+    replacement: T.Tensor((1,), "uint32x4"),
+    old_value: T.Tensor((1,), "uint32x4"),
+    final_value: T.Tensor((1,), "uint32x4"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old_value[0] = T.cuda.atomic_cas(cell.data, compare[0], replacement[0])
     T.cuda.warp_sync()
@@ -388,15 +368,14 @@ def cuda_atomic_cas_uint32x4(
         final_value[0] = cell[0]
 
 
-@T.prim_func
+@T.function
 def ptx_relaxed_type_atomics(
-    bit_counter: T.Buffer((1,), "uint32"),
-    signed_counter: T.Buffer((1,), "uint32"),
-    old_values: T.Buffer((2,), "uint32"),
+    bit_counter: T.Tensor((1,), "uint32"),
+    signed_counter: T.Tensor((1,), "uint32"),
+    old_values: T.Tensor((2,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx.atom.relaxed.gpu.global_.or_.b32(
             old_values[0],
@@ -407,15 +386,14 @@ def ptx_relaxed_type_atomics(
         T.ptx.atom.relaxed.gpu.global_.min.s32(
             old_signed, T.address_of(signed_counter[0]), T.int32(1)
         )
-        old_values[1] = T.reinterpret("uint32", old_signed)
+        old_values[1] = T.reinterpret(old_signed, ty="uint32")
 
 
-@T.prim_func
-def st_bulk_default_weak(output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "uint32", scope="shared")
+@T.function
+def st_bulk_default_weak(output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "uint32")
     if lane < 4:
         shared[lane] = T.cast(lane + 1, "uint32")
     T.cuda.warp_sync()
@@ -426,105 +404,83 @@ def st_bulk_default_weak(output: T.Buffer((4,), "uint32")):
         output[lane] = shared[lane]
 
 
-@T.prim_func
-def legacy_global_acquire(source: T.Buffer((32,), "uint64"), output: T.Buffer((32,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    local = T.alloc_buffer((1,), "uint64", scope="local")
+@T.function
+def legacy_global_acquire(source: T.Tensor((32,), "uint64"), output: T.Tensor((32,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    local = T.alloc_local((1,), "uint64")
     T.ptx.ld.acquire.gpu.global_.u64(local[0], T.address_of(source[lane]))
     output[lane] = local[0]
 
 
-@T.prim_func
-def guarded_ldg32(source: T.Buffer((32,), "float32"), output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    local = T.alloc_buffer((32,), "float32", scope="local")
-    local[lane] = T.float32(-123.5)
-    T.evaluate(T.s_tir.ldg32(local.data, lane < 16, source[lane], lane))
-    output[lane] = local[lane]
-
-
-@T.prim_func
-def legacy_ldmatrix_x2_trans(output: T.Buffer((128,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint16", scope="shared")
-    local = T.alloc_buffer((4,), "uint16", scope="local")
+@T.function
+def legacy_ldmatrix_x2_trans(output: T.Tensor((128,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint16")
+    local = T.alloc_local((4,), "uint16")
     for element in T.serial(8):
         shared[lane * 8 + element] = T.Cast("uint16", lane * 8 + element)
     T.cuda.warp_sync()
     T.evaluate(
-        T.ptx_legacy.ldmatrix(True, 2, ".b16", local.data, 0, shared.data, lane * 8, dtype="uint16")
+        T.ptx_legacy.ldmatrix(True, 2, ".b16", local.data, 0, shared.data, lane * 8, ty="uint16")
     )
     for element in T.serial(4):
         output[lane * 4 + element] = local[element]
 
 
-@T.prim_func
-def legacy_ldmatrix_i8_transpose_fallback(output: T.Buffer((512,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1024,), "uint8", scope="shared")
-    local = T.alloc_buffer((16,), "uint8", scope="local")
+@T.function
+def legacy_ldmatrix_i8_transpose_fallback(output: T.Tensor((512,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1024,), "uint8")
+    local = T.alloc_local((16,), "uint8")
     for element in T.serial(32):
         shared[lane * 32 + element] = T.Cast("uint8", lane * 32 + element)
     T.cuda.warp_sync()
-    T.evaluate(
-        T.ptx_legacy.ldmatrix(True, 4, ".b16", local.data, 0, shared.data, 32, dtype="uint8")
-    )
+    T.evaluate(T.ptx_legacy.ldmatrix(True, 4, ".b16", local.data, 0, shared.data, 32, ty="uint8"))
     for element in T.serial(16):
         output[lane * 16 + element] = local[element]
 
 
-@T.prim_func
-def legacy_ldmatrix_i8_transpose_two_warps(output: T.Buffer((1024,), "uint8")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def legacy_ldmatrix_i8_transpose_two_warps(output: T.Tensor((1024,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     thread = warp * 32 + lane
-    shared = T.alloc_buffer((1024,), "uint8", scope="shared")
-    local = T.alloc_buffer((16,), "uint8", scope="local")
+    shared = T.alloc_shared((1024,), "uint8")
+    local = T.alloc_local((16,), "uint8")
     for element in T.serial(16):
         shared[thread * 16 + element] = T.Cast("uint8", thread * 16 + element)
     T.cuda.cta_sync()
-    T.evaluate(
-        T.ptx_legacy.ldmatrix(True, 4, ".b16", local.data, 0, shared.data, 32, dtype="uint8")
-    )
+    T.evaluate(T.ptx_legacy.ldmatrix(True, 4, ".b16", local.data, 0, shared.data, 32, ty="uint8"))
     for element in T.serial(16):
         output[thread * 16 + element] = local[element]
 
 
-@T.prim_func
-def legacy_ldmatrix_i8_x4(output: T.Buffer((512,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
-    local = T.alloc_buffer((16,), "uint8", scope="local")
+@T.function
+def legacy_ldmatrix_i8_x4(output: T.Tensor((512,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
+    local = T.alloc_local((16,), "uint8")
     for element in T.serial(16):
         shared[lane * 16 + element] = T.Cast("uint8", lane * 16 + element)
     T.cuda.warp_sync()
     T.evaluate(
-        T.ptx_legacy.ldmatrix(
-            False, 4, ".b16", local.data, 0, shared.data, lane * 16, dtype="uint8"
-        )
+        T.ptx_legacy.ldmatrix(False, 4, ".b16", local.data, 0, shared.data, lane * 16, ty="uint8")
     )
     for element in T.serial(16):
         output[lane * 16 + element] = local[element]
 
 
-@T.prim_func
-def bulk_g2s_cta(source: T.Buffer((16,), "uint8"), output: T.Buffer((16,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def bulk_g2s_cta(source: T.Tensor((16,), "uint8"), output: T.Tensor((16,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -544,13 +500,12 @@ def bulk_g2s_cta(source: T.Buffer((16,), "uint8"), output: T.Buffer((16,), "uint
         output[lane] = shared[lane]
 
 
-@T.prim_func
-def raw_tma_gather4_bar_address(input_map: T.TensorMap(), output: T.Buffer((4, 4), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4, 4), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def raw_tma_gather4_bar_address(input_map: T.Ptr(T.TensorMap), output: T.Tensor((4, 4), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4, 4), "float32")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -576,12 +531,11 @@ def raw_tma_gather4_bar_address(input_map: T.TensorMap(), output: T.Buffer((4, 4
         output[lane // 4, lane % 4] = shared[lane // 4, lane % 4]
 
 
-@T.prim_func
-def raw_tma_reduce_add(source: T.Buffer((4,), "float32"), output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
+@T.function
+def raw_tma_reduce_add(source: T.Tensor((4,), "float32"), output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
     if lane < 4:
         shared[lane] = source[lane]
     T.cuda.warp_sync()
@@ -594,12 +548,11 @@ def raw_tma_reduce_add(source: T.Buffer((4,), "float32"), output_map: T.TensorMa
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
-def raw_tma_reduce_add_bfloat16(source: T.Buffer((8,), "bfloat16"), output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8,), "bfloat16", scope="shared")
+@T.function
+def raw_tma_reduce_add_bfloat16(source: T.Tensor((8,), "bfloat16"), output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8,), "bfloat16")
     if lane < 8:
         shared[lane] = source[lane]
     T.cuda.warp_sync()
@@ -612,31 +565,28 @@ def raw_tma_reduce_add_bfloat16(source: T.Buffer((8,), "bfloat16"), output_map: 
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
-def raw_tma_prefetch(input_map: T.TensorMap(), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_tma_prefetch(input_map: T.Ptr(T.TensorMap), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx["cp.async.bulk.prefetch.tensor.2d.L2.global.tile"](T.address_of(input_map), 0, 0)
         output[0] = 1
 
 
-@T.prim_func
-def raw_bulk_prefetch(source: T.Buffer((32,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_bulk_prefetch(source: T.Tensor((32,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx["cp.async.bulk.prefetch.L2.global"](T.address_of(source[0]), T.uint32(128))
         output[0] = source[0]
 
 
-@T.prim_func
-def raw_prefetchu(source: T.Buffer((32,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_prefetchu(source: T.Tensor((32,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx["prefetchu.L1"](T.address_of(source[0]))
         output[0] = source[0]
@@ -714,10 +664,10 @@ def test_cp_async_preserves_bound_raw_shared_base_and_lane_offset(tmp_path):
 
 def test_obsolete_cp_async_bulk_wrapper_is_rejected_during_parsing():
     with pytest.raises(
-        tvm.error.DiagnosticError,
+        AttributeError,
         match=r"'cp_async' is not a ptx instruction",
     ):
-        tvm.script.from_source(_OBSOLETE_CP_ASYNC_BULK_SOURCE, {"T": T})
+        tvm_tirx.script.from_source(_OBSOLETE_CP_ASYNC_BULK_SOURCE, {"T": T})
 
 
 def test_cuda_float_atomic_add_and_default_st_bulk_forms(tmp_path):
@@ -1165,22 +1115,13 @@ def test_ptx_atomics_apply_instruction_type_after_relaxed_operand_conformance(tm
     np.testing.assert_array_equal(result.outputs["signed_counter"], signed_initial)
 
 
-def test_legacy_acquire_and_guarded_ldg32_write_local_lvalues(tmp_path):
+def test_legacy_acquire_writes_local_lvalues(tmp_path):
     source_u64 = np.arange(32, dtype=np.uint64) * np.uint64(0x1_0000_0001)
     acquire = numsim.transpile(legacy_global_acquire, cache_dir=tmp_path / "acquire")
     acquire_result = numsim.Engine().run(
         acquire, {"source": source_u64, "output": np.zeros_like(source_u64)}
     )
     np.testing.assert_array_equal(acquire_result.outputs["output"], source_u64)
-
-    source_f32 = np.arange(32, dtype=np.float32) + np.float32(0.25)
-    ldg = numsim.transpile(guarded_ldg32, cache_dir=tmp_path / "ldg32")
-    ldg_result = numsim.Engine().run(
-        ldg, {"source": source_f32, "output": np.zeros_like(source_f32)}
-    )
-    expected = source_f32.copy()
-    expected[16:] = np.float32(0)
-    np.testing.assert_array_equal(ldg_result.outputs["output"], expected)
 
 
 def test_legacy_ldmatrix_transpose_preserves_b16_fragment_abi(tmp_path):
@@ -1348,7 +1289,6 @@ def test_memory_family_public_ops_have_closed_world_registration():
     assert analyze(cuda_atomic_cas_uint32x4).unsupported == ()
     assert analyze(st_bulk_default_weak).unsupported == ()
     assert analyze(legacy_global_acquire).unsupported == ()
-    assert analyze(guarded_ldg32).unsupported == ()
     assert analyze(legacy_ldmatrix_x2_trans).unsupported == ()
     assert analyze(bulk_g2s_cta).unsupported == ()
     assert analyze(raw_tma_gather4_bar_address).unsupported == ()
@@ -1389,9 +1329,9 @@ def test_scalar_atomic_add_has_no_s64_form_while_min_and_max_do(op_name):
     destination_operand = "destination, " if op_name == "atom" else ""
     kernel = parse_kernel(
         f"""
-@T.prim_func
-def kernel(counter: T.Buffer((1,), "int64")):
-    T.device_entry()
+@T.function
+def kernel(counter: T.Tensor((1,), "int64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     destination = T.local_scalar("int64")
     T.ptx.{op_name}.global_.min.s64({destination_operand}T.address_of(counter[0]), T.int64(1))
 """

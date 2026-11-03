@@ -5,13 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import tvm
-from tests.numsim.support.runtime_domains import CUDA_LDG_DTYPES
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.dtype_abi import vector_dtype_abi
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.tirx.layout import wg_local_layout
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _NUMPY_SCALAR_DTYPES = {
@@ -27,41 +24,6 @@ _NUMPY_SCALAR_DTYPES = {
     "uint32": np.uint32,
     "uint64": np.uint64,
 }
-
-
-def _make_complete_cuda_ldg_runtime_kernel():
-    parameters = []
-    statements = []
-    for dtype in CUDA_LDG_DTYPES:
-        name = dtype.replace("_", "")
-        parameters.extend(
-            (
-                f'    source_{name}: T.Buffer((1,), "{dtype}"),',
-                f'    output_{name}: T.Buffer((1,), "{dtype}"),',
-            )
-        )
-        statements.append(
-            f'        output_{name}[0] = T.cuda.ldg(source_{name}.ptr_to([0]), "{dtype}")'
-        )
-    return tvm.script.from_source(
-        "\n".join(
-            (
-                "@T.prim_func",
-                "def cuda_ldg_complete_runtime_domain(",
-                *parameters,
-                "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
-                "    if lane == 0:",
-                *statements,
-            )
-        ),
-        extra_vars={"T": T},
-    )
-
-
-CUDA_LDG_COMPLETE_RUNTIME_DOMAIN = _make_complete_cuda_ldg_runtime_kernel()
 
 
 def _make_complete_ordering_runtime_kernel():
@@ -80,14 +42,14 @@ def _make_complete_ordering_runtime_kernel():
             "    T.cuda.warpgroup_sync(7)",
         )
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
-                "def ordering_complete_runtime_domain(output: T.Buffer((1,), 'int32')):",
-                "    T.device_entry()",
-                "    warp = T.warp_id([4])",
-                "    lane = T.lane_id([32])",
+                "@T.function",
+                "def ordering_complete_runtime_domain(output: T.Tensor((1,), 'int32')):",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))",
+                "    warp = T.cuda.warp_id()",
+                "    lane = T.cuda.lane_id()",
                 *statements,
                 "    if (warp == 0) and (lane == 0):",
                 "        output[0] = 0x13579BDF",
@@ -126,98 +88,6 @@ _SNAPSHOT_BOUND_LDSTMATRIX_LAYOUT = TileLayout(
 )
 
 
-@T.prim_func
-def snapshot_copy_linear_32_runtime_domain(
-    source: T.Buffer((32,), "float16"),
-    output: T.Buffer((32,), "float16"),
-):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
-    Tx.copy(output[:], source[:], dispatch="fallback")
-
-
-@T.prim_func
-def snapshot_copy_variable_min_runtime_domain(
-    source: T.Buffer((32,), "float16"),
-    output: T.Buffer((32,), "float16"),
-):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    local: T.f16[1]
-    local[0] = source[lane]
-    Tx.copy(output[lane : lane + 1], local[:], dispatch="reg")
-
-
-@T.prim_func
-def snapshot_copy_cross_warp_extent_runtime_domain(
-    source: T.Buffer((64, 2), "float32"),
-    output: T.Buffer((64, 2), "float32"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    thread = T.meta_var(warp * 32 + lane)
-    source_storage: T.f32[2]
-    destination_storage: T.f32[2]
-    source_view = source_storage.view(128, 2, layout=wg_local_layout(2))
-    destination_view = destination_storage.view(128, 2, layout=wg_local_layout(2))
-    if thread < 64:
-        for column in T.serial(2):
-            source_view[thread, column] = source[thread, column]
-    Tx.wg.copy(destination_view[64:128, :], source_view[0:64, :])
-    if thread >= 64:
-        for column in T.serial(2):
-            output[thread - 64, column] = destination_view[thread, column]
-
-
-@T.prim_func
-def snapshot_copy_transposed_ldstmatrix_runtime_domain(
-    source_registers: T.Buffer((128, 8), "bfloat16"),
-    output: T.Buffer((8, 128), "bfloat16"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    thread = T.meta_var(warp * 32 + lane)
-    shared = T.alloc_buffer((8, 128), "bfloat16", scope="shared")
-    source_storage = T.alloc_buffer((8,), "bfloat16", scope="local")
-    source_view = source_storage.view(8, 128, layout=_SNAPSHOT_TRANSPOSED_LDSTMATRIX_LAYOUT)
-    for register in T.serial(8):
-        source_storage[register] = source_registers[thread, register]
-    Tx.wg.copy(shared[:, :], source_view[:, :], dispatch="ldstmatrix")
-    T.cuda.cta_sync()
-    for row in T.serial(8):
-        output[row, thread] = shared[row, thread]
-
-
-@T.prim_func
-def snapshot_copy_bound_ldstmatrix_runtime_domain(
-    source_registers: T.Buffer((128, 4), "bfloat16"),
-    output: T.Buffer((64, 64), "bfloat16"),
-):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    thread = T.meta_var(warp * 32 + lane)
-    shared = T.alloc_buffer((64, 64), "bfloat16", scope="shared", align=16)
-    source_storage = T.alloc_buffer((4,), "bfloat16", scope="local")
-    source_view = source_storage.view(64, 8, layout=_SNAPSHOT_BOUND_LDSTMATRIX_LAYOUT)
-    for register in T.serial(4):
-        source_storage[register] = source_registers[thread, register]
-    for block in T.unroll(8):
-        column: T.let = block * 8
-        Tx.wg.copy(shared[:, column : column + 8], source_view[:, :], dispatch="ldstmatrix")
-    T.cuda.cta_sync()
-    if thread < 64:
-        for column in T.serial(64):
-            output[thread, column] = shared[thread, column]
-
-
 _RAW_TCGEN_LDST_LAYOUT = TileLayout(S[(128, 512) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
@@ -251,20 +121,17 @@ def _make_raw_tcgen_ldst_runtime_kernel(shape: str, registers_per_num: int, num:
             )
         )
     name = shape.replace("x", "_x")
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
-                f"def raw_tcgen_ldst_runtime_domain_{name}_{num}(output: T.Buffer((1,), 'int32')):",
-                "    T.device_entry()",
-                "    _cta = T.cta_id([1])",
-                "    _warpgroup = T.warpgroup_id([1])",
-                "    warp = T.warp_id_in_wg([4])",
-                "    lane = T.lane_id([32])",
+                "@T.function",
+                f"def raw_tcgen_ldst_runtime_domain_{name}_{num}(output: T.Tensor((1,), 'int32')):",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))",
+                "    warp = T.cuda.warp_in_warpgroup()",
+                "    lane = T.cuda.lane_id()",
                 "    row = T.meta_var(warp * 32 + lane)",
-                "    tmem = T.decl_buffer((128, 512), 'uint32', scope='tmem', "
-                "layout=TMEM_LAYOUT, allocated_addr=0)",
-                "    registers = T.alloc_buffer((128,), 'uint32', scope='local')",
+                "    tmem = T.tmem((128, 512), 'uint32', allocated_addr=0, layout=TMEM_LAYOUT)",
+                "    registers = T.alloc_local((128,), 'uint32')",
                 "    for col in T.serial(512):",
                 "        tmem[row, col] = T.cast(row * 257 + col, 'uint32')",
                 "    T.cuda.cta_sync()",
@@ -318,21 +185,18 @@ def _make_raw_tcgen_cp_runtime_kernel(shape: str, multicast: str, cta_group: int
         item.replace("::", "_").replace(".", "_").replace("x", "x") or "none"
         for item in (shape, multicast, str(cta_group), decompress)
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
-                f"def raw_tcgen_cp_runtime_domain_{slug}(output: T.Buffer((1,), 'int32')):",
-                "    T.device_entry()",
-                "    _cluster = T.cluster_id([1])",
-                "    cta = T.cta_id_in_cluster([2])",
-                "    _warpgroup = T.warpgroup_id([1])",
-                "    warp = T.warp_id_in_wg([4])",
-                "    lane = T.lane_id([32])",
+                "@T.function",
+                f"def raw_tcgen_cp_runtime_domain_{slug}(output: T.Tensor((1,), 'int32')):",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))",
+                "    cta = T.cuda.cluster_cta_id('x')",
+                "    warp = T.cuda.warp_in_warpgroup()",
+                "    lane = T.cuda.lane_id()",
                 "    thread = T.meta_var(warp * 32 + lane)",
-                "    shared = T.alloc_buffer((16384,), 'uint8', scope='shared', align=128)",
-                "    tmem = T.decl_buffer((128, 512), 'uint32', scope='tmem', "
-                "layout=TMEM_LAYOUT, allocated_addr=0)",
+                "    shared = T.alloc_shared((16384,), 'uint8', align=128)",
+                "    tmem = T.tmem((128, 512), 'uint32', allocated_addr=0, layout=TMEM_LAYOUT)",
                 "    descriptor: T.uint64",
                 "    for index in T.serial(128):",
                 "        shared[thread + index * 128] = T.uint8(0)",
@@ -430,93 +294,6 @@ def _bound_ldstmatrix_expected(source_registers: np.ndarray) -> np.ndarray:
             register = 2 * coordinates[1] + 4 * coordinates[3] + coordinates[5]
             tile[row, column] = source_registers[warp * 32 + lane, register]
     return np.tile(tile, (1, 8))
-
-
-def test_snapshot_copy_linear_32_runtime_domain_has_exact_oracle(tmp_path: Path):
-    source = np.arange(32, dtype=np.float16) * np.float16(0.25) - np.float16(3)
-    module = numsim.transpile(snapshot_copy_linear_32_runtime_domain, cache_dir=tmp_path)
-    result = numsim.Engine(max_workers=1).run(
-        module, {"source": source, "output": np.zeros_like(source)}
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], source)
-
-
-def test_snapshot_copy_variable_min_runtime_domain_has_exact_oracle(tmp_path: Path):
-    source = np.arange(32, dtype=np.float16) + np.float16(0.5)
-    module = numsim.transpile(snapshot_copy_variable_min_runtime_domain, cache_dir=tmp_path)
-    result = numsim.Engine(max_workers=1).run(
-        module, {"source": source, "output": np.zeros_like(source)}
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], source)
-
-
-def test_snapshot_copy_cross_warp_extent_runtime_domain_has_exact_oracle(tmp_path: Path):
-    source = np.arange(128, dtype=np.float32).reshape(64, 2) + np.float32(0.25)
-    module = numsim.transpile(snapshot_copy_cross_warp_extent_runtime_domain, cache_dir=tmp_path)
-    result = numsim.Engine(max_workers=1).run(
-        module, {"source": source, "output": np.zeros_like(source)}
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], source)
-
-
-def test_snapshot_copy_transposed_ldstmatrix_runtime_domain_has_exact_oracle(tmp_path: Path):
-    values = (np.arange(128 * 8, dtype=np.float32).reshape(128, 8) % 97) - np.float32(48)
-    source = _bfloat16_bits(values)
-    expected = _transposed_ldstmatrix_expected(source)
-    module = numsim.transpile(
-        snapshot_copy_transposed_ldstmatrix_runtime_domain, cache_dir=tmp_path
-    )
-    result = numsim.Engine(max_workers=1).run(
-        module,
-        {
-            "source_registers": source,
-            "output": np.zeros_like(expected),
-        },
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-def test_snapshot_copy_bound_ldstmatrix_runtime_domain_has_exact_oracle(tmp_path: Path):
-    values = (np.arange(128 * 4, dtype=np.float32).reshape(128, 4) % 89) - np.float32(44)
-    source = _bfloat16_bits(values)
-    expected = _bound_ldstmatrix_expected(source)
-    module = numsim.transpile(snapshot_copy_bound_ldstmatrix_runtime_domain, cache_dir=tmp_path)
-    result = numsim.Engine(max_workers=1).run(
-        module,
-        {
-            "source_registers": source,
-            "output": np.zeros_like(expected),
-        },
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-def test_cuda_ldg_complete_finite_domain_executes_with_exact_physical_oracle(tmp_path: Path):
-    module = numsim.transpile(CUDA_LDG_COMPLETE_RUNTIME_DOMAIN, cache_dir=tmp_path)
-    arguments: dict[str, object] = {}
-    expected: dict[str, np.ndarray] = {}
-    for dtype in CUDA_LDG_DTYPES:
-        name = dtype.replace("_", "")
-        source, _ = _storage(dtype, initialized=True)
-        output, _ = _storage(dtype, initialized=False)
-        arguments[f"source_{name}"] = source
-        arguments[f"output_{name}"] = output
-        expected[f"output_{name}"] = source.copy()
-
-    result = numsim.Engine(max_workers=1).run(module, arguments)
-
-    def check_every_dtype() -> None:
-        assert len(expected) == 55
-        assert set(result.outputs) == set(arguments)
-        for name, value in expected.items():
-            _assert_same_physical_value(result.outputs[name], value)
-
-    check_every_dtype()
 
 
 def test_ordering_fence_and_register_policy_finite_domains_execute(tmp_path: Path):

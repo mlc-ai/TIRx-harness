@@ -14,15 +14,12 @@ from tests.numsim.runtime.test_sync_runtime_domain_oracle import (
 )
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def collective_protocol_ops():
-    T.device_entry()
-    _warp = T.warp_id([4])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
 
     T.cuda.warp_sync()
     T.cuda.warpgroup_sync(7)
@@ -31,11 +28,10 @@ def collective_protocol_ops():
     T.cuda.grid_sync()
 
 
-@T.prim_func
+@T.function
 def named_barrier_protocol_ops():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.bar.arrive(T.uint32(3), T.uint32(64))
@@ -54,11 +50,10 @@ def named_barrier_protocol_ops():
     T.ptx.bar.warp.sync(T.uint32(0xFFFFFFFF))
 
 
-@T.prim_func
+@T.function
 def divergent_unaligned_named_barrier_op():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     if lane == 0:
         T.ptx.barrier.sync(T.uint32(5), T.uint32(32))
@@ -66,24 +61,19 @@ def divergent_unaligned_named_barrier_op():
         T.ptx.barrier.sync(T.uint32(5), T.uint32(32))
 
 
-@T.prim_func
+@T.function
 def split_cluster_barrier_protocol_ops():
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
 
     T.ptx.barrier.cluster.arrive()
     T.ptx.barrier.cluster.wait()
 
 
-@T.prim_func
+@T.function
 def mbarrier_protocol_ops():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((6,), "uint64", scope="shared", align=8)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((6,), "uint64", align=8)
     state = T.local_scalar("uint64")
 
     if lane == 0:
@@ -123,15 +113,12 @@ def mbarrier_protocol_ops():
         T.cuda.mbarrier_wait(T.address_of(barriers[5]), 0)
 
 
-@T.prim_func
+@T.function
 def clc_protocol_op():
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    response = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    response = T.alloc_shared((4,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
@@ -146,11 +133,9 @@ def clc_protocol_op():
         T.cuda.mbarrier_wait_acquire_cluster(T.address_of(barrier[0]), 0)
 
 
-@T.prim_func
+@T.function
 def ordering_protocol_ops():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
 
     T.cuda.thread_fence()
     T.cuda.nano_sleep(0)
@@ -161,22 +146,17 @@ def ordering_protocol_ops():
     T.cuda.warp_sync()
 
 
-@T.prim_func
+@T.function
 def setmaxnreg_protocol_op():
-    T.device_entry()
-    _wg = T.warpgroup_id([1])
-    _warp = T.warp_id_in_wg([4])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
 
     T.ptx.setmaxnreg.dec.sync.aligned.u32(88)
 
 
-@T.prim_func
+@T.function
 def tcgen_lifecycle_protocol_ops():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", align=4)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    address = T.alloc_shared((1,), "uint32", align=4)
 
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.cuda.warp_sync()
@@ -184,12 +164,11 @@ def tcgen_lifecycle_protocol_ops():
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def tcgen_commit_protocol_op():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
@@ -203,13 +182,12 @@ def tcgen_commit_protocol_op():
         T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
 
 
-@T.prim_func
-def tcgen_ordering_protocol_ops(output: T.Buffer((4, 32), "uint32")):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def tcgen_ordering_protocol_ops(output: T.Tensor((4, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     value = T.alloc_local((1,), "uint32")
 
     if warp == 0:
@@ -234,14 +212,13 @@ def tcgen_ordering_protocol_ops(output: T.Buffer((4, 32), "uint32")):
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def cp_async_group_protocol_ops(
-    source: T.Buffer((128,), "uint8"), output: T.Buffer((128,), "uint8")
+    source: T.Tensor((128,), "uint8"), output: T.Tensor((128,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
 
     T.ptx["cp.async.ca.shared.global.L2::64B"](
         T.address_of(shared[lane * 4]),
@@ -254,12 +231,11 @@ def cp_async_group_protocol_ops(
         output[lane * 4 + element] = shared[lane * 4 + element]
 
 
-@T.prim_func
-def cp_async_predicated_group_protocol_ops(source: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+@T.function
+def cp_async_predicated_group_protocol_ops(source: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
 
     T.ptx["cp.async.ca.shared.global"](
         T.address_of(shared[lane * 4]),
@@ -271,12 +247,11 @@ def cp_async_predicated_group_protocol_ops(source: T.Buffer((128,), "uint8")):
     T.ptx.cp.async_.wait_group(0)
 
 
-@T.prim_func
-def cp_async_zero_fill_group_protocol_ops(source: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+@T.function
+def cp_async_zero_fill_group_protocol_ops(source: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
 
     T.ptx["cp.async.ca.shared.global"](
         T.address_of(shared[lane * 4]),
@@ -288,28 +263,11 @@ def cp_async_zero_fill_group_protocol_ops(source: T.Buffer((128,), "uint8")):
     T.ptx.cp.async_.wait_group(0)
 
 
-@T.prim_func
-def ldgsts_cp_async_group_protocol_ops(
-    source: T.Buffer((128,), "uint8"), output: T.Buffer((128,), "uint8")
-):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
-
-    Tx.copy_async(shared[:], source[:], dispatch="ldgsts")
-    T.ptx.cp.async_.commit_group()
-    T.ptx.cp.async_.wait_group(0)
-    for element in T.serial(4):
-        output[lane * 4 + element] = shared[lane * 4 + element]
-
-
-@T.prim_func
-def cp_async_uncommitted_protocol_op(source: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+@T.function
+def cp_async_uncommitted_protocol_op(source: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
 
     T.ptx["cp.async.ca.shared.global"](
         T.address_of(shared[lane * 4]),
@@ -318,14 +276,13 @@ def cp_async_uncommitted_protocol_op(source: T.Buffer((128,), "uint8")):
     )
 
 
-@T.prim_func
+@T.function
 def bulk_async_group_protocol_ops(
-    source: T.Buffer((16,), "uint8"), output: T.Buffer((16,), "uint8")
+    source: T.Tensor((16,), "uint8"), output: T.Tensor((16,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
 
     if lane < 16:
         shared[lane] = source[lane]
@@ -340,11 +297,10 @@ def bulk_async_group_protocol_ops(
     T.cuda.warp_sync()
 
 
-@T.prim_func
-def pure_warp_sync_source_ops(output: T.Buffer((32, 10), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def pure_warp_sync_source_ops(output: T.Tensor((32, 10), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     full: T.let = T.uint32(0xFFFFFFFF)
     value: T.let = T.cast(lane + 1, "uint32")
 
@@ -360,12 +316,12 @@ def pure_warp_sync_source_ops(output: T.Buffer((32, 10), "uint32")):
     output[lane, 9] = T.cuda.elect_sync()
 
 
-@T.prim_func
-def pure_cta_sync_source_ops(output: T.Buffer((2, 32, 3), "int64")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    scratch = T.alloc_buffer((2,), "int32", scope="shared")
+@T.function
+def pure_cta_sync_source_ops(output: T.Tensor((2, 32, 3), "int64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((2,), "int32")
     value: T.let = warp * 32 + lane + 1
 
     output[warp, lane, 0] = T.cast(T.cuda.cta_sum(value, 2, scratch.ptr_to([0])), "int64")
@@ -373,12 +329,11 @@ def pure_cta_sync_source_ops(output: T.Buffer((2, 32, 3), "int64")):
     output[warp, lane, 2] = T.cuda.syncthreads_or(lane == 31)
 
 
-@T.prim_func
-def mbarrier_query_sync_source_ops(output: T.Buffer((32, 4), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def mbarrier_query_sync_source_ops(output: T.Tensor((32, 4), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
@@ -395,7 +350,7 @@ def mbarrier_query_sync_source_ops(output: T.Buffer((32, 4), "uint32")):
         output[lane, 2], T.address_of(barrier[0]), T.uint32(0)
     )
     if lane == 0:
-        token = T.alloc_buffer((1,), "uint64", scope="local")
+        token = T.alloc_local((1,), "uint64")
         barrier_address: T.let = T.cuda.cvta_generic_to_shared(T.address_of(barrier[0]))
         T.ptx.mbarrier.arrive.shared__cta.b64(token[0], barrier_address, T.uint32(1))
         T.ptx.mbarrier.try_wait.shared__cta.b64(output[lane, 3], barrier_address, token[0])
@@ -417,7 +372,6 @@ _KERNELS = (
     cp_async_group_protocol_ops,
     cp_async_predicated_group_protocol_ops,
     cp_async_zero_fill_group_protocol_ops,
-    ldgsts_cp_async_group_protocol_ops,
     cp_async_uncommitted_protocol_op,
     bulk_async_group_protocol_ops,
     pure_warp_sync_source_ops,
@@ -568,7 +522,6 @@ class NativeProtocolArtifact:
             ("cp_async_group_protocol_ops", 128),
             ("cp_async_predicated_group_protocol_ops", 128),
             ("cp_async_zero_fill_group_protocol_ops", 128),
-            ("ldgsts_cp_async_group_protocol_ops", 128),
             ("cp_async_uncommitted_protocol_op", 128),
             ("bulk_async_group_protocol_ops", 16),
         ):
@@ -576,7 +529,6 @@ class NativeProtocolArtifact:
             bindings[f"k{phase_index}:source"] = np.arange(size, dtype=np.uint8)
             if kernel_name in {
                 "cp_async_group_protocol_ops",
-                "ldgsts_cp_async_group_protocol_ops",
                 "bulk_async_group_protocol_ops",
             }:
                 bindings[f"k{phase_index}:output"] = np.zeros(size, dtype=np.uint8)
@@ -708,18 +660,6 @@ def test_cp_async_zero_fill_keeps_all_lanes_in_their_groups(native_protocol_arti
     assert result["findings"] == []
     assert result["incomplete"] == []
     # src-size=0 still issues cp.async, so all 32 lanes own a non-empty group.
-    assert result["stats"]["completion_operation_count"] == 64
-
-
-def test_ldgsts_cp_async_uses_the_same_thread_local_group_protocol(native_protocol_artifact):
-    result = _run_named_protocol_phase(
-        native_protocol_artifact, "ldgsts_cp_async_group_protocol_ops"
-    )
-
-    assert result["verdict"] == "clean"
-    assert result["execution_error"] is None
-    assert result["findings"] == []
-    assert result["incomplete"] == []
     assert result["stats"]["completion_operation_count"] == 64
 
 

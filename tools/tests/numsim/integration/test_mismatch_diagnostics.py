@@ -7,43 +7,40 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def two_direct_output_writers(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def two_direct_output_writers(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = lane
     output[lane] = lane + 100
 
 
-@T.prim_func
-def root_uniform_output_writers(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def root_uniform_output_writers(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         output[lane] = lane
     else:
         output[32 + lane] = lane + 100
 
 
-@T.prim_func
-def root_sync_output_writers(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def root_sync_output_writers(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = lane
     output[32 + lane] = lane + 100
 
 
-@T.prim_func
-def repeated_split_output_writers(output: T.Buffer((96,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def repeated_split_output_writers(output: T.Tensor((96,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[32 + lane] = lane + 7
     output[64 + lane] = lane + 11
 
@@ -58,11 +55,11 @@ def test_shared_split_preserves_each_writer_and_cached_module(tmp_path, monkeypa
         np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
-@T.prim_func
-def repeated_async_exchange(output: T.Buffer((96,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def repeated_async_exchange(output: T.Tensor((96,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((96,), "int32")
     if warp == 0:
         shared[32 + lane] = lane + 7
@@ -86,11 +83,11 @@ def test_shared_async_split_preserves_exchange_and_writers(tmp_path, monkeypatch
         np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
-@T.prim_func
-def inner_split_control_output_writers(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def inner_split_control_output_writers(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     uniform_live_in: T.let = (warp // 2) * 2
     if warp == 0:
         live_in: T.let = lane + 7
@@ -116,11 +113,11 @@ def inner_split_control_output_writers(output: T.Buffer((64,), "int32")):
         output[32 + lane] = lane + 100
 
 
-@T.prim_func
-def depth_two_inner_sequence_output_writers(output: T.Buffer((64,), "int32"), lane_limit: T.int32):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def depth_two_inner_sequence_output_writers(output: T.Tensor((64,), "int32"), lane_limit: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         if lane < lane_limit:
             for _outer in T.serial(1):
@@ -135,11 +132,11 @@ def depth_two_inner_sequence_output_writers(output: T.Buffer((64,), "int32"), la
         output[32 + lane] = lane + 100
 
 
-@T.prim_func
-def inner_while_sync_output_writers(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def inner_while_sync_output_writers(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         for _outer in T.serial(1):
             while output[lane] == 0:
@@ -149,11 +146,11 @@ def inner_while_sync_output_writers(output: T.Buffer((64,), "int32")):
         output[32 + lane] = lane + 100
 
 
-@T.prim_func
-def nested_live_in_output_writers(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def nested_live_in_output_writers(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     outer_live_in: T.let = lane + 7
     if warp == 0:
         for _outer in T.serial(1):
@@ -396,11 +393,11 @@ def test_inner_split_preserves_while_execution(monkeypatch, tmp_path):
     np.testing.assert_array_equal(split_run.outputs["output"], expected)
 
 
-@T.prim_func
-def varying_while_transfers(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def varying_while_transfers(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     counter = T.alloc_local((1,), "int32")
     if warp == 0:
         counter[0] = 0

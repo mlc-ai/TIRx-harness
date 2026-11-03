@@ -3,10 +3,9 @@
 import numpy as np
 import pytest
 
-from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tests.numsim.support.execution import run_checked, with_cuda_arch
 from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 
@@ -168,58 +167,62 @@ def ti16_kernel(
     st_scales = f"tcgen05.st.sync.aligned.32x32b.x{scale_columns}.b32"
     sfb_column = 104 if extended_scales else 100
 
-    @T.prim_func
+    @T.function
     def kernel(
-        a: T.Buffer((4, m, a_columns), "uint16"),
-        b: T.Buffer((b_rows * cta_group, k), "uint16"),
-        zero_mask: T.Buffer((1,), "uint64"),
-        metadata: T.Buffer((2, 128, metadata_columns), "uint32"),
-        seed: T.Buffer((m, n), "int32"),
-        out: T.Buffer((m, n), "int32"),
+        a: T.Tensor((4, m, a_columns), "uint16"),
+        b: T.Tensor((b_rows * cta_group, k), "uint16"),
+        zero_mask: T.Tensor((1,), "uint64"),
+        metadata: T.Tensor((2, 128, metadata_columns), "uint32"),
+        seed: T.Tensor((m, n), "int32"),
+        out: T.Tensor((m, n), "int32"),
     ):
-        T.device_entry()
-        _cluster = T.cluster_id([1])
-        cta = T.cta_id_in_cluster([cta_group])
-        _wg = T.warpgroup_id([1])
-        warp = T.warp_id_in_wg([4])
-        lane = T.lane_id([32])
-        address = T.alloc_buffer((1,), "uint32", scope="shared")
-        barrier = T.alloc_buffer((3,), "uint64", scope="shared")
+        T.device_entry(
+            launch=T.cuda.LaunchConfig(grid=(1) * cta_group, block=128, cluster=cta_group)
+        )
+        cta = T.cuda.cluster_cta_id("x")
+        warp = T.cuda.warp_in_warpgroup()
+        lane = T.cuda.lane_id()
+        address = T.alloc_shared((1,), "uint32")
+        barrier = T.alloc_shared((3,), "uint64")
         # Relative swizzle layouts need a base aligned to their full 256B period.
-        shared_a = T.alloc_buffer(
-            (shared_a_rows, a_columns * (2 if byte_a else 1)),
-            "uint8" if byte_a else "uint16",
-            scope="shared",
+        shared_a = T.alloc_shared(
+            (shared_a_rows, a_columns * (2 if T.constexpr(byte_a) else 1)),
+            "uint8" if T.constexpr(byte_a) else "uint16",
             layout=a_layout,
             align=512,
         )
-        shared_b = T.alloc_buffer(
-            (shared_b_rows, k * (2 if byte_b else 1)),
-            "uint8" if byte_b else "uint16",
-            scope="shared",
+        shared_b = T.alloc_shared(
+            (shared_b_rows, k * (2 if T.constexpr(byte_b) else 1)),
+            "uint8" if T.constexpr(byte_b) else "uint16",
             layout=b_layout,
-            align=1024 if sparse and wide_k else 512,
+            align=1024 if T.constexpr(sparse and wide_k) else 512,
         )
         regs = T.alloc_local((columns,), "int32")
         packed_a = T.alloc_local((a_columns // 2,), "uint32")
         desc_a: T.uint64
         desc_b: T.uint64
-        row = cta * rows + (warp * 16 + lane % 16 if half_layout else (warp * 32 + lane) % rows)
-        bank = 0 if half_layout else (warp * 32 + lane) // rows
+        row = cta * rows + (
+            warp * 16 + lane % 16 if T.constexpr(half_layout) else (warp * 32 + lane) % rows
+        )
+        bank = 0 if T.constexpr(half_layout) else (warp * 32 + lane) // rows
         if warp == 0 and lane == 0:
-            if byte_a:
-                Tx.copy(shared_a[:rows, :], a.view("uint8")[0, cta * rows : (cta + 1) * rows, :])
+            if T.constexpr(byte_a):
+                for _i0_0, _i0_1 in T.grid(rows, shared_a.shape[1]):
+                    shared_a[_i0_0, _i0_1] = a.view("uint8")[0, cta * rows + _i0_0, _i0_1]
             else:
-                Tx.copy(shared_a[:rows, :], a[0, cta * rows : (cta + 1) * rows, :])
-            if byte_b:
-                Tx.copy(shared_b[:b_rows, :], b.view("uint8")[cta * b_rows : (cta + 1) * b_rows, :])
+                for _i1_0, _i1_1 in T.grid(rows, shared_a.shape[1]):
+                    shared_a[_i1_0, _i1_1] = a[0, cta * rows + _i1_0, _i1_1]
+            if T.constexpr(byte_b):
+                for _i2_0, _i2_1 in T.grid(b_rows, shared_b.shape[1]):
+                    shared_b[_i2_0, _i2_1] = b.view("uint8")[cta * b_rows + _i2_0, _i2_1]
             else:
-                Tx.copy(shared_b[:b_rows, :], b[cta * b_rows : (cta + 1) * b_rows, :])
+                for _i3_0, _i3_1 in T.grid(b_rows, shared_b.shape[1]):
+                    shared_b[_i3_0, _i3_1] = b[cta * b_rows + _i3_0, _i3_1]
         if warp == 0:
             T.ptx[alloc](address.ptr_to([0]), 128)
             if lane == 0:
                 T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
-                if early_reuse is not None:
+                if T.constexpr(early_reuse is not None):
                     T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([1]), 1)
                     T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([2]), 1)
         T.ptx.fence.proxy.async_.shared__cta()
@@ -228,12 +231,12 @@ def ti16_kernel(
         for i in T.unroll(columns):
             regs[i] = seed[row, bank * columns + i]
         T.ptx[st](address[0], *[regs[i] for i in range(columns)])
-        if sparse or lut_b:
+        if T.constexpr(sparse or lut_b):
             T.ptx[f"tcgen05.st.sync.aligned.32x32b.x{sparse_words}.b32"](
                 address[0] + T.uint32(lookup_column),
                 *[metadata[cta, warp * 32 + lane, lookup_word + i] for i in range(sparse_words)],
             )
-        if block_scale:
+        if T.constexpr(block_scale):
             T.ptx[st_scales](
                 address[0] + T.uint32(96),
                 *[
@@ -241,7 +244,7 @@ def ti16_kernel(
                     for i in range(scale_columns)
                 ],
             )
-        if tmem_a:
+        if T.constexpr(tmem_a):
             for i in T.unroll(a_columns // 2):
                 packed_a[i] = T.Cast("uint32", a[bank, row, i * 2]) | (
                     T.Cast("uint32", a[bank, row, i * 2 + 1]) << 16
@@ -253,64 +256,76 @@ def ti16_kernel(
             T.cuda.tcgen05.encode_matrix_descriptor(
                 T.address_of(desc_a),
                 shared_a.ptr_to([0, 0]),
-                ldo=(32 if kind == "tf32" else 16) if transpose_a else 0,
-                sdo=rows // (2 if byte_a else 1) if transpose_a else 32 if wide_k else 16,
-                swizzle=(4 if kind == "tf32" else 1) if transpose_a else 2 if wide_k else 1,
+                ldo=(32 if T.constexpr(kind == "tf32") else 16) if T.constexpr(transpose_a) else 0,
+                sdo=rows // (2 if T.constexpr(byte_a) else 1)
+                if T.constexpr(transpose_a)
+                else 32
+                if T.constexpr(wide_k)
+                else 16,
+                swizzle=(4 if T.constexpr(kind == "tf32") else 1)
+                if T.constexpr(transpose_a)
+                else 2
+                if T.constexpr(wide_k)
+                else 1,
             )
             T.cuda.tcgen05.encode_matrix_descriptor(
                 T.address_of(desc_b),
                 shared_b.ptr_to([0, 0]),
-                ldo=(32 if kind == "tf32" else 16) if transpose_b else 0,
-                sdo=shared_b_rows // (2 if byte_b else 1)
-                if transpose_b
+                ldo=(32 if T.constexpr(kind == "tf32") else 16) if T.constexpr(transpose_b) else 0,
+                sdo=shared_b_rows // (2 if T.constexpr(byte_b) else 1)
+                if T.constexpr(transpose_b)
                 else 64
-                if wide_k and sparse
+                if T.constexpr(wide_k and sparse)
                 else 32
-                if sparse or wide_k
+                if T.constexpr(sparse or wide_k)
                 else 16,
-                swizzle=(4 if kind == "tf32" else 1)
-                if transpose_b
+                swizzle=(4 if T.constexpr(kind == "tf32") else 1)
+                if T.constexpr(transpose_b)
                 else 3
-                if wide_k and sparse
+                if T.constexpr(wide_k and sparse)
                 else 2
-                if sparse or wide_k
+                if T.constexpr(sparse or wide_k)
                 else 1,
             )
-            if lut_b:
+            if T.constexpr(lut_b):
                 desc_b = desc_b | T.uint64(lut_segment << 53)
             T.ptx[mma](
                 address[0],
-                *([address[0] + T.uint32(64)] if tmem_a else [desc_a]),
+                *([address[0] + T.uint32(64)] if T.constexpr(tmem_a) else [desc_a]),
                 desc_b,
-                *([address[0] + T.uint32(lookup_column)] if sparse else []),
-                *([address[0] + T.uint32(lut_address_offset)] if lut_b else []),
+                *([address[0] + T.uint32(lookup_column)] if T.constexpr(sparse) else []),
+                *([address[0] + T.uint32(lut_address_offset)] if T.constexpr(lut_b) else []),
                 T.uint32(descriptor),
                 *(
                     [address[0] + T.uint32(96), address[0] + T.uint32(sfb_column)]
-                    if block_scale
+                    if T.constexpr(block_scale)
                     else []
-                    if ws
+                    if T.constexpr(ws)
                     else [T.uint32(mask) for mask in masks]
                 ),
                 T.ptx.pred(T.uint32(enable_d)),
-                *([zero_mask[0]] if ws and mask_form else []),
+                *([zero_mask[0]] if T.constexpr(ws and mask_form) else []),
                 pred=(zero_mask[0] >> 63) == T.uint64(0),
             )
-            if early_reuse is not None:
+            if T.constexpr(early_reuse is not None):
                 # A second commit has no pending A token, but must retain the
                 # first commit's completed A frontier for its own mbarrier.
                 for phase in T.unroll(2):
                     T.ptx[restricted_commit](
                         barrier.ptr_to([phase + 1]),
-                        *([T.uint32((1 << cta_group) - 1)] if restricted_multicast else []),
+                        *(
+                            [T.uint32((1 << cta_group) - 1)]
+                            if T.constexpr(restricted_multicast)
+                            else []
+                        ),
                     )
                     T.cuda.mbarrier_wait(barrier.ptr_to([phase + 1]), 0)
                 T.ptx.fence.proxy.async_.shared__cta()
-                if early_reuse == "a":
+                if T.constexpr(early_reuse == "a"):
                     shared_a[0, 0] = T.uint16(42)
-                elif early_reuse == "b":
+                elif T.constexpr(early_reuse == "b"):
                     shared_b[0, 0] = T.uint16(42)
-            if early_reuse not in ("lookup", "lookup_tail", "tmem_a_tail"):
+            if T.constexpr(early_reuse not in ("lookup", "lookup_tail", "tmem_a_tail")):
                 T.ptx[commit](barrier.ptr_to([0]))
         if early_reuse in ("lookup", "lookup_tail", "tmem_a_tail") and cta == 0 and warp == 0:
             # A shared-A restricted wait does not retire LUT/metadata or TMEM A.
@@ -318,8 +333,8 @@ def ti16_kernel(
                 address[0]
                 + T.uint32(
                     72
-                    if early_reuse == "tmem_a_tail"
-                    else lookup_column + (2 if early_reuse == "lookup_tail" else 0)
+                    if T.constexpr(early_reuse == "tmem_a_tail")
+                    else lookup_column + (2 if T.constexpr(early_reuse == "lookup_tail") else 0)
                 ),
                 T.uint32(0),
                 T.uint32(0),
@@ -340,7 +355,7 @@ def ti16_kernel(
             T.ptx[dealloc](address[0], 128)
             T.ptx[relinquish]()
 
-    return kernel.with_attr("tirx.cuda_arch", "sm_107a" if kind == "ti16" else arch)
+    return with_cuda_arch(kernel, "sm_107a" if kind == "ti16" else arch)
 
 
 @pytest.mark.parametrize(

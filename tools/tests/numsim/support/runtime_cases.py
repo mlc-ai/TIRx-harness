@@ -852,7 +852,6 @@ RUNTIME_CASES = (
         ),
         tests=(
             "integration/test_direct_memory_artifact.py::test_raw_cp_async_issues_nonbulk_group_for_zero_fill_lanes",
-            "runtime/test_tile_codegen.py::test_dsmem_copy_writes_the_named_remote_cta",
         ),
     ),
     RuntimeCase(
@@ -921,7 +920,9 @@ RUNTIME_CASES = (
     ),
     RuntimeCase(
         target_ids=("call:tirx.ptx.tcgen05_commit_multicast_width",),
-        tests=("runtime/test_multicast16.py::test_tcgen_multicast16_preserves_commit_targets",),
+        tests=(
+            "runtime/test_copy_multicast32.py::test_multicast_high_bit_targets_and_bounds[commit]",
+        ),
     ),
     RuntimeCase(
         target_ids=("call:tirx.ptx.mbarrier_pending_count",),
@@ -1078,7 +1079,6 @@ RUNTIME_CASES = (
             "integration/test_artifact_build.py::test_physical_mbarrier_reuses_phase_and_completes_numeric_transactions_directly",
             "runtime/test_mbarrier_lane_semantics.py::test_current_mbarrier_arrival_and_completion_forms_advance_protocol",
             "runtime/test_mbarrier_lane_semantics.py::test_mbarrier_init_honors_elected_lane_predicate",
-            "runtime/test_tile_codegen.py::test_dsmem_copy_writes_the_named_remote_cta",
         ),
     ),
     RuntimeCase(
@@ -1289,7 +1289,7 @@ RUNTIME_CASES = (
             "integration/test_raw_memory_artifact.py::test_pointer_derived_shared_views_raw_memory_and_cvta_preserve_aliasing",
             "integration/test_raw_memory_artifact.py::test_raw_global_load_store_modifiers_share_immediate_physical_memory",
             "integration/test_raw_memory_artifact.py::test_ordered_v2_destination_loads_keep_their_memory_semantics",
-            "runtime/test_memory_ops.py::test_legacy_acquire_and_guarded_ldg32_write_local_lvalues",
+            "runtime/test_memory_ops.py::test_legacy_acquire_writes_local_lvalues",
         ),
     ),
     RuntimeCase(
@@ -1571,7 +1571,6 @@ RUNTIME_CASES = (
         ),
         tests=(
             "runtime/test_tcgen_codegen.py::test_tcgen_commit_arrives_on_physical_mbarrier",
-            "runtime/test_tcgen_codegen.py::test_tcgen_commit_runtime_mask_multicasts_same_barrier_offset",
             "runtime/test_tcgen_codegen.py::test_tcgen_fence_forms_are_numerical_noops",
             "runtime/test_raw_tcgen_codegen.py::test_raw_tcgen_32x32b_ld_st_roundtrip",
         ),

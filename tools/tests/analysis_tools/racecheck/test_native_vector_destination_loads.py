@@ -13,15 +13,15 @@ import numpy as np
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def barrier_ordered_v2_destination_load(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "int32", scope="shared")
+@T.function
+def barrier_ordered_v2_destination_load(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "int32")
     pair = T.alloc_local((2,), "int32")
     if warp == 0:
         for index in T.unroll(2):
@@ -33,12 +33,12 @@ def barrier_ordered_v2_destination_load(output: T.Buffer((64,), "int32")):
             output[lane * 2 + index] = pair[index]
 
 
-@T.prim_func
-def unordered_v2_destination_load(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "int32", scope="shared")
+@T.function
+def unordered_v2_destination_load(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "int32")
     pair = T.alloc_local((2,), "int32")
     if warp == 0:
         for index in T.unroll(2):
@@ -49,12 +49,12 @@ def unordered_v2_destination_load(output: T.Buffer((64,), "int32")):
             output[lane * 2 + index] = pair[index]
 
 
-@T.prim_func
-def barrier_ordered_acquire_v2_destination_load(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "int32", scope="shared")
+@T.function
+def barrier_ordered_acquire_v2_destination_load(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "int32")
     pair = T.alloc_local((2,), "int32")
     if warp == 0:
         for index in T.unroll(2):

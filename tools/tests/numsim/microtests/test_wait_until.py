@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.microtests.harness import (
     NUMSIM_GPU_MARK,
     require_numsim_gpu,
@@ -12,7 +12,7 @@ from tests.numsim.microtests.harness import (
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.three_way import run_three_way_case
 from tests.numsim.support.wait_until import handoff_case, initial_case
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 @NUMSIM_GPU_MARK
@@ -43,12 +43,12 @@ def test_indexed_predicate_matches_gpu(pytestconfig, tmp_path, alias, table_size
 def test_bitwise_wait_predicate_rechecks_loaded_value(pytestconfig, tmp_path, operation):
     require_numsim_gpu(pytestconfig)
     extra = "" if operation == "bitwise_not" else ", T.int32(3)"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def wait(state: T.Buffer((32,), "int32"), out: T.Buffer((32,), "int32")):
-    T.device_entry()
-    lane = T.thread_id([32])
+@T.function
+def wait(state: T.Tensor((32,), "int32"), out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.linear_thread_id()
     seen = T.alloc_local((1,), "int32")
     seen[0] = 999
     T.cuda.wait_until(seen[0], state.ptr_to([lane]),

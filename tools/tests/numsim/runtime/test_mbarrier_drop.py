@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 DROP_FORMS = (
     "nocount",
@@ -36,14 +36,13 @@ def drop_kernel(form, *, drop=True, count=None):
         args.append(
             f"T.uint32({count if count is not None else 16 if 'expect_tx' in form else amount})"
         )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def dropped(out: T.Buffer((3,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def dropped(out: T.Tensor((3,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     state = T.alloc_local((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     if lane == 0:

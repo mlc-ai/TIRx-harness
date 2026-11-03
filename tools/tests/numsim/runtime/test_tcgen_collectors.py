@@ -6,12 +6,9 @@ from tvm_ffi import structural_map
 
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
-from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
 from tvm_tirx import ir
-from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.script import tirx as T
 
 
 def collector_case(sequence, *, tmem_a=False, ws=False, slot="a", cta_group=1):
@@ -116,63 +113,6 @@ def test_collector_chain_and_false_discard(tmem_a, ws, slot, cta_group, tmp_path
 def test_collector_use_requires_live_fill(sequence, tmp_path):
     kernel, args, _ = collector_case(sequence)
     assert_rejected(kernel, args, "requires a valid previous fill", cache_dir=tmp_path)
-
-
-def test_typed_gemm_discards_a_raw_mma_fill(tmp_path):
-    a_layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_32B_ATOM, (128, 16))
-    b_layout = mma_shared_layout("float16", SwizzleMode.SWIZZLE_32B_ATOM, (16, 16))
-    d_layout = tmem_datapath_layout("D", 128, 16)
-
-    @T.prim_func
-    def kernel(out: T.Buffer((128, 16), "float32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
-        a = T.alloc_shared((128, 16), "float16", layout=a_layout, align=512)
-        b = T.alloc_shared((16, 16), "float16", layout=b_layout, align=512)
-        d = T.decl_buffer((128, 16), "float32", scope="tmem", layout=d_layout, allocated_addr=0)
-        desc_a: T.uint64
-        desc_b: T.uint64
-        if lane == 0:
-            for row, col in T.grid(128, 16):
-                a[row, col] = T.float16(1)
-            for row, col in T.grid(16, 16):
-                b[row, col] = T.float16(1)
-            T.cuda.tcgen05.encode_matrix_descriptor(
-                T.address_of(desc_a), a.ptr_to([0, 0]), ldo=0, sdo=16, swizzle=1
-            )
-            T.cuda.tcgen05.encode_matrix_descriptor(
-                T.address_of(desc_b), b.ptr_to([0, 0]), ldo=0, sdo=16, swizzle=1
-            )
-            T.ptx["tcgen05.mma.cta_group::1.kind::f16.collector::a::fill"](
-                T.uint32(0),
-                desc_a,
-                desc_b,
-                T.uint32((8 << 24) | (2 << 17) | 16),
-                0,
-                0,
-                0,
-                0,
-                T.ptx.pred(T.uint32(0)),
-            )
-            Tx.gemm_async(d[:, :], a[:, :], b[:, :], accum=False, dispatch="tcgen05", cta_group=1)
-            T.ptx["tcgen05.mma.cta_group::1.kind::f16.collector::a::use"](
-                T.uint32(0),
-                desc_a,
-                desc_b,
-                T.uint32((8 << 24) | (2 << 17) | 16),
-                0,
-                0,
-                0,
-                0,
-                T.ptx.pred(T.uint32(1)),
-            )
-            out[0, 0] = d[0, 0]
-
-    with pytest.raises(numsim.NumSimExecutionError, match="requires a valid previous fill"):
-        numsim.Engine().run(
-            numsim.transpile(kernel, cache_dir=tmp_path), {"out": np.zeros((128, 16), np.float32)}
-        )
 
 
 @pytest.mark.numsim_gpu

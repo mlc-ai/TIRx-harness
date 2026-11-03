@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 BAR_REDUCE_FORMS = [
     (name, op, counted)
@@ -35,14 +35,14 @@ def bar_reduce_kernel(name, op, counted, *, count=None, barrier_id=None, synchro
     )
     if not synchronize:
         body = "T.evaluate(0)"
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def reduction(out: T.Buffer((3, 4, 32, 2), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4, 32), "uint32", scope="shared")
+@T.function
+def reduction(out: T.Tensor((3, 4, 32, 2), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4, 32), "uint32")
     result = T.alloc_local((1,), "uint32")
     result[0] = 0
     for phase in T.serial(3):

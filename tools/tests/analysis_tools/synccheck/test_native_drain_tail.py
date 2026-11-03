@@ -7,18 +7,18 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_drain_tail_mbarrier(
-    work_total: T.int32, probe_oob: T.int32, output: T.Buffer((1,), "int32")
+    work_total: T.int32, probe_oob: T.int32, output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    ready = T.alloc_buffer((1,), "uint64", scope="shared")
-    free = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    ready = T.alloc_shared((1,), "uint64")
+    free = T.alloc_shared((1,), "uint64")
     iteration = T.local_scalar("int32")
     phase = T.local_scalar("int32")
 

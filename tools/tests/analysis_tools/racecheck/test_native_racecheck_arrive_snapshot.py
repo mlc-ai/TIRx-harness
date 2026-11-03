@@ -8,18 +8,18 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_racecheck_arrive_snapshot(
-    producer_warp: T.int32, overwrite: T.int32, output: T.Buffer((1,), "int32")
+    producer_warp: T.int32, overwrite: T.int32, output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
+    barrier = T.alloc_shared((1,), "uint64")
 
     if (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)

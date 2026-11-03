@@ -7,7 +7,7 @@ import pytest
 from tests.numsim.microtests.harness import PairedBuffer
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tests.numsim.support.register_cases import masked_arithmetic_case
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def logic_carrier_case(width, operand=None):
@@ -54,23 +54,22 @@ def test_logic_carriers_preserve_bits_and_masks(width, tmp_path):
 def test_half_reinterpret_preserves_storage_payloads(gpu_runner, tmp_path):
     for dtype in ("float16", "bfloat16"):
 
-        @T.prim_func
+        @T.function
         def kernel(
-            raw: T.Buffer((32,), "uint16"),
-            typed: T.Buffer((32,), dtype),
-            output: T.Buffer((4, 32), "uint16"),
+            raw: T.Tensor((32,), "uint16"),
+            typed: T.Tensor((32,), dtype),
+            output: T.Tensor((4, 32), "uint16"),
         ):
-            T.device_entry()
-            _warp = T.warp_id([1])
-            lane = T.lane_id([32])
+            T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+            lane = T.cuda.lane_id()
             value = T.alloc_local((1,), dtype)
             bits = value.view("uint16")
             T.ptx.xor.b16(value[0], typed[lane], T.cast(0, dtype))
             output[0, lane] = bits[0]
-            output[1, lane] = T.reinterpret("uint16", value[0])
-            T.ptx.xor.b16(value[0], T.reinterpret(dtype, raw[lane]), T.cast(0, dtype))
+            output[1, lane] = T.reinterpret(value[0], ty="uint16")
+            T.ptx.xor.b16(value[0], T.reinterpret(raw[lane], ty=dtype), T.cast(0, dtype))
             output[2, lane] = bits[0]
-            output[3, lane] = T.reinterpret("uint16", value[0])
+            output[3, lane] = T.reinterpret(value[0], ty="uint16")
 
         # Both formats' signaling NaNs, negative payloads, signed zero and subnormals.
         raw = np.resize(
@@ -90,11 +89,10 @@ def test_half_reinterpret_preserves_storage_payloads(gpu_runner, tmp_path):
 
 
 def test_selp_does_not_make_source_evaluation_lazy(tmp_path):
-    @T.prim_func
-    def kernel(source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         T.ptx.selp.b32(output[lane], source[32], source[lane], T.bool(False))
 
     inputs = dict(source=np.arange(32, dtype=np.uint32), output=np.zeros(32, np.uint32))

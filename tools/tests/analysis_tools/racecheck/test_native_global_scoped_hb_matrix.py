@@ -4,18 +4,18 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def same_cluster_message_passing(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id_in_cluster([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     if (cta == 0) and (lane == 0):
         data[0] = T.int32(17)
@@ -26,30 +26,30 @@ def same_cluster_message_passing(
         output[0] = data[0]
 
 
-@T.prim_func
+@T.function
 def host_initialized_global_reads(
-    source: T.Buffer((1,), "int32"),
-    output: T.Buffer((2,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx.ld.acquire.gpu.global_.s32(output[cta], source.ptr_to([0]))
 
 
-@T.prim_func
+@T.function
 def exact_read_from_same_value_or_aba(
     aba: T.int32,
-    data: T.Buffer((2,), "int32"),
-    flag: T.Buffer((1,), "uint32"),
-    turn: T.Buffer((1,), "uint32"),
-    ready: T.Buffer((1,), "uint32"),
-    output: T.Buffer((2,), "int32"),
+    data: T.Tensor((2,), "int32"),
+    flag: T.Tensor((1,), "uint32"),
+    turn: T.Tensor((1,), "uint32"),
+    ready: T.Tensor((1,), "uint32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([3])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("uint32")
     if (cta == 0) and (lane == 0):
         data[0] = T.int32(11)
@@ -73,16 +73,16 @@ def exact_read_from_same_value_or_aba(
         output[1] = data[1]
 
 
-@T.prim_func
+@T.function
 def lane_precise_publication(
     mode: T.int32,
-    data: T.Buffer((2,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((2,), "int32"),
+    data: T.Tensor((2,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id_in_cluster([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     if cta == 0:
         if mode <= 1:
@@ -121,18 +121,18 @@ def lane_precise_publication(
             output[1] = data[1]
 
 
-@T.prim_func
+@T.function
 def rmw_release_sequence_matrix(
     mode: T.int32,
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "uint32"),
-    turn: T.Buffer((1,), "uint32"),
-    ready: T.Buffer((1,), "uint32"),
-    output: T.Buffer((3,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "uint32"),
+    turn: T.Tensor((1,), "uint32"),
+    ready: T.Tensor((1,), "uint32"),
+    output: T.Tensor((3,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([3])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("uint32")
     old = T.local_scalar("uint32")
     if mode == 2:
@@ -165,17 +165,17 @@ def rmw_release_sequence_matrix(
         output[0] = data[0]
 
 
-@T.prim_func
+@T.function
 def torn_scoped_observation(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "uint64"),
-    turn: T.Buffer((1,), "uint32"),
-    ready: T.Buffer((1,), "uint32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "uint64"),
+    turn: T.Tensor((1,), "uint32"),
+    ready: T.Tensor((1,), "uint32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([3])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed32 = T.local_scalar("uint32")
     observed64 = T.local_scalar("uint64")
     if (cta == 0) and (lane == 0):
@@ -186,7 +186,7 @@ def torn_scoped_observation(
         observed32 = T.uint32(0)
         while observed32 == T.uint32(0):
             T.ptx.ld.relaxed.gpu.global_.u32(observed32, turn.ptr_to([0]))
-        high_half = T.ptr_byte_offset(flag.ptr_to([0]), T.uint32(4), "uint32")
+        high_half = T.ptr_byte_offset(flag.ptr_to([0]), T.uint32(4), ty=T.Ptr("uint32"))
         T.ptx.st.relaxed.gpu.global_.u32(high_half, T.uint32(0))
         T.ptx.st.relaxed.gpu.global_.u32(ready.ptr_to([0]), T.uint32(1))
     elif (cta == 2) and (lane == 0):
@@ -197,18 +197,18 @@ def torn_scoped_observation(
         output[0] = data[0] + T.cast(observed64 & T.uint64(0), "int32")
 
 
-@T.prim_func
+@T.function
 def async_store_global_publication(
     wait_for_completion: T.int32,
-    source: T.Buffer((16,), "uint8"),
-    destination: T.Buffer((16,), "uint8"),
-    flag: T.Buffer((1,), "uint32"),
-    output: T.Buffer((1,), "uint8"),
+    source: T.Tensor((16,), "uint8"),
+    destination: T.Tensor((16,), "uint8"),
+    flag: T.Tensor((1,), "uint32"),
+    output: T.Tensor((1,), "uint8"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     observed = T.local_scalar("uint32")
     if (cta == 0) and (lane == 0):
         for index in T.serial(16):
@@ -230,17 +230,17 @@ def async_store_global_publication(
         output[0] = destination[0]
 
 
-@T.prim_func
+@T.function
 def tcgen_commit_global_publication(
     use_acquire: T.int32,
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "uint32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "uint32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     observed = T.local_scalar("uint32")
 
     if (warp == 0) and (lane == 0):
@@ -271,16 +271,16 @@ def tcgen_commit_global_publication(
             output[0] = data[0]
 
 
-@T.prim_func
+@T.function
 def million_failed_polls_then_release_acquire(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "uint32"),
-    ready: T.Buffer((1,), "uint32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "uint32"),
+    ready: T.Tensor((1,), "uint32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("uint32")
     if (cta == 0) and (lane == 0):
         observed = T.uint32(0)

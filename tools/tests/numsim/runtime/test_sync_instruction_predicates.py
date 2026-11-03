@@ -2,19 +2,18 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def pending_predicate_kernel(*, drop=False, valid=True):
     action = "arrive_drop" if drop else "arrive"
-    return tvm.script.from_source(
-        f"""@T.prim_func
-def pending(output: T.Buffer((3, 32), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    return tvm_tirx.script.from_source(
+        f"""@T.function
+def pending(output: T.Tensor((3, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64", align=8)
     state = T.alloc_local((1,), "uint64")
     result = T.alloc_local((1,), "uint32")

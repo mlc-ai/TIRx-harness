@@ -219,6 +219,17 @@ def prepare_native_bindings(
     )
 
 
+def _specialize(func: Any, bindings: dict[Any, Any]) -> Any:
+    """Drop the bound parameters and substitute each bound value everywhere,
+    including tensor types and layouts, as TVM's Function.specialize did."""
+
+    params = [parameter for parameter in func.params if parameter not in bindings]
+    return tvm_ffi.structural_map(
+        tirx.Function(params, func.body, func.ret_type, func.attrs, func.loc),
+        [(tirx.Var, lambda var: bindings.get(var, var))],
+    )
+
+
 def _concretize_checker_shapes(
     func: Any,
     inputs: dict[str, Any] | None,
@@ -272,13 +283,7 @@ def _concretize_checker_shapes(
     scalar_values = prepare_bindings(
         {name: inputs[name] for name in scalar_dtypes}, expected_scalar_dtypes=scalar_dtypes
     ).scalars
-    # Specialize as TVM's Function.specialize did: drop the bound parameters and
-    # substitute each bound dimension everywhere, including tensor types and layouts.
-    params = [parameter for parameter in func.params if parameter not in bindings]
-    specialized = tvm_ffi.structural_map(
-        tirx.Function(params, func.body, func.ret_type, func.attrs, func.loc),
-        [(tirx.Var, lambda var: bindings.get(var, var))],
-    )
+    specialized = _specialize(func, bindings)
     for name, parameter in buffers.items():
         for extent, size in zip(parameter.ty.shape, prepared.buffers[name].shape, strict=True):
             if isinstance(extent, tirx.Var) and str(extent.name) in scalar_values:
@@ -340,7 +345,13 @@ def _concretize_checker_launch(
     if not required:
         return func, inputs, {}
 
-    specialized = func.specialize(required)
+    specialized = _specialize(
+        func,
+        {
+            parameter: tirx.const(value, str(parameter.ty.dtype))
+            for parameter, value in required.items()
+        },
+    )
     execution_inputs = dict(inputs)
     supplemental_scalar_dtypes: dict[str, str] = {}
     for parameter in required:

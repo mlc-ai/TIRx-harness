@@ -4,41 +4,38 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 BT = 16
 
 
-@T.prim_func
-def loop_var_dtype_select(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def loop_var_dtype_select(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for iteration in T.serial(3):
         output[lane] = T.Select(lane < 16, T.int32(7), iteration)
 
 
-@T.prim_func
+@T.function
 def runtime_for_range(
-    minimum: T.Buffer((32,), "int32"),
-    extents: T.Buffer((32,), "int32"),
-    steps: T.Buffer((32,), "int32"),
-    output: T.Buffer((32,), "int32"),
-    selected: T.Buffer((32,), "int32"),
+    minimum: T.Tensor((32,), "int32"),
+    extents: T.Tensor((32,), "int32"),
+    steps: T.Tensor((32,), "int32"),
+    output: T.Tensor((32,), "int32"),
+    selected: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for iteration in T.serial(minimum[lane], minimum[lane] + extents[lane], step=steps[lane]):
         output[lane] = iteration
         selected[lane] = T.Select(lane < 16, T.int32(7), iteration)
 
 
-@T.prim_func
-def nested_triangular_for(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    j = T.lane_id([32])
+@T.function
+def nested_triangular_for(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    j = T.cuda.lane_id()
     output[j] = 0
     if j < BT:
         for outer in T.serial(j + 1, BT):
@@ -47,11 +44,10 @@ def nested_triangular_for(output: T.Buffer((32,), "int32")):
                 output[j] = output[j] + 1
 
 
-@T.prim_func
-def varying_loop_control(extents: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def varying_loop_control(extents: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = 0
     for iteration in T.serial(extents[lane]):
         if iteration == 1:
@@ -63,21 +59,19 @@ def varying_loop_control(extents: T.Buffer((32,), "int32"), output: T.Buffer((32
         output[lane] = output[lane] + 1
 
 
-@T.prim_func
-def static_zero_trip_for(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def static_zero_trip_for(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = 7
     for iteration in T.serial(0):
         output[lane] = iteration + 100
 
 
-@T.prim_func
-def static_single_trip_for(inside: T.Buffer((32,), "int32"), after: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def static_single_trip_for(inside: T.Tensor((32,), "int32"), after: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     inside[lane] = 0
     for iteration in T.serial(1):
         if lane < 8:

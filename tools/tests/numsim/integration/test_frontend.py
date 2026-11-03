@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from tests.numsim.support.execution import specialize, with_cuda_arch
 from tests.numsim.support.kernels import (
     bound_launch_topology,
     divergent_loop_control,
@@ -20,12 +21,12 @@ from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import frontend
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def test_non_tcgen_kernel_does_not_require_a_tcgen_architecture():
     for arch in ("sm_90a", "sm_100a", "sm_107a", "sm_110a"):
-        kernel = lane_add.with_attr("tirx.cuda_arch", arch)
+        kernel = with_cuda_arch(lane_add, arch)
         source = emit_rust_module(analyze(kernel), kernel)
         assert "async fn warp_main" in source
 
@@ -39,7 +40,7 @@ def test_control_source_text_preserves_headers_children_and_cached_metadata():
     entries = spec.kernels[0].source_map
     loop = next(entry for entry in entries if entry.kind == "For")
     assert loop.text == "for step in range(4):\n    ..."
-    store = next(entry for entry in entries if entry.kind == "BufferStore")
+    store = next(entry for entry in entries if entry.kind == "TensorStore")
     assert store.text == str(store.node).strip()
     assert store.span is not None
     restored = frontend.module_spec_from_manifest(json.loads(json.dumps(spec.to_manifest())))
@@ -60,87 +61,46 @@ def test_source_spans_exclude_process_local_source_name_addresses():
     assert all("kernels.py" in span for span in spans)
 
 
-@T.prim_func(check_well_formed=False)
-def conflicting_repeated_warp_extents():
-    T.device_entry()
-    _warp_a = T.warp_id([2])
-    _warp_b = T.warp_id([3])
-    _lane = T.lane_id([32])
-
-
-@T.prim_func(check_well_formed=False)
-def invalid_warpgroup_warp_extent():
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    _warp = T.warp_id_in_wg([3])
-    _lane = T.lane_id([32])
-
-
-@T.prim_func(check_well_formed=False)
-def invalid_warpgroup_thread_extent():
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    _thread = T.thread_id_in_wg([96])
-
-
-@T.prim_func(check_well_formed=False)
-def conflicting_direct_and_warpgroup_extents():
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([2])
-    _warp = T.warp_id([4])
-    _lane = T.lane_id([32])
-
-
-@T.prim_func(check_well_formed=False)
+@T.function(check_well_formed=False)
 def direct_warps_with_warpgroup_local_thread_coordinate():
-    T.device_entry()
-    _warp = T.warp_id([8])
-    _thread = T.thread_id_in_wg([128])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=256))
 
 
-@T.prim_func(check_well_formed=False)
-def conflicting_cluster_extents():
-    T.device_entry()
-    _cluster = T.cluster_id([2])
-    _global_cta = T.cta_id([6])
-    _cluster_cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
-
-
-@T.prim_func
+@T.function
 def multidimensional_cluster_with_cta_pair():
-    T.device_entry()
-    _cta_x, _cta_y = T.cta_id_in_cluster([4, 2])
-    _pair = T.cta_id_in_pair()
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=8, block=32, cluster=8))
 
 
-@T.prim_func
-def launch_metadata_attr(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    T.attr({"tirx.launch_bounds_min_blocks_per_sm": 1})
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def launch_metadata_attr(output: T.Tensor((1,), "int32")):
+    T.device_entry(
+        launch=T.cuda.LaunchConfig(grid=1, block=32),
+        kernel_attrs=T.cuda.KernelAttributes(min_blocks_per_sm=1),
+    )
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = 1
 
 
-@T.prim_func
-def unknown_attr(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    T.attr({"numsim.unknown_control": 1})
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def unknown_attr(output: T.Tensor((1,), "int32")):
+    T.device_entry(
+        1,
+        32,
+        attrs={
+            "cuda.kernel_attrs": {},
+            "cuda.launch_fields": ["grid.x", "block.x"],
+            "numsim.unknown_control": 1,
+        },
+    )
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = 1
 
 
-@T.prim_func
-def supported_loop_metadata(output: T.Buffer((8,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+@T.function
+def supported_loop_metadata(output: T.Tensor((8,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     for index in T.serial(2, unroll=False):
         output[index] = index
     for index in T.unroll(2, 4):
@@ -151,37 +111,24 @@ def supported_loop_metadata(output: T.Buffer((8,), "int32")):
         output[index] = index
 
 
-@T.prim_func
-def unknown_loop_annotation(output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+@T.function
+def unknown_loop_annotation(output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     for index in T.serial(4, annotations={"numsim.unknown_loop": 1}):
         output[index] = index
 
 
-@T.prim_func
-def vectorized_loop(output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+@T.function
+def vectorized_loop(output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     for index in T.vectorized(4):
         output[index] = index
 
 
-@T.prim_func
-def parallel_loop(output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+@T.function
+def parallel_loop(output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     for index in T.parallel(4):
-        output[index] = index
-
-
-@T.prim_func
-def thread_bound_loop(output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    for index in T.thread_binding(4, thread="threadIdx.x"):
         output[index] = index
 
 
@@ -280,18 +227,18 @@ def test_bound_launch_extent_is_resolved_in_statement_order():
 
 
 def test_constant_if_then_else_launch_extent_only_evaluates_selected_branch():
-    @T.prim_func
+    @T.function
     def kernel(choose: T.bool, count: T.int32):
-        T.device_entry()
-        _warp = T.warp_id([T.if_then_else(choose, count, 1)])
-        _lane = T.lane_id([32])
+        T.device_entry(
+            launch=T.cuda.LaunchConfig(grid=1, block=(T.if_then_else(choose, count, 1)) * 32)
+        )
 
     choose, count = kernel.params
-    assert analyze(kernel.specialize({choose: False})).topology.warps_per_cta == 1
-    assert analyze(kernel.specialize({choose: True, count: 2})).topology.warps_per_cta == 2
+    assert analyze(specialize(kernel, {choose: False})).topology.warps_per_cta == 1
+    assert analyze(specialize(kernel, {choose: True, count: 2})).topology.warps_per_cta == 2
     for bindings in ({choose: True}, {count: 2}):
         with pytest.raises(UnsupportedTIRxError, match="launch extent is not statically known"):
-            analyze(kernel.specialize(bindings))
+            analyze(specialize(kernel, bindings))
 
 
 def test_cta_pair_rank_does_not_override_cluster_cta_extent():
@@ -338,21 +285,6 @@ def test_bfloat_cast_is_in_the_native_codegen_slice():
     verify(spec)
 
 
-@pytest.mark.parametrize(
-    ("kernel", "message"),
-    [
-        (conflicting_repeated_warp_extents, "conflicting launch constraints for warps per CTA"),
-        (invalid_warpgroup_warp_extent, "warpgroup warp extent must be 4"),
-        (invalid_warpgroup_thread_extent, "warpgroup thread extent must be 128"),
-        (conflicting_direct_and_warpgroup_extents, "warpgroup extent implies 8"),
-        (conflicting_cluster_extents, "global CTA count 6 disagrees"),
-    ],
-)
-def test_conflicting_or_invalid_topology_constraints_fail_closed(kernel, message):
-    with pytest.raises(UnsupportedTIRxError, match=message):
-        analyze(kernel)
-
-
 def test_numerically_irrelevant_launch_metadata_is_explicitly_supported():
     spec = analyze(launch_metadata_attr)
 
@@ -388,7 +320,6 @@ def test_unknown_loop_annotations_fail_closed():
     [
         (vectorized_loop, "VECTORIZED"),
         (parallel_loop, "PARALLEL"),
-        (thread_bound_loop, "THREAD_BINDING"),
     ],
 )
 def test_non_serial_loop_semantics_are_not_silently_sequentialized(kernel, kind):

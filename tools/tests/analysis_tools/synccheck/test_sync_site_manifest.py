@@ -8,20 +8,18 @@ from pathlib import Path
 from tests.numsim.support.kernels import ordering_only_control_calls, scoped_syncs
 from tirx_harness.numsim.transpiler.frontend import analyze, module_spec_from_manifest
 from tirx_harness.numsim.transpiler.source_map import SequentialSourceSpan, flatten_source_span
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-def _inline_wait_impl(barrier):
+@T.inline
+def _inline_wait(barrier):
     T.cuda.mbarrier_wait(barrier, 0)
 
 
-_inline_wait = T.inline(_inline_wait_impl)
-
-
-@T.prim_func
+@T.function
 def inline_wait_kernel():
-    T.device_entry()
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    barriers = T.alloc_shared((1,), "uint64")
     _inline_wait(T.address_of(barriers[0]))
 
 

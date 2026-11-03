@@ -3,17 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def lane_varying_blocking_wait(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def lane_varying_blocking_wait(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
 
     if lane < 2:
         T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane]), 1)
@@ -28,12 +27,12 @@ def lane_varying_blocking_wait(output: T.Buffer((2,), "int32")):
         output[lane] = lane + 7
 
 
-@T.prim_func
-def checker_lane_varying_pending_wait(output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((4,), "uint64", scope="shared")
+@T.function
+def checker_lane_varying_pending_wait(output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((4,), "uint64")
 
     if warp == 0 and lane < 4:
         T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane]), 1)
@@ -58,13 +57,12 @@ def checker_lane_varying_pending_wait(output: T.Buffer((4,), "int32")):
             T.ptx.mbarrier.arrive.shared.b64(barriers.ptr_to([lane]))
 
 
-@T.prim_func
-def lane_varying_expect_tx(source: T.Buffer((64,), "uint8"), output: T.Buffer((64,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "uint8", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def lane_varying_expect_tx(source: T.Tensor((64,), "uint8"), output: T.Tensor((64,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "uint8")
+    barriers = T.alloc_shared((2,), "uint64")
 
     shared[lane] = T.uint8(0)
     shared[lane + 32] = T.uint8(0)
@@ -92,12 +90,11 @@ def lane_varying_expect_tx(source: T.Buffer((64,), "uint8"), output: T.Buffer((6
     output[lane + 32] = shared[lane + 32]
 
 
-@T.prim_func
-def lane_varying_nonblocking_queries(output: T.Buffer((2, 4), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def lane_varying_nonblocking_queries(output: T.Tensor((2, 4), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
 
     if lane < 2:
         T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane]), 1)
@@ -130,14 +127,12 @@ def lane_varying_nonblocking_queries(output: T.Buffer((2, 4), "uint32")):
         T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
 
 
-@T.prim_func
-def lane_varying_remote_arrive(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def lane_varying_remote_arrive(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
 
     if lane < 2:
         T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane]), 1)
@@ -160,12 +155,11 @@ def lane_varying_remote_arrive(output: T.Buffer((2,), "int32")):
     T.cuda.cluster_sync()
 
 
-@T.prim_func
-def current_mbarrier_completion_forms(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared", align=8)
+@T.function
+def current_mbarrier_completion_forms(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64", align=8)
     state = T.local_scalar("uint64")
 
     if lane == 0:
@@ -186,12 +180,11 @@ def current_mbarrier_completion_forms(output: T.Buffer((2,), "int32")):
         output[1] = 1
 
 
-@T.prim_func
-def standalone_mbarrier_expect_tx(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def standalone_mbarrier_expect_tx(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), T.uint32(1))
@@ -207,12 +200,11 @@ def standalone_mbarrier_expect_tx(output: T.Buffer((1,), "int32")):
         output[0] = 1
 
 
-@T.prim_func
-def elected_mbarrier_init(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def elected_mbarrier_init(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     leader = T.cuda.elect_sync()
     T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1, pred=leader)
@@ -336,13 +328,13 @@ def test_mbarrier_init_honors_elected_lane_predicate(tmp_path):
 
 
 def test_relaxed_query_does_not_acquire_arriving_threads_memory():
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def kernel(data: T.Buffer((1,), "uint32"), output: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def kernel(data: T.Tensor((1,), "uint32"), output: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64", align=16)
     shared = T.alloc_shared((1,), "uint32", align=16)
     ready = T.alloc_local((1,), "uint32")

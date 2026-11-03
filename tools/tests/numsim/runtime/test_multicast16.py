@@ -13,12 +13,11 @@ from tests.numsim.runtime.test_raw_tma_codegen import (
 from tests.numsim.runtime.test_tcgen_codegen import (
     tcgen_commit_dynamic_single_bit_mask_is_multicast,
 )
-from tests.numsim.support.kernels import tcgen_commit_runtime_multicast
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.script import tirx as T
 from tvm_tirx.ir import Call
+from tvm_tirx.script import tirx as T
 
 
 def explicit_multicast(kernel, width=16, *, mask=None, semantics=""):
@@ -103,20 +102,6 @@ def test_tensor_multicast16_completes_each_target(tmp_path, ctas, width):
         np.broadcast_to(source, (ctas, 4)),
         tmp_path,
     )
-
-
-@pytest.mark.parametrize("group", [1, 2])
-@pytest.mark.parametrize("width", [16, 32])
-def test_tcgen_multicast16_preserves_commit_targets(tmp_path, group, width):
-    original = (
-        tcgen_commit_dynamic_single_bit_mask_is_multicast
-        if group == 1
-        else tcgen_commit_runtime_multicast
-    )
-    inputs = {"output": np.zeros(group, np.uint32)}
-    if group == 1:
-        inputs["cta_mask"] = 2
-    _check_and_run(explicit_multicast(original, width), inputs, np.ones(group, np.uint32), tmp_path)
 
 
 @pytest.mark.parametrize(

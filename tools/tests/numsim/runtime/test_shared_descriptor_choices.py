@@ -6,12 +6,12 @@ from tvm_ffi import structural_map
 
 from tests.numsim.microtests.cases.tcgen05_lifecycle_ldst import tcgen05_cp_warpx4
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
 from tvm_tirx.ir import Call
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def _publish_shared():
     T.ptx.fence.proxy.async_.shared__cta()
 

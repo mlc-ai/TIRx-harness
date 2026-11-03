@@ -4,21 +4,20 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def warp_engine_ops(
-    source: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32, 6), "uint32"),
-    unpacked: T.Buffer((32, 2), "float32"),
+    source: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32, 6), "uint32"),
+    unpacked: T.Tensor((32, 2), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value: T.let = source[lane]
     full: T.let = T.uint32(0xFFFFFFFF)
-    output[lane, 0] = T.tvm_warp_shuffle_xor(full, value, 1, 32, 32)
+    output[lane, 0] = T.gpu_warp_shuffle_xor(full, value, 1, 32, 32)
     output[lane, 1] = T.cuda.ballot_sync(full, lane < 16)
     output[lane, 2] = T.cuda.reduce_min_sync_u32(full, value)
     output[lane, 3] = T.cuda.reduce_add_sync_u32(full, value)
@@ -31,15 +30,14 @@ def warp_engine_ops(
     unpacked[lane, 1] = T.cuda.float2_y(unpacked_f32)
 
 
-@T.prim_func
+@T.function
 def warp_participant_contract(
-    participant_masks: T.Buffer((32,), "uint32"),
-    active_count: T.Buffer((1,), "int32"),
-    output: T.Buffer((32,), "uint32"),
+    participant_masks: T.Tensor((32,), "uint32"),
+    active_count: T.Tensor((1,), "int32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < active_count[0]:
         output[lane] = T.cuda.ballot_sync(participant_masks[lane], lane < 16)
 

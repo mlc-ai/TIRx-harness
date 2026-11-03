@@ -5,7 +5,7 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _TANH_APPROX_SOURCE = r"""// tanh.approx.f32 (sigmoid via tanh; used throughout the prep role)
 __device__ __forceinline__ float flashkda_tanh_approx(float x) {
@@ -30,96 +30,75 @@ __device__ __forceinline__ float flashkda_rsqrtf(float x) {
 """
 
 
-@T.prim_func
+@T.function
 def flashkda_math_helpers(
-    a: T.Buffer((32,), "float32"),
-    b: T.Buffer((32,), "float32"),
-    c: T.Buffer((32,), "float32"),
-    rsqrt_input: T.Buffer((32,), "float32"),
-    tanh_input: T.Buffer((32,), "float32"),
-    output: T.Buffer((32, 3), "float32"),
+    a: T.Tensor((32,), "float32"),
+    b: T.Tensor((32,), "float32"),
+    c: T.Tensor((32,), "float32"),
+    rsqrt_input: T.Tensor((32,), "float32"),
+    tanh_input: T.Tensor((32,), "float32"),
+    output: T.Tensor((32, 3), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane, 0] = T.cuda.func_call(
-        "flashkda_fmaf_rn",
-        a[lane],
-        b[lane],
-        c[lane],
-        source_code=_FMAF_RN_SOURCE,
-        return_type="float32",
+        "flashkda_fmaf_rn", a[lane], b[lane], c[lane], _FMAF_RN_SOURCE, ty="float32"
     )
     output[lane, 1] = T.cuda.func_call(
-        "flashkda_rsqrtf",
-        rsqrt_input[lane],
-        source_code=_RSQRTF_SOURCE,
-        return_type="float32",
+        "flashkda_rsqrtf", rsqrt_input[lane], _RSQRTF_SOURCE, ty="float32"
     )
     output[lane, 2] = T.cuda.func_call(
-        "flashkda_tanh_approx",
-        tanh_input[lane],
-        source_code=_TANH_APPROX_SOURCE,
-        return_type="float32",
+        "flashkda_tanh_approx", tanh_input[lane], _TANH_APPROX_SOURCE, ty="float32"
     )
 
 
-@T.prim_func
-def modified_flashkda_fmaf_rn(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_flashkda_fmaf_rn(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "flashkda_fmaf_rn",
             T.float32(1),
             T.float32(2),
             T.float32(3),
-            source_code=_FMAF_RN_SOURCE.replace("__fmaf_rn(a, b, c)", "a * b + c"),
-            return_type="float32",
+            _FMAF_RN_SOURCE.replace("__fmaf_rn(a, b, c)", "a * b + c"),
+            ty="float32",
         )
 
 
-@T.prim_func
-def modified_flashkda_rsqrtf(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_flashkda_rsqrtf(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "flashkda_rsqrtf",
             T.float32(4),
-            source_code=_RSQRTF_SOURCE.replace("rsqrtf(x)", "sqrtf(x)"),
-            return_type="float32",
+            _RSQRTF_SOURCE.replace("rsqrtf(x)", "sqrtf(x)"),
+            ty="float32",
         )
 
 
-@T.prim_func
-def modified_flashkda_tanh_approx(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def modified_flashkda_tanh_approx(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cuda.func_call(
             "flashkda_tanh_approx",
             T.float32(1),
-            source_code=_TANH_APPROX_SOURCE.replace("tanh.approx.f32", "ex2.approx.f32"),
-            return_type="float32",
+            _TANH_APPROX_SOURCE.replace("tanh.approx.f32", "ex2.approx.f32"),
+            ty="float32",
         )
 
 
-@T.prim_func
-def flashkda_rsqrtf_wrong_dtype(output: T.Buffer((1,), "float64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def flashkda_rsqrtf_wrong_dtype(output: T.Tensor((1,), "float64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        output[0] = T.cuda.func_call(
-            "flashkda_rsqrtf",
-            T.float64(4),
-            source_code=_RSQRTF_SOURCE,
-            return_type="float64",
-        )
+        output[0] = T.cuda.func_call("flashkda_rsqrtf", T.float64(4), _RSQRTF_SOURCE, ty="float64")
 
 
 def test_flashkda_math_helpers_have_reviewed_observable_semantics(tmp_path):

@@ -4,22 +4,22 @@ import numpy as np
 import pytest
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import device_kernel
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
+from tvm_tirx.script import tirx as T
 
 
 def _kernel(dtype):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(output: T.Buffer((1,), "float32")):
-    T.device_entry()
+@T.function
+def kernel(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     value: T.let = T.exp(T.{dtype}(1))
     output[0] = T.cast(value, "float32")
     T.evaluate(T.log(T.{dtype}(1)))
@@ -93,11 +93,11 @@ _RECOVERY_CASES = [
 
 
 def _recovery_kernel(body, dtype):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         """
-@T.prim_func
-def kernel(output: T.Buffer((1,), "float32")):
-    T.device_entry()
+@T.function
+def kernel(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     """
         + body.format(dtype=dtype)
         + "\n",
@@ -145,8 +145,8 @@ def test_error_recovery_respects_expression_let_scope(dtype, tmp_path):
     assert sum(message.endswith(":Let") for message in errors) == 1
     assert len(errors) == (3 if dtype == "float64" else 1), errors
     if dtype == "float64":
-        assert any("Call(tirx.exp(float64)" in message for message in errors)
-        assert any("Call(tirx.log(float64)" in message for message in errors)
+        assert any("Call(prim.exp(float64)" in message for message in errors)
+        assert any("Call(prim.log(float64)" in message for message in errors)
     with pytest.raises(UnsupportedTIRxError):
         verify(spec)
     if dtype == "float32":
@@ -163,12 +163,12 @@ def test_error_recovery_respects_expression_let_scope(dtype, tmp_path):
 
 @pytest.mark.parametrize("threads", [64, 128])
 def test_native_topology_returns_semantic_errors_as_data(threads):
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
-    thread = T.thread_id_in_wg([{threads}])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={threads}))
+    thread = T.cuda.thread_in_warpgroup()
     T.evaluate(thread)
 """,
         {"T": T},

@@ -2,9 +2,9 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def reduction_and_peer(ptx_type, peer):
@@ -17,13 +17,13 @@ def reduction_and_peer(ptx_type, peer):
     else:
         spelling = "cp.async.bulk.global.shared::cta.bulk_group"
     offset = 16 if peer == "outside" else 0
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def kernel(destination: T.Buffer((32,), "uint8")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def kernel(destination: T.Tensor((32,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((32,), "uint8", align=16)
     if lane == 0:
         for index in T.serial(16):

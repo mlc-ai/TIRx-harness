@@ -3,20 +3,19 @@
 import numpy as np
 
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def policy_kernel(
-    source: T.Buffer((32,), "uint32"),
-    out: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    out: T.Tensor((32,), "uint32"),
     fraction: T.float32,
     primary: T.uint32,
     total: T.uint32,
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     policy = T.alloc_local((1,), "uint64")
     inherited = T.alloc_local((1,), "uint64")
     value = T.alloc_local((1,), "uint32")

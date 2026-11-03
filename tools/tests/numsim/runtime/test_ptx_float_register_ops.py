@@ -7,11 +7,11 @@ from fractions import Fraction
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
-from tvm.script import tirx as T
 from tvm_tirx.backend.cuda.ptx.table import canonical_dtypes, mods, variants
+from tvm_tirx.script import tirx as T
 
 COPYSIGN = "tirx.ptx.copysign"
 MAD_F = "tirx.ptx.mad_f"
@@ -73,20 +73,19 @@ def _make_kernel():
     for form in _FORMS:
         output_rows[form.dtypes[0]] = max(output_rows.get(form.dtypes[0], 0), form.output_row + 1)
     parameters = [
-        *(f'input_{op}_{index}_{dtype}: T.Buffer((32,), "{dtype}")' for op, index, dtype in inputs),
+        *(f'input_{op}_{index}_{dtype}: T.Tensor((32,), "{dtype}")' for op, index, dtype in inputs),
         *(
-            f'output_{dtype}: T.Buffer(({rows}, 32), "{dtype}")'
+            f'output_{dtype}: T.Tensor(({rows}, 32), "{dtype}")'
             for dtype, rows in sorted(output_rows.items())
         ),
     ]
     lines = [
-        "@T.prim_func",
+        "@T.function",
         "def ptx_float_register_ops(",
         *(f"    {parameter}," for parameter in parameters),
         "):",
-        "    T.device_entry()",
-        "    _warp = T.warp_id([1])",
-        "    lane = T.lane_id([32])",
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+        "    lane = T.cuda.lane_id()",
     ]
     for form in _FORMS:
         arguments = [f"output_{form.dtypes[0]}[{form.output_row}, lane]"]
@@ -95,7 +94,7 @@ def _make_kernel():
             for index, dtype in enumerate(form.dtypes[1:])
         )
         lines.append(f'    T.ptx["{form.spelling}"]({", ".join(arguments)})')
-    return tvm.script.from_source("\n".join(lines), {"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), {"T": T})
 
 
 def _resize(values: list[float], dtype: np.dtype) -> np.ndarray:

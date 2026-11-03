@@ -5,7 +5,7 @@ import pytest
 
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # Byte widths and carrier classes are independent for a store. Signed arithmetic
 # remains covered separately by the 32/64-bit reduction cases below.
@@ -19,11 +19,10 @@ def release_kernel(ptx_type="u32", *, reduction=False, consume=False):
         f"{'add.' if reduction else ''}{ptx_type}"
     )
 
-    @T.prim_func
-    def kernel(data: T.Buffer((32,), dtype), output: T.Buffer((32,), dtype)):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(data: T.Tensor((32,), dtype), output: T.Tensor((32,), dtype)):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         T.ptx[instruction](data.ptr_to([lane]), T.cast(lane - 3, dtype), pred=lane < 16)
         if consume:
             T.ptx.cp.async_.bulk.commit_group()
@@ -59,15 +58,15 @@ def publication_kernel(*, after=False, shared=False, reduction=False):
         "red_async.release.gpu.global.add.u32" if reduction else "st_async.release.gpu.global.u32"
     )
 
-    @T.prim_func
+    @T.function
     def kernel(
-        data: T.Buffer((1,), "uint32"),
-        flag: T.Buffer((1,), "uint32"),
-        output: T.Buffer((1,), "uint32"),
+        data: T.Tensor((1,), "uint32"),
+        flag: T.Tensor((1,), "uint32"),
+        output: T.Tensor((1,), "uint32"),
     ):
-        T.device_entry()
-        warp = T.warp_id([2])
-        lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+        warp = T.cuda.warp_id()
+        lane = T.cuda.lane_id()
         scratch = T.alloc_shared((1,), "uint32")
         if lane == 0:
             if warp == 0:

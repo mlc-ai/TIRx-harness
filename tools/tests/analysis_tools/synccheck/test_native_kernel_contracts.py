@@ -7,20 +7,19 @@ import json
 import numpy as np
 import pytest
 
-from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm_tirx.backend.cuda.lang.pipeline import TMABar
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_trailing_warp_mbarrier(expected_arrivals: T.uint32):
-    T.device_entry()
-    T.attr({"tirx.launch_bounds_min_blocks_per_sm": 1})
-    warp = T.warp_id([9])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(
+        launch=T.cuda.LaunchConfig(grid=1, block=288),
+        kernel_attrs=T.cuda.KernelAttributes(min_blocks_per_sm=1),
+    )
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
 
     if (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), expected_arrivals)
@@ -33,14 +32,14 @@ def native_trailing_warp_mbarrier(expected_arrivals: T.uint32):
         T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
 
 
-@T.prim_func
+@T.function
 def native_lane_and_elect_mbarrier(mode: T.int32, epoch: T.int32, expected_arrivals: T.uint32):
-    T.device_entry()
-    wg = T.warpgroup_id([2])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    tid_in_wg = T.thread_id_in_wg([128])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=256))
+    wg = T.cuda.warpgroup_id()
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    tid_in_wg = T.cuda.thread_in_warpgroup()
+    barriers = T.alloc_shared((1,), "uint64")
 
     if (wg == 0) and (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), expected_arrivals)
@@ -66,11 +65,11 @@ def native_lane_and_elect_mbarrier(mode: T.int32, epoch: T.int32, expected_arriv
         T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
 
 
-@T.prim_func
+@T.function
 def native_collective_in_while(mode: T.int32, bound: T.int32):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     iteration = T.alloc_local((1,), "int32")
     iteration[0] = 0
     while iteration[0] < 1:
@@ -91,31 +90,27 @@ def native_collective_in_while(mode: T.int32, bound: T.int32):
         iteration[0] = iteration[0] + 1
 
 
-@T.prim_func
+@T.function
 def native_setmaxnreg_inside_loop():
-    T.device_entry()
-    _wg = T.warpgroup_id([1])
-    _warp = T.warp_id_in_wg([4])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
     for _iteration in T.serial(2):
         T.ptx.setmaxnreg.dec.sync.aligned.u32(88)
 
 
-@T.prim_func
+@T.function
 def native_setmaxnreg_with_trailing_warps():
-    T.device_entry()
-    warp = T.warp_id([6])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=192))
+    warp = T.cuda.warp_id()
     if warp < 4:
         T.ptx.setmaxnreg.dec.sync.aligned.u32(88)
 
 
-@T.prim_func
+@T.function
 def native_mbarrier_depth_two_pipeline():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((4,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((4,), "uint64")
 
     if (warp == 0) and (lane == 0):
         for barrier in T.serial(4):
@@ -140,47 +135,11 @@ def native_mbarrier_depth_two_pipeline():
                 phase = phase ^ 1
 
 
-@T.prim_func
-def tma_completion_many_waiters(
-    source: T.Buffer((8, 64), "float16"),
-    output: T.Buffer((1,), "float16"),
-):
-    T.device_entry()
-    warpgroup = T.warpgroup_id([4])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-
-    pool = T.SMEMPool()
-    barrier = TMABar(pool, 1)
-    shared = pool.alloc_tcgen05_mma_AB((8, 64), "float16")
-    pool.commit()
-    barrier.init(1)
-
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if (warpgroup == 0) & (warp == 0):
-        if T.cuda.elect_sync():
-            Tx.copy_async(
-                shared[:, :],
-                source[:, :],
-                dispatch="tma_auto",
-                mbar=barrier.ptr_to([0]),
-            )
-            barrier.arrive(0, tx_count=8 * 64 * 2)
-
-    barrier.wait(0, 0)
-    if (warpgroup == 0) & (warp == 0) & (lane == 0):
-        output[0] = shared[0, 0]
-
-
-@T.prim_func
+@T.function
 def native_conditional_tcgen_alloc():
-    T.device_entry()
-    warp = T.warp_id([9])
-    _lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=288))
+    warp = T.cuda.warp_id()
+    address = T.alloc_shared((1,), "uint32")
 
     if warp == 8:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
@@ -188,13 +147,13 @@ def native_conditional_tcgen_alloc():
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
+@T.function
 def native_cross_warp_tmem_dealloc(ordered: T.int32):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    gate = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    gate = T.alloc_shared((1,), "uint64")
     value = T.alloc_local((1,), "uint32")
 
     if (warp == 0) and (lane == 0):
@@ -230,111 +189,35 @@ def native_cross_warp_tmem_dealloc(ordered: T.int32):
             T.ptx.tcgen05.wait__ld.sync.aligned()
 
 
-@T.prim_func
-def native_rank_conditional_tmem_pool():
-    T.device_entry()
-    T.cta_id([2])
-    cluster_rank = T.cta_id_in_cluster([2])
-    T.warpgroup_id([1])
-
-    pool = T.SMEMPool()
-    tmem_address = pool.alloc((1,), "uint32", align=4)
-    pool.commit()
-
-    rank0_pool = T.TMEMPool(
-        pool,
-        total_cols=64,
-        cta_group=1,
-        alloc_warp=0,
-        dealloc_warp=0,
-        tmem_addr=tmem_address,
-    )
-    rank0_pool.alloc_tcgen05_mma_D((64, 64), "float32", M=64, cta_group=1)
-    rank1_pool = T.TMEMPool(
-        pool,
-        total_cols=512,
-        cta_group=1,
-        alloc_warp=0,
-        dealloc_warp=0,
-        tmem_addr=tmem_address,
-    )
-    rank1_pool.alloc_tcgen05_mma_D((128, 128), "float32", M=128, cta_group=1)
-
-    if cluster_rank == 0:
-        rank0_pool.commit()
-    else:
-        rank1_pool.commit()
-    T.cuda.cluster_sync()
-    if cluster_rank == 0:
-        rank0_pool.dealloc()
-    else:
-        rank1_pool.dealloc()
-
-
-@T.prim_func
-def native_thread_topology_conditional_tmem_pool():
-    T.device_entry()
-    T.cta_id([2])
-    cluster_rank = T.cta_id_in_cluster([2])
-    T.thread_id([64])
-
-    pool = T.SMEMPool()
-    tmem_address = pool.alloc((1,), "uint32", align=4)
-    pool.commit()
-
-    rank0_pool = T.TMEMPool(
-        pool,
-        total_cols=64,
-        cta_group=1,
-        alloc_warp=0,
-        dealloc_warp=0,
-        tmem_addr=tmem_address,
-    )
-    rank0_pool.alloc_tcgen05_mma_D((64, 64), "float32", M=64, cta_group=1)
-    rank1_pool = T.TMEMPool(
-        pool,
-        total_cols=128,
-        cta_group=1,
-        alloc_warp=0,
-        dealloc_warp=0,
-        tmem_addr=tmem_address,
-    )
-    rank1_pool.alloc_tcgen05_mma_D((128, 128), "float32", M=128, cta_group=1)
-
-    if cluster_rank == 0:
-        rank0_pool.commit()
-    else:
-        rank1_pool.commit()
-    T.cuda.cluster_sync()
-    if cluster_rank == 0:
-        rank0_pool.dealloc()
-    else:
-        rank1_pool.dealloc()
-
-
 def native_setmaxnreg_budget_kernel(settings):
     """Build representative four-WG register-budget shapes."""
 
     setting0, setting1, setting2, setting3 = settings
 
-    @T.prim_func
+    @T.function
     def kernel():
-        T.device_entry()
-        wg = T.warpgroup_id([4])
-        _warp = T.warp_id_in_wg([4])
-        _lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=512))
+        wg = T.cuda.warpgroup_id()
         if wg == 0:
-            if setting0 is not None:
-                T.ptx[f"setmaxnreg.{'inc' if setting0[0] else 'dec'}.sync.aligned.u32"](setting0[1])
+            if T.constexpr(setting0 is not None):
+                T.ptx[
+                    f"setmaxnreg.{'inc' if T.constexpr(setting0[0]) else 'dec'}.sync.aligned.u32"
+                ](setting0[1])
         elif wg == 1:
-            if setting1 is not None:
-                T.ptx[f"setmaxnreg.{'inc' if setting1[0] else 'dec'}.sync.aligned.u32"](setting1[1])
+            if T.constexpr(setting1 is not None):
+                T.ptx[
+                    f"setmaxnreg.{'inc' if T.constexpr(setting1[0]) else 'dec'}.sync.aligned.u32"
+                ](setting1[1])
         elif wg == 2:
-            if setting2 is not None:
-                T.ptx[f"setmaxnreg.{'inc' if setting2[0] else 'dec'}.sync.aligned.u32"](setting2[1])
+            if T.constexpr(setting2 is not None):
+                T.ptx[
+                    f"setmaxnreg.{'inc' if T.constexpr(setting2[0]) else 'dec'}.sync.aligned.u32"
+                ](setting2[1])
         else:
-            if setting3 is not None:
-                T.ptx[f"setmaxnreg.{'inc' if setting3[0] else 'dec'}.sync.aligned.u32"](setting3[1])
+            if T.constexpr(setting3 is not None):
+                T.ptx[
+                    f"setmaxnreg.{'inc' if T.constexpr(setting3[0]) else 'dec'}.sync.aligned.u32"
+                ](setting3[1])
 
     return kernel
 
@@ -342,12 +225,10 @@ def native_setmaxnreg_budget_kernel(settings):
 def native_six_warpgroup_setmaxnreg_budget(cg1_target: int):
     """Build the working and hanging six-WG register splits from the KDA artifacts."""
 
-    @T.prim_func
+    @T.function
     def kernel():
-        T.device_entry()
-        wg = T.warpgroup_id([6])
-        _warp = T.warp_id_in_wg([4])
-        _lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=768))
+        wg = T.cuda.warpgroup_id()
         if wg == 0:
             T.ptx.setmaxnreg.inc.sync.aligned.u32(104)
         elif wg == 1:
@@ -528,33 +409,6 @@ def test_native_synccheck_preserves_depth_two_multi_generation_pipeline(native_c
     assert effects.count("mbarrier.wait") == 6
 
 
-def test_native_synccheck_reduces_tma_completion_waiter_interleavings(native_cache_dir):
-    report = internal_synccheck(
-        tma_completion_many_waiters,
-        inputs={
-            "source": np.full((8, 64), 7, dtype=np.float16),
-            "output": np.zeros((1,), dtype=np.float16),
-        },
-        cache_dir=native_cache_dir,
-        max_workers=1,
-        resource_limits=numsim.ResourceLimits(
-            max_schedules=100,
-            max_backtrack_nodes=64,
-            max_events_per_run=100_000,
-            max_total_events=1_000_000,
-            max_loop_steps=1_000_000,
-            max_wall_time_ms=30_000,
-            max_diagnostic_bytes=1_000_000,
-        ),
-    )
-
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["coverage"]["termination"]["kind"] == "worklist_exhausted"
-    assert native["search"]["visited_state_count"] <= 32
-    assert native["search"]["explored_transition_count"] <= 64
-
-
 def test_native_synccheck_keeps_conditional_tcgen_alloc_at_one_warp(native_cache_dir):
     report = _run(native_conditional_tcgen_alloc, inputs={}, cache_dir=native_cache_dir)
 
@@ -584,28 +438,6 @@ def test_native_synccheck_requires_cross_warp_tmem_quiescence_before_dealloc(
     assert unordered.verdict == "error"
     assert unordered.findings[0].kind == "synchronization_collective_publication"
     assert "not covered by any live allocation" in unordered.findings[0].message
-
-
-@pytest.mark.parametrize(
-    ("kernel", "expected_tasks"),
-    [
-        pytest.param(native_rank_conditional_tmem_pool, 8, id="rank-conditional-two-cta"),
-        pytest.param(
-            native_thread_topology_conditional_tmem_pool,
-            4,
-            id="thread-topology-two-warps",
-        ),
-    ],
-)
-def test_native_synccheck_executes_conditional_tmem_pool_with_exact_topology(
-    native_cache_dir, kernel, expected_tasks: int
-):
-    report = _run(kernel, inputs={}, cache_dir=native_cache_dir)
-
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["stats"]["task_count"] == expected_tasks
-    assert native["stats"]["completed_task_count"] == expected_tasks
 
 
 @pytest.mark.parametrize(

@@ -3,27 +3,26 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def partial_array_case(mode):
     index = {"valid": "lane % 2", "uninitialized": "1 - lane % 2", "oob": "2"}[mode]
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     pointers = T.alloc_local((2,), "uint64")
-    pointers[lane % 2] = T.reinterpret("uint64", source.ptr_to([lane]))
+    pointers[lane % 2] = T.reinterpret(source.ptr_to([lane]), ty="uint64")
     T.cuda.cta_sync()
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", pointers[{index}]))
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", pointers[99]), pred=False, preserve_dst=True)
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(pointers[{index}], ty="handle"))
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(pointers[99], ty="handle"), pred=False, preserve_dst=True)
 """,
         {"T": T},
     )
@@ -54,19 +53,21 @@ def test_pointer_array_initialization_and_bounds(mode, tmp_path):
             numsim.Engine().run(module, inputs)
 
 
-@T.prim_func
-def pointer_array_alias(source: T.Buffer((64,), "uint32"), output: T.Buffer((32, 2), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def pointer_array_alias(source: T.Tensor((64,), "uint32"), output: T.Tensor((32, 2), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     pointers = T.alloc_local((2, 2), "uint64")
-    alias = T.decl_buffer((2,), "uint64", data=pointers.data, elem_offset=2, scope="local")
+    alias = T.decl_tensor(
+        T.ptr_byte_offset(pointers.data, 16, ty=T.Ptr("uint64", "local")),
+        ty_args=[T.Tensor((2,), "uint64", scope="local")],
+    )
     for index in T.serial(4):
-        pointers[index // 2, index % 2] = T.reinterpret("uint64", source.ptr_to([lane + index]))
-    T.ptx.ld.global_.u32(output[lane, 0], T.reinterpret("handle", alias[lane % 2]))
-    alias[lane % 2] = T.reinterpret("uint64", source.ptr_to([lane + 32]))
+        pointers[index // 2, index % 2] = T.reinterpret(source.ptr_to([lane + index]), ty="uint64")
+    T.ptx.ld.global_.u32(output[lane, 0], T.reinterpret(alias[lane % 2], ty="handle"))
+    alias[lane % 2] = T.reinterpret(source.ptr_to([lane + 32]), ty="uint64")
     T.cuda.cta_sync()
-    T.ptx.ld.global_.u32(output[lane, 1], T.reinterpret("handle", pointers[1, lane % 2]))
+    T.ptx.ld.global_.u32(output[lane, 1], T.reinterpret(pointers[1, lane % 2], ty="handle"))
 
 
 def test_pointer_array_alias_and_suspension(tmp_path):

@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def commit_kernel(restricted, multicast):
@@ -13,15 +13,12 @@ def commit_kernel(restricted, multicast):
     suffix = f".multicast::cluster{multicast}" if multicast is not None else ""
     mask_dtype = "uint32" if multicast == "::32b" else "uint16"
     extra = ", targets[0]" if multicast is not None else ""
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def kernel(output: T.Buffer((32,), "uint32"), enabled: T.int32, selected: T.int32):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(output: T.Tensor((32,), "uint32"), enabled: T.int32, selected: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64")
     pointer = T.alloc_local((1,), "uint32")
     targets = T.alloc_local((1,), "{mask_dtype}")

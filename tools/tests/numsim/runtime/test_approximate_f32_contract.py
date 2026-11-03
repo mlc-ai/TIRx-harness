@@ -9,18 +9,17 @@ import pytest
 
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def approximate_f32_calls(
-    source: T.Buffer((32,), "float32"),
-    exponentials: T.Buffer((32,), "float32"),
-    reciprocals: T.Buffer((32,), "float32"),
+    source: T.Tensor((32,), "float32"),
+    exponentials: T.Tensor((32,), "float32"),
+    reciprocals: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     exponential = T.local_scalar("float32")
     reciprocal = T.local_scalar("float32")
     T.ptx.ex2.approx.ftz.f32(exponential, source[lane])
@@ -29,67 +28,62 @@ def approximate_f32_calls(
     reciprocals[lane] = reciprocal
 
 
-@T.prim_func
+@T.function
 def non_ftz_exp2_calls(
-    source: T.Buffer((32,), "float32"),
-    exponentials: T.Buffer((32,), "float32"),
+    source: T.Tensor((32,), "float32"),
+    exponentials: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     exponential = T.local_scalar("float32")
     T.ptx.ex2.approx.f32(exponential, source[lane])
     exponentials[lane] = exponential
 
 
-@T.prim_func
+@T.function
 def non_ftz_rcp_calls(
-    source: T.Buffer((32,), "float32"),
-    reciprocals: T.Buffer((32,), "float32"),
+    source: T.Tensor((32,), "float32"),
+    reciprocals: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     reciprocal = T.local_scalar("float32")
     T.ptx.rcp.approx.f32(reciprocal, source[lane])
     reciprocals[lane] = reciprocal
 
 
-@T.prim_func
+@T.function
 def bf16x2_exp2_calls(
-    source: T.Buffer((32,), "uint32"),
-    exponentials: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    exponentials: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     exponential = T.local_scalar("uint32")
     T.ptx["ex2.approx.ftz.bf16x2"](exponential, source[lane])
     exponentials[lane] = exponential
 
 
-@T.prim_func
+@T.function
 def f16x2_exp2_calls(
-    source: T.Buffer((32,), "uint32"),
-    exponentials: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    exponentials: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     exponential = T.local_scalar("uint32")
     T.ptx["ex2.approx.f16x2"](exponential, source[lane])
     exponentials[lane] = exponential
 
 
-@T.prim_func
+@T.function
 def flashkda_ptx_unary_calls(
-    source: T.Buffer((32,), "float32"),
-    tanh_output: T.Buffer((32,), "float32"),
-    rsqrt_output: T.Buffer((32,), "float32"),
+    source: T.Tensor((32,), "float32"),
+    tanh_output: T.Tensor((32,), "float32"),
+    rsqrt_output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     tanh_value = T.local_scalar("float32")
     rsqrt_value = T.local_scalar("float32")
     T.ptx.tanh.approx.f32(tanh_value, source[lane])
@@ -98,14 +92,13 @@ def flashkda_ptx_unary_calls(
     rsqrt_output[lane] = rsqrt_value
 
 
-@T.prim_func
+@T.function
 def f16x2_tanh_calls(
-    source: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value = T.local_scalar("uint32")
     T.ptx["tanh.approx.f16x2"](value, source[lane])
     output[lane] = value

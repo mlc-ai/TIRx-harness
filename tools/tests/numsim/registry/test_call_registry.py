@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.kernels import (
     fetch_register_coordinates,
     raw_scalar_call_mix,
@@ -12,21 +12,21 @@ from tests.numsim.support.kernels import (
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _synthetic_call_kernel(
     result_dtype: str, op_name: str, arguments: tuple[str, ...], value_dtype: str | None
 ):
-    call = f"T.call_intrin({result_dtype!r}, {op_name!r}, {', '.join(arguments)})"
-    parameters = 'output: T.Buffer((32,), "int32")'
+    call = f"T.call_intrin({op_name!r}, {', '.join(arguments)}, ty={result_dtype!r})"
+    parameters = 'output: T.Tensor((32,), "int32")'
     if value_dtype is not None:
-        parameters += f', values: T.Buffer((32,), "{value_dtype}")'
-    return tvm.script.from_source(
-        "@T.prim_func\n"
+        parameters += f', values: T.Tensor((32,), "{value_dtype}")'
+    return tvm_tirx.script.from_source(
+        "@T.function\n"
         f"def kernel({parameters}):\n"
-        "    T.device_entry()\n"
-        "    lane = T.lane_id()\n"
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))\n"
+        "    lane = T.cuda.lane_id()\n"
         f"    value: T.let = {call}\n"
         "    output[lane] = T.int32(1)\n",
         {"T": T},
@@ -85,7 +85,7 @@ def test_fetch_register_uses_launch_coordinates_without_hardware_state(tmp_path)
 def test_registry_remains_closed_for_unregistered_calls():
     spec = analyze(unsupported_exp)
 
-    assert any("Call(tirx.sin(float32)->float32)" in item for item in spec.unsupported)
+    assert any("Call(prim.sin(float32)->float32)" in item for item in spec.unsupported)
 
 
 @pytest.mark.parametrize(
@@ -153,10 +153,10 @@ def test_registry_accepts_cuda_shuffle_value_forms(value_dtype: str, op_name: st
 @pytest.mark.parametrize(
     "op_name",
     [
-        "tirx.tvm_warp_shuffle",
-        "tirx.tvm_warp_shuffle_up",
-        "tirx.tvm_warp_shuffle_down",
-        "tirx.tvm_warp_shuffle_xor",
+        "tirx.gpu_warp_shuffle",
+        "tirx.gpu_warp_shuffle_up",
+        "tirx.gpu_warp_shuffle_down",
+        "tirx.gpu_warp_shuffle_xor",
     ],
 )
 def test_registry_accepts_tvm_shuffle_forms(op_name: str):

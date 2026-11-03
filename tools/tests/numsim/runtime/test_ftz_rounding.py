@@ -6,10 +6,10 @@ from fractions import Fraction
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_ptx_float_register_ops import _round_fraction
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 FORMS = tuple(
     (op, mode, ftz)
@@ -31,8 +31,8 @@ def ftz_boundary_case():
                 args += ", T.uint64(0)"
             lines += [
                 f'    T.ptx["{spelling}"](packed_d[0], {args})',
-                f'    output[{row}, lane, 0] = T.reinterpret("float32", T.Cast("uint32", packed_d[0]))',
-                f'    output[{row}, lane, 1] = T.reinterpret("float32", T.Cast("uint32", packed_d[0] >> T.uint64(32)))',
+                f'    output[{row}, lane, 0] = T.reinterpret(T.Cast("uint32", packed_d[0]), ty="float32")',
+                f'    output[{row}, lane, 1] = T.reinterpret(T.Cast("uint32", packed_d[0] >> T.uint64(32)), ty="float32")',
             ]
         else:
             args = {
@@ -45,17 +45,16 @@ def ftz_boundary_case():
                 f'    T.ptx["{spelling}"](output[{row}, lane, 0], {args})',
                 f"    output[{row}, lane, 1] = output[{row}, lane, 0]",
             ]
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(A: T.Buffer((32,), "float32"), B: T.Buffer((32,), "float32"),
-           output: T.Buffer(({len(FORMS)}, 32, 2), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(A: T.Tensor((32,), "float32"), B: T.Tensor((32,), "float32"),
+           output: T.Tensor(({len(FORMS)}, 32, 2), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed_a = T.alloc_local((1,), "uint64")
     packed_d = T.alloc_local((1,), "uint64")
-    bits = T.Cast("uint64", T.reinterpret("uint32", A[lane]))
+    bits = T.Cast("uint64", T.reinterpret(A[lane], ty="uint32"))
     packed_a[0] = bits | ((bits ^ T.uint64(0x80000000)) << T.uint64(32))
 {chr(10).join(lines)}
 """,

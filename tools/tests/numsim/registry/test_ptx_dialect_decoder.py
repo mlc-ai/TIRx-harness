@@ -5,7 +5,7 @@ import pickle
 import pytest
 from tvm_ffi import structural_walk
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import call_op_names, resolved_kernel
 from tirx_harness.numsim.transpiler.ptx_dialect import (
     PTX_SINK,
@@ -13,13 +13,13 @@ from tirx_harness.numsim.transpiler.ptx_dialect import (
     PtxCallDecodeError,
     decode_ptx_call,
 )
-from tvm.script import tirx as T
 from tvm_tirx import ir
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 
 def _parse(source: str):
-    return tvm.script.from_source(source, {"T": T})
+    return tvm_tirx.script.from_source(source, {"T": T})
 
 
 def _calls(func, prefix: str = "tirx."):
@@ -46,9 +46,9 @@ def _with_args(call, args):
 def test_decode_mbarrier_and_wait_from_public_dsl():
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel(bar: T.handle):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.mbarrier.init.shared.b64(bar, T.uint32(1))
     T.ptx.tcgen05.wait__ld.sync.aligned()
     T.cuda.cta_sync()
@@ -87,18 +87,18 @@ def kernel(bar: T.handle):
     [
         (
             """
-@T.prim_func
+@T.function
 def invalid():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.tcgen05.shift(T.uint32(0), cta_group=1)
 """,
             r"'shift' is not a valid modifier for 'tcgen05'",
         ),
         (
             """
-@T.prim_func
+@T.function
 def invalid():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
         T.uint32(0),
         T.uint32(0),
@@ -116,9 +116,9 @@ def invalid():
         ),
         (
             """
-@T.prim_func
+@T.function
 def invalid():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.mma.legacy()
 """,
             r"'legacy' is not a valid modifier for 'mma'",
@@ -126,20 +126,20 @@ def invalid():
     ],
 )
 def test_target_parser_rejects_removed_tcgen05_families(source: str, message: str):
-    with pytest.raises(tvm.error.DiagnosticError, match=message):
+    with pytest.raises((AttributeError, ValueError), match=message):
         _parse(source)
 
 
 def test_target_parser_rejects_tensormap_prefetch_in_global_space():
     with pytest.raises(
-        tvm.error.DiagnosticError,
+        ValueError,
         match=r"\.tensormap takes \.const or \.param",
     ):
         _parse(
             """
-@T.prim_func
-def invalid(tensor_map: T.TensorMap()):
-    T.device_entry()
+@T.function
+def invalid(tensor_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.evaluate(T.ptx.prefetch.global_.tensormap(T.address_of(tensor_map)))
 """
         )
@@ -148,10 +148,9 @@ def invalid(tensor_map: T.TensorMap()):
 def test_decode_dynamic_operand_groups_by_slot_name():
     func = _parse(
         """
-@T.prim_func
-def kernel(src: T.handle):
-    source = T.match_buffer(src, (4,), "uint32")
-    T.device_entry()
+@T.function
+def kernel(source: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     r0 = T.local_scalar("uint32")
     r1 = T.local_scalar("uint32")
     r2 = T.local_scalar("uint32")
@@ -172,9 +171,9 @@ def kernel(src: T.handle):
 def test_decode_reconstructs_sink_lanes_without_exposing_marker_positions():
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     hi = T.local_scalar("uint32")
     packed = T.local_scalar("uint64")
     T.ptx.mov.b64(T.ptx.SINK, hi, packed)
@@ -189,7 +188,7 @@ def kernel():
     assert destination[1] is not PTX_SINK
     assert len(decoded.operand("a")) == 1
 
-    reparsed = tvm.script.from_source(func.script(), {"T": T})
+    reparsed = tvm_tirx.script.from_source(func.script(), {"T": T})
     ir.assert_structural_equal(func, reparsed)
     reparsed_call = next(iter(_calls(reparsed, "tirx.ptx.")))
     assert decode_ptx_call(reparsed_call).operand("d")[0] is PTX_SINK
@@ -198,9 +197,9 @@ def kernel():
 def test_decoded_call_and_sink_survive_frontend_cache_pickling():
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     hi = T.local_scalar("uint32")
     packed = T.local_scalar("uint64")
     T.ptx.mov.b64(T.ptx.SINK, hi, packed)
@@ -219,10 +218,10 @@ def kernel():
 def test_decode_materializes_table_owned_literal_operands():
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
-    shared = T.alloc_buffer((8,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    shared = T.alloc_shared((8,), "uint8")
     T.ptx.st_bulk.shared__cta(shared.ptr_to([0]), T.uint64(8))
 """
     )
@@ -236,9 +235,9 @@ def kernel():
 def test_emitter_decodes_only_table_driven_ptx_calls():
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     bar = T.alloc_shared((1,), "uint64")
     T.ptx.mbarrier.init.shared.b64(bar.ptr_to([0]), T.uint32(1))
     T.cuda.cta_sync()
@@ -247,7 +246,7 @@ def kernel():
     c = T.alloc_local((4,), "float32")
     T.ptx_legacy.mma(
         "m16n8k16", "row", "col", "float16", "float16", "float32",
-        a.data, 0, b.data, 0, c.data, 0, False, dtype="float32"
+        a.data, 0, b.data, 0, c.data, 0, False,
     )
 """
     )
@@ -274,10 +273,9 @@ def kernel():
 def test_decode_reconstructs_register_class_and_instruction_predicate():
     func = _parse(
         """
-@T.prim_func
-def kernel(dst: T.handle):
-    out = T.match_buffer(dst, (1,), "uint32")
-    T.device_entry()
+@T.function
+def kernel(out: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     tmem = T.local_scalar("uint32")
     desc = T.local_scalar("uint64")
     idesc = T.local_scalar("uint32")
@@ -314,9 +312,9 @@ def kernel(dst: T.handle):
 def test_decode_rejects_corrupt_serialized_metadata(mutate):
     func = _parse(
         """
-@T.prim_func
+@T.function
 def kernel(bar: T.handle):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.mbarrier.init.shared.b64(bar, T.uint32(1))
 """
     )

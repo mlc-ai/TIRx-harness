@@ -9,234 +9,163 @@ from tests.numsim.support.kernels import tmem_d_alias_per_cta
 from tests.numsim.support.manifest import emitted_module
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.script import tirx as T
 from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_TILE = TileLayout(S[(2, 2) : (4, 1)])
 _PADDED_COMPOSE = ComposeLayout(0, 0, 0, _PADDED_TILE)
 
 
-@T.prim_func
-def in_bounds_internal_alias(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((8,), "uint32", scope="shared")
-    alias = T.decl_buffer((4,), "uint32", data=storage.data, scope="shared", elem_offset=4)
+@T.function
+def in_bounds_internal_alias(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((8,), "uint32")
+    alias = T.decl_tensor(
+        T.ptr_byte_offset(storage.data, 16, ty=T.Ptr("uint32", "shared")),
+        ty_args=[T.Tensor((4,), "uint32", scope="shared")],
+    )
     alias[0] = 1
     output[0] = alias[0]
 
 
-@T.prim_func
-def alias_extends_internal_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((4,), "uint32", scope="shared")
-    alias = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared")
+@T.function
+def alias_extends_internal_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((4,), "uint32")
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((8,), "uint32", scope="shared")])
     alias[7] = 1
     output[0] = alias[7]
 
 
-@T.prim_func
-def dead_alias_extends_internal_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((4,), "uint32", scope="shared")
-    _dead = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared")
+@T.function
+def dead_alias_extends_internal_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((4,), "uint32")
+    _dead = T.decl_tensor(storage.data, ty_args=[T.Tensor((8,), "uint32", scope="shared")])
     output[0] = 17
 
 
-@T.prim_func
-def loaded_alias_extends_internal_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((4,), "uint32", scope="shared")
-    alias = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared")
+@T.function
+def loaded_alias_extends_internal_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((4,), "uint32")
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((8,), "uint32", scope="shared")])
     storage[0] = 29
     output[0] = alias[0]
 
 
-@T.prim_func
-def evaluated_buffer_data_projection_is_pure(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
+@T.function
+def evaluated_buffer_data_projection_is_pure(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.evaluate(output.data)
     output[0] = 23
 
 
-@T.prim_func
+@T.function
 def pointer_origin_disagrees_with_declared_scope(
-    source: T.Buffer((4,), "uint32"), output: T.Buffer((1,), "uint32")
+    source: T.Tensor((4,), "uint32"), output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     pointer: T.let[
         T.Var(
             name="global_pointer",
             ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), source.ptr_to([0]))
-    alias = T.decl_buffer((4,), "uint32", data=pointer, scope="shared")
+    ] = T.reinterpret(source.ptr_to([0]), ty=PtrType(PrimType("uint32"), "shared"))
+    alias = T.decl_tensor(pointer, ty_args=[T.Tensor((4,), "uint32", scope="shared")])
     output[0] = alias[0]
 
 
-@T.prim_func
-def mapa_shared_address_in_generic_handle(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    shared = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def mapa_shared_address_in_generic_handle(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    shared = T.alloc_shared((1,), "uint64")
     remote_bits: T.uint64
     T.ptx.mapa.u64(remote_bits, T.address_of(shared[0]), T.uint32(0))
     remote_pointer: T.let[
         T.Var(name="remote_pointer", ty=PtrType(PrimType("uint64"), "global"))
-    ] = T.reinterpret(PtrType(PrimType("uint64"), "global"), remote_bits)
-    remote = T.decl_buffer((1,), "uint64", data=remote_pointer)
+    ] = T.reinterpret(remote_bits, ty=PtrType(PrimType("uint64"), "global"))
+    remote = T.decl_tensor(remote_pointer, ty_args=[T.Tensor((1,), "uint64", scope="global")])
     output[0] = T.cast(remote[0], "uint32")
 
 
-@T.prim_func
-def mapa_source_through_nominal_global_declbuffer(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    shared = T.alloc_buffer((8,), "uint64", scope="shared")
+@T.function
+def mapa_source_through_nominal_global_declbuffer(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    shared = T.alloc_shared((8,), "uint64")
     alias_pointer: T.let[
         T.Var(name="nominal_global_alias_pointer", ty=PtrType(PrimType("uint64"), "global"))
-    ] = T.reinterpret(PtrType(PrimType("uint64"), "global"), shared.ptr_to([0]))
-    alias = T.decl_buffer(
-        (8,),
-        "uint64",
-        data=alias_pointer,
-        scope="global",
-    )
+    ] = T.reinterpret(shared.ptr_to([0]), ty=PtrType(PrimType("uint64"), "global"))
+    alias = T.decl_tensor(alias_pointer, ty_args=[T.Tensor((8,), "uint64", scope="global")])
     mapped = T.local_scalar("uint64")
     T.ptx.mapa.shared__cluster.u64(mapped, alias.ptr_to([0]), T.uint32(0))
     output[0] = 0
 
 
-@T.prim_func
-def pool_capacity_bounds_alias(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((0,), "uint8", scope="shared")
-    T.attr(storage.data, "tirx.pool_max_bytes", 32)
-    alias = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared")
+@T.function
+def zero_extent_pool_uses_concrete_view_span(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_tensor(ty_args=[T.Tensor((0,), "uint8", scope="shared.dyn")])
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((8,), "uint32", scope="shared.dyn")])
     alias[7] = 1
     output[0] = alias[7]
 
 
-@T.prim_func
-def alias_exceeds_pool_capacity(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((0,), "uint8", scope="shared")
-    T.attr(storage.data, "tirx.pool_max_bytes", 16)
-    alias = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared")
-    alias[7] = 1
-    output[0] = alias[7]
-
-
-@T.prim_func
-def zero_extent_pool_uses_concrete_view_span(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((0,), "uint8", scope="shared.dyn")
-    alias = T.decl_buffer((8,), "uint32", data=storage.data, scope="shared.dyn")
-    alias[7] = 1
-    output[0] = alias[7]
-
-
-@T.prim_func
-def zero_extent_pool_without_span_evidence(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    T.alloc_buffer((0,), "uint8", scope="shared.dyn")
+@T.function
+def zero_extent_pool_without_span_evidence(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.alloc_tensor(ty_args=[T.Tensor((0,), "uint8", scope="shared.dyn")])
     output[0] = 0
 
 
-@T.prim_func
-def conflicting_pool_capacities(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((0,), "uint8", scope="shared")
-    T.attr(storage.data, "tirx.pool_max_bytes", 16)
-    T.attr(storage.data, "tirx.pool_max_bytes", 32)
-    alias = T.decl_buffer((4,), "uint32", data=storage.data, scope="shared")
-    output[0] = alias[0]
-
-
-@T.prim_func
-def negative_pool_capacity(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((0,), "uint8", scope="shared")
-    T.attr(storage.data, "tirx.pool_max_bytes", -1)
-    output[0] = 0
-
-
-@T.prim_func
-def repeated_tile_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((2, 3), "uint32", scope="shared", layout=_PADDED_TILE)
-    alias = T.decl_buffer((10,), "uint32", data=storage.data, scope="shared")
+@T.function
+def repeated_tile_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((2, 3), "uint32", layout=_PADDED_TILE)
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((10,), "uint32", scope="shared")])
     alias[9] = 7
     output[0] = alias[9]
 
 
-@T.prim_func
-def repeated_compose_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((2, 4), "uint32", scope="shared", layout=_PADDED_COMPOSE)
-    alias = T.decl_buffer((14,), "uint32", data=storage.data, scope="shared")
+@T.function
+def repeated_compose_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((2, 4), "uint32", layout=_PADDED_COMPOSE)
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((14,), "uint32", scope="shared")])
     alias[13] = 9
     output[0] = alias[13]
 
 
-@T.prim_func
-def odd_float4_owner(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((3,), "float4_e2m1fn", scope="shared")
-    alias = T.decl_buffer((2,), "uint8", data=storage.data, scope="shared")
+@T.function
+def odd_float4_owner(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_shared((3,), "float4_e2m1fn")
+    alias = T.decl_tensor(storage.data, ty_args=[T.Tensor((2,), "uint8", scope="shared")])
     output[0] = alias[1]
 
 
-@T.prim_func
-def high_nibble_float4_alias(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    storage = T.alloc_buffer((2,), "uint8", scope="shared")
-    alias = T.decl_buffer((3,), "float4_e2m1fn", data=storage.data, elem_offset=1, scope="shared")
-    output[0] = T.cast(alias[0], "uint32")
-
-
-@T.prim_func
+@T.function
 def pointer_origin_through_pure_if_then_else(
-    left: T.Buffer((4,), "uint32"),
-    right: T.Buffer((4,), "uint32"),
+    left: T.Tensor((4,), "uint32"),
+    right: T.Tensor((4,), "uint32"),
     choose_left: T.int32,
-    output: T.Buffer((1,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     selected_bits: T.let = T.if_then_else(
         choose_left != 0,
-        T.reinterpret("uint64", left.ptr_to([0])),
-        T.reinterpret("uint64", right.ptr_to([0])),
+        T.reinterpret(left.ptr_to([0]), ty="uint64"),
+        T.reinterpret(right.ptr_to([0]), ty="uint64"),
     )
     pointer: T.let[
         T.Var(
             name="selected_pointer",
             ty=PtrType(PrimType("uint32"), "global"),
         )
-    ] = T.reinterpret(PtrType(PrimType("uint32"), "global"), selected_bits)
-    alias = T.decl_buffer((4,), "uint32", data=pointer, scope="global")
+    ] = T.reinterpret(selected_bits, ty=PtrType(PrimType("uint32"), "global"))
+    alias = T.decl_tensor(pointer, ty_args=[T.Tensor((4,), "uint32", scope="global")])
     output[0] = alias[0]
 
 
@@ -304,30 +233,10 @@ def test_mapa_source_in_a_nominal_global_declbuffer_keeps_runtime_address_resolu
     _runtime_pointer_view(mapa_source_through_nominal_global_declbuffer, 64, 8)
 
 
-def test_pool_capacity_attr_sizes_owner_without_opportunistic_growth(tmp_path):
-    assert _shared_backing_sizes(pool_capacity_bounds_alias) == [32]
-    module = numsim.transpile(pool_capacity_bounds_alias, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": np.zeros(1, dtype=np.uint32)})
-    assert result.verdict == "clean", result.diagnostics
-    np.testing.assert_array_equal(result.outputs["output"], np.array([1], dtype=np.uint32))
-    with pytest.raises(UnsupportedTIRxError, match="exceeds owner storage range"):
-        emitted_module(alias_exceeds_pool_capacity)
-
-
 def test_zero_extent_pool_owner_uses_only_concrete_view_span_evidence():
     assert _shared_backing_sizes(zero_extent_pool_uses_concrete_view_span) == [32]
     with pytest.raises(UnsupportedTIRxError, match="no positive static view span"):
         emitted_module(zero_extent_pool_without_span_evidence)
-
-
-def test_conflicting_pool_capacity_attrs_fail_closed():
-    with pytest.raises(UnsupportedTIRxError, match="conflicting capacities 16 and 32"):
-        emitted_module(conflicting_pool_capacities)
-
-
-def test_malformed_pool_capacity_attr_fails_closed():
-    with pytest.raises(UnsupportedTIRxError, match="cannot be negative"):
-        emitted_module(negative_pool_capacity)
 
 
 @pytest.mark.parametrize(
@@ -340,19 +249,6 @@ def test_repeated_layout_atoms_size_the_complete_logical_domain(kernel, expected
 
 def test_odd_float4_spans_round_up_to_complete_physical_bytes():
     assert _shared_backing_sizes(odd_float4_owner) == [2]
-
-
-def test_float4_alias_can_begin_at_the_high_nibble():
-    source = emitted_module(high_nibble_float4_alias)
-    assert re.search(
-        r"let buffer_2 = runtime_buffer_shared\(\s*"
-        r"numsim_cta_shared_backing.clone\(\),\s*0,\s*2,\s*2,\s*0,\s*\);",
-        source,
-    )
-    index = re.search(r"let (broadcast_\d+) = WarpValue::splat\(\(1_i32\) as i64\);", source)
-    assert index is not None
-    assert f"{index[1]}[lane].div_euclid(2_i64)" in source
-    assert f"{index[1]}[lane].rem_euclid(2_i64) == 0" in source
 
 
 def test_integer_addresses_selected_at_runtime_keep_dynamic_views():

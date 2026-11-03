@@ -21,6 +21,7 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.bfloat162float` | pure_scalar | modeled |  |
 | `tirx.cuda.block_dim` | pure_scalar | modeled |  |
 | `tirx.cuda.block_idx` | pure_scalar | modeled |  |
+| `tirx.cuda.bmma_sync` | architecture_rejection | rejected | binary WMMA fragments are not modeled |
 | `tirx.cuda.clock64` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.cluster_cta_id` | pure_scalar | modeled |  |
 | `tirx.cuda.cluster_dim` | pure_scalar | modeled |  |

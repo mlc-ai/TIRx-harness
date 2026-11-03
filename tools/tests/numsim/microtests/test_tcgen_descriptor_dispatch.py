@@ -6,12 +6,12 @@ from tvm_ffi import structural_map, structural_walk
 
 from tests.numsim.microtests.harness import require_numsim_gpu, run_gpu_primfunc
 from tests.numsim.runtime.test_tcgen_collectors import collector_case
-from tests.numsim.support.execution import assert_rejected, run_checked
+from tests.numsim.support.execution import assert_rejected, run_checked, with_cuda_arch
 from tests.numsim.support.tcgen_descriptor import INSTR_DESC, encode_dense_instr_descriptor_fields
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 
 def dispatch_case(
@@ -24,7 +24,7 @@ def dispatch_case(
     tmem_a=False,
 ):
     kernel, inputs, expected = collector_case(("",), tmem_a=tmem_a)
-    kernel = kernel.with_attr("tirx.cuda_arch", "sm_100a")
+    kernel = with_cuda_arch(kernel, "sm_100a")
     metadata = next(parameter for parameter in kernel.params if str(parameter) == "metadata")
     selector = ir.TensorLoad(metadata, [0, 0, 0])
     if multiple_issuers:

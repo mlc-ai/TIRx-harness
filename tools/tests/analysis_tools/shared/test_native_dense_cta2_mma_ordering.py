@@ -19,19 +19,18 @@ import pytest
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
 from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
 
 
-@T.prim_func
+@T.function
 def raw_dense_cta2_mma_pipeline(
-    left: T.Buffer((128, 16), "float16"),
-    right: T.Buffer((32, 16), "float16"),
-    output: T.Buffer((128, 32), "float32"),
+    left: T.Tensor((128, 16), "float16"),
+    right: T.Tensor((32, 16), "float16"),
+    output: T.Tensor((128, 32), "float32"),
     with_commit: T.int32,
 ):
     """One CTA-pair MMA published to both CTAs' readers.
@@ -42,28 +41,25 @@ def raw_dense_cta2_mma_pipeline(
     destination with no completion edge behind them.
     """
 
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    left_shared = T.alloc_buffer((64, 16), "float16", scope="shared", layout=_MMA_F16_32B)
-    right_shared = T.alloc_buffer((16, 16), "float16", scope="shared", layout=_MMA_F16_32B)
-    accumulator = T.decl_buffer(
-        (64, 32),
-        "float32",
-        scope="tmem",
-        layout=tmem_datapath_layout("B", 64, 32),
-        allocated_addr=0,
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
+    left_shared = T.alloc_shared((64, 16), "float16", layout=_MMA_F16_32B)
+    right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
+    accumulator = T.tmem(
+        (64, 32), "float32", allocated_addr=0, layout=tmem_datapath_layout("B", 64, 32)
     )
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
     if (warp == 0) and (lane == 0):
-        Tx.copy(left_shared[:, :], left[cta * 64 : (cta + 1) * 64, :])
-        Tx.copy(right_shared[:, :], right[cta * 16 : (cta + 1) * 16, :])
+        for _i0_0, _i0_1 in T.grid(left_shared.shape[0], left_shared.shape[1]):
+            left_shared[_i0_0, _i0_1] = left[cta * 64 + _i0_0, _i0_1]
+        for _i1_0, _i1_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
+            right_shared[_i1_0, _i1_1] = right[cta * 16 + _i1_0, _i1_1]
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()

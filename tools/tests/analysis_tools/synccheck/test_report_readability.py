@@ -18,15 +18,15 @@ from tirx_harness.numsim.checker_runner import (
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.frontend import analyze, module_spec_from_manifest
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def report_mbarrier_deadlock():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 2)
         T.ptx.fence.mbarrier_init.release.cluster()

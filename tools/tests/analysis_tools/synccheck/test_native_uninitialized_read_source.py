@@ -8,15 +8,15 @@ import numpy as np
 import pytest
 
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def repeated_uninitialized_operand(output: T.Buffer((128,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    value = T.alloc_buffer((1,), "uint32", scope="local")
+@T.function
+def repeated_uninitialized_operand(output: T.Tensor((128,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    value = T.alloc_local((1,), "uint32")
     T.ptx.st.global_.u32(output.ptr_to([warp * 64 + lane]), value[0])  # first read
     T.cuda.cta_sync()
     T.ptx.st.global_.u32(output.ptr_to([warp * 64 + 32 + lane]), value[0])  # second read

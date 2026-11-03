@@ -6,19 +6,19 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_walk
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness import numsim
-from tvm.script import tirx as T
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 
 def _cvt_call(spelling: str, destination_dtype: str, *arguments: str):
-    func = tvm.script.from_source(
+    func = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     destination = T.local_scalar("{destination_dtype}")
     T.ptx["{spelling}"](destination, {", ".join(arguments)})
 """,
@@ -118,11 +118,10 @@ def test_previously_unmodeled_neighbors_preserve_exact_modifiers():
 
 
 def test_f6_form_transpiles_and_preserves_exact_half_bits(tmp_path):
-    @T.prim_func
-    def f6_cvt(source: T.Buffer((32,), "uint16"), output: T.Buffer((32,), "uint32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def f6_cvt(source: T.Tensor((32,), "uint16"), output: T.Tensor((32,), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         T.ptx["cvt.rn.f16x2.e2m3x2"](output[lane], source[lane])
 
     # E2M3 encodes 1, 2 and 4 as 0x08, 0x10 and 0x18; sign is bit5.
@@ -188,5 +187,5 @@ def test_stochastic_and_exponent_forms_record_their_rounding():
 def test_non_table_cvt_neighbours_are_rejected_by_target_parser(
     spelling, destination_dtype, arguments
 ):
-    with pytest.raises(tvm.error.DiagnosticError):
+    with pytest.raises(ValueError):
         _cvt_call(spelling, destination_dtype, *arguments)

@@ -8,15 +8,14 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def native_same_warp_lane_handoff(use_sync: T.int32, output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_same_warp_lane_handoff(use_sync: T.int32, output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
 
     if use_sync >= 3:
         if lane == 0:
@@ -35,45 +34,41 @@ def native_same_warp_lane_handoff(use_sync: T.int32, output: T.Buffer((1,), "int
         output[0] = shared[0]
 
 
-@T.prim_func
-def native_same_lane_program_order(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_same_lane_program_order(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
 
     if lane == 0:
         shared[0] = 17
         output[0] = shared[0]
 
 
-@T.prim_func
+@T.function
 def native_same_address_warp_atomic(
-    counter: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")
+    counter: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.atomic_add(counter.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
+@T.function
 def native_disjoint_warp_atomics(
-    counters: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")
+    counters: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.atomic_add(counters.ptr_to([lane]), T.int32(1))
 
 
-@T.prim_func
+@T.function
 def native_same_address_atomic_controls_warp_sync(
-    counter: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")
+    counter: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     ticket: T.let = T.cuda.atomic_add(counter.ptr_to([0]), T.int32(1))
 
     # The native numeric order returns ticket == lane, so this execution is a
@@ -83,25 +78,24 @@ def native_same_address_atomic_controls_warp_sync(
     output[lane] = ticket
 
 
-@T.prim_func
+@T.function
 def native_same_address_atomic_selects_output_address(
-    counter: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")
+    counter: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     ticket: T.let = T.cuda.atomic_add(counter.ptr_to([0]), T.int32(1))
     output[ticket] = lane
 
 
-@T.prim_func
+@T.function
 def native_atomic_poll_does_not_publish_shared_write(
-    counter: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")
+    counter: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     observed = T.local_scalar("int32")
 
     if warp == 0:

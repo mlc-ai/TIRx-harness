@@ -149,9 +149,8 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
             "@T.prim_func",
             "def wheel_add_one(source: T.Buffer((32,), 'float32'), "
             "output: T.Buffer((32,), 'float32')):",
-            "    T.device_entry()",
-            "    _warp = T.warp_id([1])",
-            "    lane = T.lane_id([32])",
+            "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+            "    lane = T.cuda.lane_id()",
             "    output[lane] = source[lane] + T.float32(1)",
             "source = np.arange(32, dtype=np.float32)",
             "module = numsim.transpile(wheel_add_one, cache_dir=pathlib.Path('cache'))",

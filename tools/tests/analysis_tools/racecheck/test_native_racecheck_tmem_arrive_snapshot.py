@@ -9,21 +9,21 @@ from tests.analysis_tools.racecheck._native_race_trace import full_direct_race_r
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
+@T.function
 def native_tmem_arrive_snapshot(
-    producer_warp: T.int32, load_after_arrive: T.int32, output: T.Buffer((32,), "uint32")
+    producer_warp: T.int32, load_after_arrive: T.int32, output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barriers = T.alloc_shared((2,), "uint64")
 
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
@@ -35,9 +35,7 @@ def native_tmem_arrive_snapshot(
     T.cuda.cta_sync()
 
     tmem_base: T.let = address[0]
-    tmem = T.decl_buffer(
-        (128, 64), "uint32", scope="tmem", layout=_TMEM_LAYOUT, allocated_addr=tmem_base
-    )
+    tmem = T.tmem((128, 64), "uint32", allocated_addr=tmem_base, layout=_TMEM_LAYOUT)
 
     if warp == producer_warp:
         tmem[lane, 0] = T.cast(7000 + lane, "uint32")

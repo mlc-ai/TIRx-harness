@@ -5,16 +5,15 @@ import json
 import pytest
 import tvm_ffi
 
-import tvm
 from tests.numsim.integration.test_host_prelude import host_encoded_tensor_map_store
 from tests.numsim.support.kernels import lane_add
 from tirx_harness.numsim.transpiler import frontend, host_prelude, native_frontend
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SINK, PtxCallDecodeError, decode_ptx_call
 from tirx_harness.numsim.transpiler.semantic_ir import semantic_ir_json
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
 from tvm_tirx.ir import Expr, Stmt
 from tvm_tirx.ir.location import CallSiteLoc, SourceLoc
+from tvm_tirx.script import tirx as T
 
 
 def _substitute_vars(value, replacements):
@@ -113,11 +112,9 @@ def test_frontend_source_map_consumes_one_native_body_walk(native_calls):
 def test_host_promotion_preserves_parameters_types_spans_and_references(native_calls, rename):
     original = host_encoded_tensor_map_store
     allocation = original.body.seq[0].var
-    span = tvm.ir.SequentialSpan(
-        [
-            tvm.ir.Span(ir.SourceName("host.py"), 4, 4, 1, 9),
-            tvm.ir.Span(ir.SourceName("device.py"), 8, 8, 2, 10),
-        ]
+    span = CallSiteLoc(
+        SourceLoc(ir.SourceName("device.py"), 8, 2, 8, 10),
+        SourceLoc(ir.SourceName("host.py"), 4, 1, 4, 9),
     )
     variable = tirx.Var("output" if rename else str(allocation.name), allocation.ty, span)
     body = ir.SeqStmt(
@@ -148,9 +145,9 @@ def test_host_promotion_preserves_parameters_types_spans_and_references(native_c
     assert sum(name == "numsim_normalize_host_tensor_maps" for name, _ in native_calls) == 1
 
 
-@T.prim_func
+@T.function
 def native_ptx_metadata():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     hi = T.local_scalar("uint32")
     packed = T.local_scalar("uint64")
     T.ptx.mov.b64(T.ptx.SINK, hi, packed)

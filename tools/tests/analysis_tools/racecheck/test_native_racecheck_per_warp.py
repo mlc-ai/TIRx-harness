@@ -5,16 +5,15 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_racecheck_per_warp_slices(overlap: T.int32):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "int32")
 
     if overlap == 0:
         shared[warp * 32 + lane] = warp

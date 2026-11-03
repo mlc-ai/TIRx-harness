@@ -6,19 +6,18 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def generic_vector_store_forms(
-    source_u32: T.Buffer((256,), "uint32"),
-    destination_u32: T.Buffer((256,), "uint32"),
-    source_f64: T.Buffer((64,), "float64"),
-    destination_f64: T.Buffer((64,), "float64"),
+    source_u32: T.Tensor((256,), "uint32"),
+    destination_u32: T.Tensor((256,), "uint32"),
+    source_f64: T.Tensor((64,), "float64"),
+    destination_f64: T.Tensor((64,), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     base8 = lane * 8
     T.ptx.st.global_.v8.u32(
         T.address_of(destination_u32[base8]),
@@ -39,11 +38,10 @@ def generic_vector_store_forms(
     )
 
 
-@T.prim_func
-def misaligned_vector_store(destination: T.Buffer((64,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def misaligned_vector_store(destination: T.Tensor((64,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx.st.global_.v4.b32(
             T.address_of(destination[1]),

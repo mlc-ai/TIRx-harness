@@ -6,21 +6,20 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checker_report import RaceReport
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _TMEM_LAYOUT = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _TMEM_WIDE_LAYOUT = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
-def native_pool_alias_provenance(mode: T.int32, output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pool = T.alloc_buffer((1,), "int32", scope="shared")
-    A_shared = T.decl_buffer((1,), "int32", data=pool.data, scope="shared")
-    B_shared = T.decl_buffer((1,), "int32", data=pool.data, scope="shared")
+@T.function
+def native_pool_alias_provenance(mode: T.int32, output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    pool = T.alloc_shared((1,), "int32")
+    A_shared = T.decl_tensor(pool.data, ty_args=[T.Tensor((1,), "int32", scope="shared")])
+    B_shared = T.decl_tensor(pool.data, ty_args=[T.Tensor((1,), "int32", scope="shared")])
 
     if lane == 0:
         A_shared[0] = 1
@@ -36,14 +35,13 @@ def native_pool_alias_provenance(mode: T.int32, output: T.Buffer((1,), "int32"))
             output[0] = B_shared[0]
 
 
-@T.prim_func
-def native_raw_ptx_pool_alias_provenance(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pool = T.alloc_buffer((1,), "uint32", scope="shared")
-    A_shared = T.decl_buffer((1,), "uint32", data=pool.data, scope="shared")
-    B_shared = T.decl_buffer((1,), "uint32", data=pool.data, scope="shared")
+@T.function
+def native_raw_ptx_pool_alias_provenance(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    pool = T.alloc_shared((1,), "uint32")
+    A_shared = T.decl_tensor(pool.data, ty_args=[T.Tensor((1,), "uint32", scope="shared")])
+    B_shared = T.decl_tensor(pool.data, ty_args=[T.Tensor((1,), "uint32", scope="shared")])
     loaded = T.alloc_local((1,), "uint32")
 
     if lane == 0:
@@ -53,12 +51,11 @@ def native_raw_ptx_pool_alias_provenance(output: T.Buffer((1,), "uint32")):
         output[0] = loaded[0]
 
 
-@T.prim_func
-def native_explicit_view_provenance(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    storage = T.alloc_buffer((4,), "int32", scope="shared")
+@T.function
+def native_explicit_view_provenance(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    storage = T.alloc_shared((4,), "int32")
     matrix = storage.view(2, 2)
     transposed = matrix.rearrange("row col -> col row")
 
@@ -67,26 +64,22 @@ def native_explicit_view_provenance(output: T.Buffer((1,), "int32")):
         output[0] = transposed[0, 1]
 
 
-@T.prim_func
-def native_tmem_view_provenance(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    tmem = T.decl_buffer((128, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT, allocated_addr=0)
+@T.function
+def native_tmem_view_provenance(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
     tmem_view = tmem.rearrange("(group row) col -> (group row) col", group=2)
 
     tmem[lane, 0] = T.cast(lane + 1, "uint32")
     output[lane] = tmem_view[lane, 0]
 
 
-@T.prim_func
-def native_tmem_partitioned_view_provenance(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    tmem = T.decl_buffer(
-        (128, 8), "uint32", scope="tmem", layout=_TMEM_WIDE_LAYOUT, allocated_addr=0
-    )
+@T.function
+def native_tmem_partitioned_view_provenance(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_WIDE_LAYOUT)
     tmem_lo = tmem.sub[:, :4]
     _tmem_hi = tmem.sub[:, 4:]
     tmem_view = tmem.rearrange("(group row) col -> (group row) col", group=2)
@@ -95,37 +88,34 @@ def native_tmem_partitioned_view_provenance(output: T.Buffer((32,), "uint32")):
     output[lane] = tmem_view[lane, 0]
 
 
-@T.prim_func
-def native_tmem_full_extent_subview_provenance(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    tmem = T.decl_buffer((2, 64, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT, allocated_addr=0)
+@T.function
+def native_tmem_full_extent_subview_provenance(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.tmem((2, 64, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
     tmem_view = tmem.sub[:, :, 0:4]
 
     tmem[0, lane, 0] = T.cast(lane + 1, "uint32")
     output[lane] = tmem_view[0, lane, 0]
 
 
-@T.prim_func
-def native_tmem_reused_lifetime_provenance(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    first = T.decl_buffer((128, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT, allocated_addr=0)
-    second = T.decl_buffer((128, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT, allocated_addr=0)
+@T.function
+def native_tmem_reused_lifetime_provenance(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    first = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
+    second = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
 
     first[lane, 0] = T.cast(lane + 1, "uint32")
     second[lane, 0] = T.cast(lane + 2, "uint32")
     output[lane] = first[lane, 0]
 
 
-@T.prim_func
-def native_tcgen_alloc_result_is_warp_visible(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def native_tcgen_alloc_result_is_warp_visible(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
 
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     output[lane] = address[0]

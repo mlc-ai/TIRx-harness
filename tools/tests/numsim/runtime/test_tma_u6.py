@@ -2,10 +2,10 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 U6_CASES = (
     # Each direction covers plain/swizzled and tile/im2col, without their product.
@@ -49,7 +49,7 @@ def u6_case(*, store=False, swizzle=False, im2col=False, atomicity=16):
         for i in T.serial(4):
             output[48 + i] = shared[64 + i]
 """
-        parameters = 'output: T.Buffer((52,), "uint32")'
+        parameters = 'output: T.Tensor((52,), "uint32")'
         inputs = {"output": np.zeros(52, np.uint32)}
         # Do not read the unspecified four padding bytes of each 16-byte atom.
         expected = np.concatenate((source[:192].view(np.uint32), np.full(4, 0xA5B6C7D8, np.uint32)))
@@ -71,17 +71,16 @@ def u6_case(*, store=False, swizzle=False, im2col=False, atomicity=16):
         T.ptx.cp.async_.bulk.commit_group()
         T.ptx.cp.async_.bulk.wait_group(0)
 """
-        parameters = 'values: T.Buffer((256,), "uint8"), backing: T.Buffer((256,), "uint8")'
+        parameters = 'values: T.Tensor((256,), "uint8"), backing: T.Tensor((256,), "uint8")'
         inputs = {"values": values}
         # Independent bitstream oracle; high bits are deliberately nonzero.
         bits = np.unpackbits(values[:, None], axis=1, bitorder="little")[:, :6].reshape(-1)
         expected = np.concatenate((np.packbits(bits, bitorder="little"), source[192:]))
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(descriptor: T.TensorMap(), {parameters}):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(descriptor: T.Ptr(T.TensorMap), {parameters}):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     {body}
 """,
         {"T": T},

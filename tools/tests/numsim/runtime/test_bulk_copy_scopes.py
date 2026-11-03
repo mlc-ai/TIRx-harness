@@ -3,24 +3,24 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def copy_case(scope, relation="cta"):
     semantics = f"relaxed.{scope}" if scope else "weak"
     element = ".b128" if scope else ""
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(destination: T.Buffer((8,), "uint32"), enabled: T.int32):
-    T.device_entry()
-    cluster = T.cluster_id([{2 if relation == "gpu" else 1}])
-    cta = T.cta_id_in_cluster([{2 if relation == "cluster" else 1}])
-    warp = T.warp_id([{2 if relation == "cta" else 1}])
-    lane = T.lane_id([32])
+@T.function
+def kernel(destination: T.Tensor((8,), "uint32"), enabled: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid={2 if relation == "gpu" else 1} * {2 if relation == "cluster" else 1}, block={2 if relation == "cta" else 1} * 32, cluster={2 if relation == "cluster" else 1}))
+    cluster = T.cuda.cluster_id("x")
+    cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     actor = cluster + cta + warp
     shared = T.alloc_shared((16,), "uint32", align=16)
     if lane < 8:

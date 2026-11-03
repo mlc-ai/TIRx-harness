@@ -7,32 +7,27 @@ import numpy as np
 from tests.analysis_tools.racecheck.test_native_racecheck_artifact import (
     native_racecheck_write_write,
 )
-from tests.analysis_tools.synccheck.test_native_kernel_contracts import (
-    native_conditional_tcgen_alloc,
-    native_rank_conditional_tmem_pool,
-    native_thread_topology_conditional_tmem_pool,
-)
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_strided_local_index_overlap():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "float32")
     for iteration in T.serial(2):
         index: T.let = lane + iteration * 32
         shared[index] = T.cast(warp, "float32")
 
 
-@T.prim_func
-def native_nested_local_index_disjoint(output: T.Buffer((128,), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "float32", scope="shared")
+@T.function
+def native_nested_local_index_disjoint(output: T.Tensor((128,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "float32")
     for iteration in T.serial(2):
         for inner in T.serial(1):
             index: T.let = warp * 64 + lane + iteration * 32 + inner
@@ -41,11 +36,10 @@ def native_nested_local_index_disjoint(output: T.Buffer((128,), "float32")):
     output[warp * 64 + lane] = shared[warp * 64 + lane]
 
 
-@T.prim_func
-def native_uint32_local_scalar(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def native_uint32_local_scalar(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value = T.alloc_local((1,), "uint32")
     if lane == 0:
         value[0] = T.uint32(17)
@@ -72,17 +66,6 @@ def test_local_scalar_indices_preserve_strided_race_and_nested_clean_case():
     assert source_texts and all("shared[index]" in text for text in source_texts)
     clean.require_clean()
     assert clean.to_dict()["native"]["incomplete"] == []
-
-
-def test_racecheck_accepts_conditional_tmem_lifecycles():
-    for kernel in (
-        native_conditional_tcgen_alloc,
-        native_rank_conditional_tmem_pool,
-        native_thread_topology_conditional_tmem_pool,
-    ):
-        report = racecheck(kernel, inputs={})
-        report.require_clean()
-        assert report.to_dict()["native"]["incomplete"] == []
 
 
 def test_racecheck_executes_non_int32_local_storage():

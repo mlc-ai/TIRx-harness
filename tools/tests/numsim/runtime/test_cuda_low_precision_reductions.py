@@ -7,17 +7,17 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def cuda_float16_reductions(output: T.Buffer((2, 32, 6), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    sum_scratch = T.alloc_buffer((2,), "float16", scope="shared")
-    max_scratch = T.alloc_buffer((2,), "float16", scope="shared")
-    min_scratch = T.alloc_buffer((2,), "float16", scope="shared")
+@T.function
+def cuda_float16_reductions(output: T.Tensor((2, 32, 6), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    sum_scratch = T.alloc_shared((2,), "float16")
+    max_scratch = T.alloc_shared((2,), "float16")
+    min_scratch = T.alloc_shared((2,), "float16")
     raw: T.float32 = T.if_then_else(
         lane == 0,
         T.float32(1.0) + T.cast(warp, "float32") * T.float32(0.5),
@@ -32,14 +32,14 @@ def cuda_float16_reductions(output: T.Buffer((2, 32, 6), "float32")):
     output[warp, lane, 5] = T.cast(T.cuda.cta_min(value, 2, min_scratch.ptr_to([0])), "float32")
 
 
-@T.prim_func
-def cuda_bfloat16_reductions(output: T.Buffer((2, 32, 6), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    sum_scratch = T.alloc_buffer((2,), "bfloat16", scope="shared")
-    max_scratch = T.alloc_buffer((2,), "bfloat16", scope="shared")
-    min_scratch = T.alloc_buffer((2,), "bfloat16", scope="shared")
+@T.function
+def cuda_bfloat16_reductions(output: T.Tensor((2, 32, 6), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    sum_scratch = T.alloc_shared((2,), "bfloat16")
+    max_scratch = T.alloc_shared((2,), "bfloat16")
+    min_scratch = T.alloc_shared((2,), "bfloat16")
     raw: T.float32 = T.if_then_else(
         lane == 0,
         T.float32(1.0) + T.cast(warp, "float32") * T.float32(0.5),
@@ -54,22 +54,20 @@ def cuda_bfloat16_reductions(output: T.Buffer((2, 32, 6), "float32")):
     output[warp, lane, 5] = T.cast(T.cuda.cta_min(value, 2, min_scratch.ptr_to([0])), "float32")
 
 
-@T.prim_func
-def cuda_float16_zero_reductions(output: T.Buffer((32, 2), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def cuda_float16_zero_reductions(output: T.Tensor((32, 2), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     raw: T.float32 = T.if_then_else(lane % 2 == 0, T.float32(0.0), T.float32(-0.0))
     value: T.float16 = T.cast(raw, "float16")
     output[lane, 0] = T.cast(T.cuda.warp_max(value, width=2), "float32")
     output[lane, 1] = T.cast(T.cuda.warp_min(value, width=2), "float32")
 
 
-@T.prim_func
-def cuda_bfloat16_zero_reductions(output: T.Buffer((32, 2), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def cuda_bfloat16_zero_reductions(output: T.Tensor((32, 2), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     raw: T.float32 = T.if_then_else(lane % 2 == 0, T.float32(0.0), T.float32(-0.0))
     value: T.bfloat16 = T.cast(raw, "bfloat16")
     output[lane, 0] = T.cast(T.cuda.warp_max(value, width=2), "float32")

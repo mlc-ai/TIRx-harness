@@ -4,25 +4,25 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def scheduler_progress_poll(
-    root_head: T.Buffer((1,), "int32"),
-    root_total: T.Buffer((1,), "int32"),
-    root_ready_queue: T.Buffer((1,), "int32"),
-    cont_head: T.Buffer((1,), "int32"),
-    cont_tail: T.Buffer((1,), "int32"),
-    cont_ready_queue: T.Buffer((1,), "int32"),
-    done_counter: T.Buffer((1,), "int32"),
-    work_total: T.Buffer((1,), "int32"),
-    publish_done: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    root_head: T.Tensor((1,), "int32"),
+    root_total: T.Tensor((1,), "int32"),
+    root_ready_queue: T.Tensor((1,), "int32"),
+    cont_head: T.Tensor((1,), "int32"),
+    cont_tail: T.Tensor((1,), "int32"),
+    cont_ready_queue: T.Tensor((1,), "int32"),
+    done_counter: T.Tensor((1,), "int32"),
+    work_total: T.Tensor((1,), "int32"),
+    publish_done: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     ready_work = T.local_scalar("int32")
     atomic_old = T.local_scalar("int32")
     root_seen = T.local_scalar("int32")
@@ -62,21 +62,20 @@ def scheduler_progress_poll(
             T.ptx.atom.release.gpu.global_.add.s32(atomic_old, cont_tail.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
+@T.function
 def scheduler_progress_poll_two_lane_cas_mismatch(
-    root_head: T.Buffer((1,), "int32"),
-    root_total: T.Buffer((1,), "int32"),
-    root_ready_queue: T.Buffer((1,), "int32"),
-    cont_head: T.Buffer((1,), "int32"),
-    cont_tail: T.Buffer((1,), "int32"),
-    cont_ready_queue: T.Buffer((1,), "int32"),
-    done_counter: T.Buffer((1,), "int32"),
-    work_total: T.Buffer((1,), "int32"),
-    output: T.Buffer((2,), "int32"),
+    root_head: T.Tensor((1,), "int32"),
+    root_total: T.Tensor((1,), "int32"),
+    root_ready_queue: T.Tensor((1,), "int32"),
+    cont_head: T.Tensor((1,), "int32"),
+    cont_tail: T.Tensor((1,), "int32"),
+    cont_ready_queue: T.Tensor((1,), "int32"),
+    done_counter: T.Tensor((1,), "int32"),
+    work_total: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     ready_work = T.local_scalar("int32")
     root_seen = T.local_scalar("int32")
     cont_tail_seen = T.local_scalar("int32")
@@ -108,21 +107,20 @@ def scheduler_progress_poll_two_lane_cas_mismatch(
         output[lane] = ready_work
 
 
-@T.prim_func
+@T.function
 def scheduler_progress_poll_effectful_fallback(
-    root_head: T.Buffer((1,), "int32"),
-    root_total: T.Buffer((1,), "int32"),
-    root_ready_queue: T.Buffer((1,), "int32"),
-    cont_head: T.Buffer((1,), "int32"),
-    cont_tail: T.Buffer((1,), "int32"),
-    cont_ready_queue: T.Buffer((1,), "int32"),
-    done_counter: T.Buffer((1,), "int32"),
-    work_total: T.Buffer((1,), "int32"),
-    output: T.Buffer((2,), "int32"),
+    root_head: T.Tensor((1,), "int32"),
+    root_total: T.Tensor((1,), "int32"),
+    root_ready_queue: T.Tensor((1,), "int32"),
+    cont_head: T.Tensor((1,), "int32"),
+    cont_tail: T.Tensor((1,), "int32"),
+    cont_ready_queue: T.Tensor((1,), "int32"),
+    done_counter: T.Tensor((1,), "int32"),
+    work_total: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     ready_work = T.local_scalar("int32")
     root_seen = T.local_scalar("int32")
     cont_tail_seen = T.local_scalar("int32")
@@ -154,11 +152,11 @@ def scheduler_progress_poll_effectful_fallback(
         output[0] = ready_work
 
 
-@T.prim_func
-def time_sliced_side_effect_poll(signal: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def time_sliced_side_effect_poll(signal: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     current = T.local_scalar("int32")
     atomic_old = T.local_scalar("int32")
     if warp == 0:
@@ -172,11 +170,11 @@ def time_sliced_side_effect_poll(signal: T.Buffer((1,), "int32"), output: T.Buff
         T.ptx.atom.release.gpu.global_.add.s32(atomic_old, signal.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
-def time_sliced_finite_for(signal: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def time_sliced_finite_for(signal: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     current = T.local_scalar("int32")
     atomic_old = T.local_scalar("int32")
     if warp == 0:
@@ -189,11 +187,10 @@ def time_sliced_finite_for(signal: T.Buffer((1,), "int32"), output: T.Buffer((1,
         T.ptx.atom.release.gpu.global_.add.s32(atomic_old, signal.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
-def time_sliced_lane_divergent_while(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def time_sliced_lane_divergent_while(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     count = T.local_scalar("int32")
     count = T.int32(0)
     while count < lane + T.int32(64):
@@ -201,11 +198,10 @@ def time_sliced_lane_divergent_while(output: T.Buffer((32,), "int32")):
     output[lane] = count
 
 
-@T.prim_func
-def short_native_while(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def short_native_while(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     count = T.local_scalar("int32")
     if lane == 0:
         count = T.int32(0)
@@ -214,11 +210,10 @@ def short_native_while(output: T.Buffer((1,), "int32")):
         output[0] = count
 
 
-@T.prim_func
-def long_native_while(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def long_native_while(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     count = T.local_scalar("int32")
     if lane == 0:
         count = T.int32(0)
@@ -227,11 +222,11 @@ def long_native_while(output: T.Buffer((1,), "int32")):
         output[0] = count
 
 
-@T.prim_func
-def full_continue_reaches_time_slice(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def full_continue_reaches_time_slice(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     count = T.local_scalar("int32")
     if warp == 0:
         if lane == 0:
@@ -244,21 +239,19 @@ def full_continue_reaches_time_slice(output: T.Buffer((2,), "int32")):
         output[1] = T.int32(1)
 
 
-@T.prim_func
-def initially_false_native_while(control: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def initially_false_native_while(control: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         while control[0] < T.int32(0):
             output[0] = output[0] + T.int32(1)
 
 
-@T.prim_func
-def nested_time_sliced_while(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def nested_time_sliced_while(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     outer = T.local_scalar("int32")
     inner = T.local_scalar("int32")
     total = T.local_scalar("int32")
@@ -274,11 +267,10 @@ def nested_time_sliced_while(output: T.Buffer((1,), "int32")):
         output[0] = total
 
 
-@T.prim_func
-def integer_truth_while(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def integer_truth_while(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         while T.int32(1):
             output[0] = output[0] + T.int32(1)

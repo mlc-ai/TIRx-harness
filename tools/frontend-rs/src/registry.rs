@@ -174,6 +174,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.cuda.bfloat162float", "pure_scalar", crate::emit::pure::cuda_bfloat162float),
     OpRow::new("tirx.cuda.block_dim", "pure_scalar", crate::emit::pure::cuda_launch_index),
     OpRow::new("tirx.cuda.block_idx", "pure_scalar", crate::emit::pure::cuda_launch_index),
+    OpRow::new("tirx.cuda.bmma_sync", "architecture_rejection", crate::emit::calls::rejected).support("rejected").reason("binary WMMA fragments are not modeled"),
     OpRow::new("tirx.cuda.clock64", "pure_scalar", crate::emit::pure::cuda_clock64).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE),
     OpRow::new("tirx.cuda.cluster_cta_id", "pure_scalar", crate::emit::pure::cuda_launch_index),
     OpRow::new("tirx.cuda.cluster_dim", "pure_scalar", crate::emit::pure::cuda_launch_index),

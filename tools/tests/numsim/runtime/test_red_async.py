@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def reduction_kernel(op, ptx_type, *, bulk=False, wait=True, lanes=1):
@@ -18,18 +18,16 @@ def reduction_kernel(op, ptx_type, *, bulk=False, wait=True, lanes=1):
         if bulk
         else f'T.ptx["red_async.relaxed.cluster.shared::cluster.mbarrier::complete_tx::bytes.{op}.{ptx_type}"](remote_destination[0], T.cast(3, "{dtype}"), remote_barrier[0])'
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def kernel(out: T.Buffer(({elements},), "{dtype}")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    destination = T.alloc_buffer(({elements},), "{dtype}", scope="shared", align=16)
-    source = T.alloc_buffer(({elements},), "{dtype}", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(out: T.Tensor(({elements},), "{dtype}")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    destination = T.alloc_shared(({elements},), "{dtype}", align=16)
+    source = T.alloc_shared(({elements},), "{dtype}", align=16)
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         for i in T.unroll({elements}):
             destination[i] = T.cast(7, "{dtype}")

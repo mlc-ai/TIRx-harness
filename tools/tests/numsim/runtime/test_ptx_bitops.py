@@ -6,13 +6,13 @@ import ml_dtypes
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
-from tvm.script import tirx as T
 from tvm_tirx.backend.cuda.ptx.table import canonical_dtypes, mods, operand_type, variants
+from tvm_tirx.script import tirx as T
 
 PTX_BIT_OP_CALLS = (
     "tirx.ptx.abs",
@@ -88,20 +88,19 @@ def _make_all_forms_kernel():
         output_rows[form.dtypes[0]] = max(output_rows.get(form.dtypes[0], 0), form.output_row + 1)
 
     parameters = [
-        *(f'input_{index}_{dtype}: T.Buffer((32,), "{dtype}")' for index, dtype in inputs),
+        *(f'input_{index}_{dtype}: T.Tensor((32,), "{dtype}")' for index, dtype in inputs),
         *(
-            f'output_{dtype}: T.Buffer(({4 * rows}, 32), "{dtype}")'
+            f'output_{dtype}: T.Tensor(({4 * rows}, 32), "{dtype}")'
             for dtype, rows in sorted(output_rows.items())
         ),
     ]
     lines = [
-        "@T.prim_func",
+        "@T.function",
         "def ptx_bitops_all_forms(",
         *(f"    {parameter}," for parameter in parameters),
         "):",
-        "    T.device_entry()",
-        "    _warp = T.warp_id([1])",
-        "    lane = T.lane_id([32])",
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+        "    lane = T.cuda.lane_id()",
         "    masked = T.Select(lane % 2 == 0, lane, 32)",
         *(f'    dst_{dtype} = T.alloc_local((1,), "{dtype}")' for dtype in sorted(output_rows)),
     ]
@@ -135,7 +134,7 @@ def _make_all_forms_kernel():
                 f'    T.ptx["{form.spelling}"]({", ".join(arguments)}{predicate})',
                 f"    output_{dtype}[{row + position}, lane] = dst_{dtype}[0]",
             ]
-    return tvm.script.from_source("\n".join(lines), {"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), {"T": T})
 
 
 def _unsigned_words(width: int) -> np.ndarray:
@@ -427,13 +426,12 @@ def test_bitfield_control_domain_is_checked_only_on_issuing_lanes(tmp_path):
         bits = int(spelling[-2:])
         dtype = f"{'int' if spelling.startswith('bfe.s') else 'uint'}{bits}"
         data = f"T.{dtype}(1), " + (f"T.{dtype}(0), " if spelling.startswith("bfi") else "")
-        kernel = tvm.script.from_source(
-            f'''@T.prim_func
-def kernel(position: T.Buffer((32,), "uint32"), length: T.Buffer((32,), "uint32"),
-           output: T.Buffer((32,), "{dtype}")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+        kernel = tvm_tirx.script.from_source(
+            f'''@T.function
+def kernel(position: T.Tensor((32,), "uint32"), length: T.Tensor((32,), "uint32"),
+           output: T.Tensor((32,), "{dtype}")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.{dtype}(85)
     T.ptx["{spelling}"](output[lane], {data}position[lane], length[lane],
                       pred=lane % 2 == 0, preserve_dst=True)
@@ -462,11 +460,10 @@ def kernel(position: T.Buffer((32,), "uint32"), length: T.Buffer((32,), "uint32"
 
 
 def test_fns_base_domain_is_checked_only_on_issuing_lanes(tmp_path):
-    @T.prim_func
-    def kernel(bases: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(bases: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         output[lane] = T.uint32(85)
         T.ptx.fns.b32(
             output[lane],
@@ -501,14 +498,13 @@ _B16_DTYPES = ("uint16", "int16", "float16", "bfloat16")
 
 def _make_b16_carrier_kernel():
     lines = [
-        "@T.prim_func",
+        "@T.function",
         "def ptx_b16_carriers(",
-        *(f'    input_{dtype}: T.Buffer((32,), "{dtype}"),' for dtype in _B16_DTYPES),
-        *(f'    output_{dtype}: T.Buffer((8, 32), "{dtype}"),' for dtype in _B16_DTYPES),
+        *(f'    input_{dtype}: T.Tensor((32,), "{dtype}"),' for dtype in _B16_DTYPES),
+        *(f'    output_{dtype}: T.Tensor((8, 32), "{dtype}"),' for dtype in _B16_DTYPES),
         "):",
-        "    T.device_entry()",
-        "    _warp = T.warp_id([1])",
-        "    lane = T.lane_id([32])",
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+        "    lane = T.cuda.lane_id()",
     ]
     for destination_dtype in _B16_DTYPES:
         row = 0
@@ -519,7 +515,7 @@ def _make_b16_carrier_kernel():
                     f"output_{destination_dtype}[{row}, lane], input_{source_dtype}[lane])"
                 )
                 row += 1
-    return tvm.script.from_source("\n".join(lines), {"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), {"T": T})
 
 
 def _view_b16(bits: np.ndarray, dtype: str) -> np.ndarray:

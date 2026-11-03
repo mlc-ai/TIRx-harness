@@ -2,9 +2,9 @@
 
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 @pytest.mark.parametrize(
@@ -13,11 +13,11 @@ from tvm.script import tirx as T
 )
 def test_vector_bitwise_nodes_are_rejected(operation):
     arguments = "x" if operation == "bitwise_not" else "x, x"
-    kernel = tvm.script.from_source(
-        "@T.prim_func\n"
-        'def kernel(values: T.Buffer((32,), "int32x2")):\n'
-        "    T.device_entry()\n"
-        "    lane = T.lane_id([32])\n"
+    kernel = tvm_tirx.script.from_source(
+        "@T.function\n"
+        'def kernel(values: T.Tensor((32,), "int32x2")):\n'
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))\n"
+        "    lane = T.cuda.lane_id()\n"
         "    x: T.let = values[lane]\n"
         f"    T.evaluate(T.{operation}({arguments}))\n",
         extra_vars={"T": T},

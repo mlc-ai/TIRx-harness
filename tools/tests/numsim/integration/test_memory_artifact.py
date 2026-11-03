@@ -3,102 +3,96 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.script import tirx as T
 from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def integer_address_same_backing(
-    source: T.Buffer((33,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((33,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address_bits: T.uint64 = T.reinterpret("uint64", source.ptr_to([0]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address_bits: T.uint64 = T.reinterpret(source.ptr_to([0]), ty="uint64")
     if lane < 16:
-        address_bits = T.reinterpret("uint64", source.ptr_to([lane]))
+        address_bits = T.reinterpret(source.ptr_to([lane]), ty="uint64")
     else:
-        address_bits = T.reinterpret("uint64", source.ptr_to([31 - lane]))
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", address_bits))
+        address_bits = T.reinterpret(source.ptr_to([31 - lane]), ty="uint64")
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(address_bits, ty="handle"))
 
 
-@T.prim_func
+@T.function
 def integer_address_different_backing(
-    left: T.Buffer((32,), "uint32"),
-    right: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    left: T.Tensor((32,), "uint32"),
+    right: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address_bits: T.uint64 = T.reinterpret("uint64", left.ptr_to([lane]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address_bits: T.uint64 = T.reinterpret(left.ptr_to([lane]), ty="uint64")
     if lane >= 16:
-        address_bits = T.reinterpret("uint64", right.ptr_to([lane]))
-    T.ptx.ld.global_.u32(output[lane], T.reinterpret("handle", address_bits))
+        address_bits = T.reinterpret(right.ptr_to([lane]), ty="uint64")
+    T.ptx.ld.global_.u32(output[lane], T.reinterpret(address_bits, ty="handle"))
 
 
-@T.prim_func
+@T.function
 def integer_address_byte_offset(
-    source: T.Buffer((33,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((33,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address_bits: T.uint64 = T.reinterpret("uint64", source.ptr_to([lane]))
-    shifted = T.reinterpret("handle", address_bits + T.uint64(4))
-    typed_shifted = T.ptr_byte_offset(shifted, T.uint32(0), "uint32")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address_bits: T.uint64 = T.reinterpret(source.ptr_to([lane]), ty="uint64")
+    shifted = T.reinterpret(address_bits + T.uint64(4), ty="handle")
+    typed_shifted = T.ptr_byte_offset(shifted, T.uint32(0), ty=T.Ptr("uint32"))
     T.ptx.ld.global_.u32(output[lane], typed_shifted)
 
 
-@T.prim_func
-def unused_out_of_bounds_shared_view(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    storage = T.alloc_buffer((4,), "uint8", scope="shared")
+@T.function
+def unused_out_of_bounds_shared_view(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    storage = T.alloc_shared((4,), "uint8")
     alias_data: T.let[
         T.Var(
             name="unused_out_of_bounds_shared_data",
             ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
-    _alias = T.decl_buffer((1,), "uint32", data=alias_data, scope="shared")
+    ] = T.reinterpret(storage.ptr_to([8]), ty=PtrType(PrimType("uint32"), "shared"))
+    _alias = T.decl_tensor(alias_data, ty_args=[T.Tensor((1,), "uint32", scope="shared")])
     if lane == 0:
         output[0] = T.uint32(17)
 
 
-@T.prim_func
-def accessed_out_of_bounds_shared_view(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    storage = T.alloc_buffer((4,), "uint8", scope="shared")
+@T.function
+def accessed_out_of_bounds_shared_view(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    storage = T.alloc_shared((4,), "uint8")
     alias_data: T.let[
         T.Var(
             name="accessed_out_of_bounds_shared_data",
             ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
-    alias = T.decl_buffer((1,), "uint32", data=alias_data, scope="shared")
+    ] = T.reinterpret(storage.ptr_to([8]), ty=PtrType(PrimType("uint32"), "shared"))
+    alias = T.decl_tensor(alias_data, ty_args=[T.Tensor((1,), "uint32", scope="shared")])
     if lane == 0:
         output[0] = alias[0]
 
 
-@T.prim_func
+@T.function
 def byte_storage_integer_address_atomic_and_load(
-    storage: T.Buffer((4,), "uint8"), output: T.Buffer((2,), "uint32")
+    storage: T.Tensor((4,), "uint8"), output: T.Tensor((2,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        address_bits: T.uint64 = T.reinterpret("uint64", storage.ptr_to([0]))
-        shifted = T.reinterpret("handle", address_bits + T.uint64(0))
+        address_bits: T.uint64 = T.reinterpret(storage.ptr_to([0]), ty="uint64")
+        shifted = T.reinterpret(address_bits + T.uint64(0), ty="handle")
         T.ptx.atom.release.gpu.global_.add.u32(
             output[0],
             shifted,
@@ -107,16 +101,15 @@ def byte_storage_integer_address_atomic_and_load(
         T.ptx.ld.global_.u32(output[1], shifted)
 
 
-@T.prim_func
+@T.function
 def non_byte_integer_address_atomic_uses_instruction_width(
-    storage: T.Buffer((2,), "uint16"), output: T.Buffer((1,), "uint32")
+    storage: T.Tensor((2,), "uint16"), output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        address_bits: T.uint64 = T.reinterpret("uint64", storage.ptr_to([0]))
-        shifted = T.reinterpret("handle", address_bits + T.uint64(0))
+        address_bits: T.uint64 = T.reinterpret(storage.ptr_to([0]), ty="uint64")
+        shifted = T.reinterpret(address_bits + T.uint64(0), ty="handle")
         T.ptx.atom.release.gpu.global_.add.u32(
             output[0],
             shifted,
@@ -124,22 +117,21 @@ def non_byte_integer_address_atomic_uses_instruction_width(
         )
 
 
-@T.prim_func
+@T.function
 def mega_atomic_and_reduction_ops(
-    atom_u32: T.Buffer((1,), "uint32"),
-    atom_u64: T.Buffer((1,), "uint64"),
-    red_i32: T.Buffer((1,), "int32"),
-    red_u32: T.Buffer((1,), "uint32"),
-    red_or_u64: T.Buffer((1,), "uint64"),
-    old_shared: T.Buffer((32,), "int32"),
-    old_u32: T.Buffer((32,), "uint32"),
-    old_u64: T.Buffer((32,), "uint64"),
-    final_shared: T.Buffer((1,), "int32"),
+    atom_u32: T.Tensor((1,), "uint32"),
+    atom_u64: T.Tensor((1,), "uint64"),
+    red_i32: T.Tensor((1,), "int32"),
+    red_u32: T.Tensor((1,), "uint32"),
+    red_or_u64: T.Tensor((1,), "uint64"),
+    old_shared: T.Tensor((32,), "int32"),
+    old_u32: T.Tensor((32,), "uint32"),
+    old_u64: T.Tensor((32,), "uint64"),
+    final_shared: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if lane == 0:
         shared[0] = 0
     T.cuda.warp_sync()
@@ -164,16 +156,15 @@ def mega_atomic_and_reduction_ops(
         final_shared[0] = shared[0]
 
 
-@T.prim_func
+@T.function
 def atomic_cache_hints_are_numerical_noops(
-    atom_counter: T.Buffer((1,), "uint32"),
-    red_counter: T.Buffer((1,), "uint32"),
-    old_values: T.Buffer((3,), "uint32"),
-    final_values: T.Buffer((2,), "uint32"),
+    atom_counter: T.Tensor((1,), "uint32"),
+    red_counter: T.Tensor((1,), "uint32"),
+    old_values: T.Tensor((3,), "uint32"),
+    final_values: T.Tensor((2,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx.atom.release.gpu.global_.add.u32(
             old_values[0],
@@ -207,16 +198,15 @@ def atomic_cache_hints_are_numerical_noops(
         final_values[1] = red_counter[0]
 
 
-@T.prim_func
+@T.function
 def global_i32_atomic_add_forms(
-    cuda_counter: T.Buffer((1,), "int32"),
-    ptx_counter: T.Buffer((1,), "int32"),
-    old_cuda: T.Buffer((4,), "int32"),
-    old_ptx: T.Buffer((4,), "int32"),
+    cuda_counter: T.Tensor((1,), "int32"),
+    ptx_counter: T.Tensor((1,), "int32"),
+    old_cuda: T.Tensor((4,), "int32"),
+    old_ptx: T.Tensor((4,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         old_cuda[lane] = T.cuda.atomic_add(cuda_counter.ptr_to([0]), T.int32(1))
         T.ptx.atom.release.gpu.global_.add.s32(
@@ -226,27 +216,25 @@ def global_i32_atomic_add_forms(
         )
 
 
-@T.prim_func
+@T.function
 def global_i32_atomic_cas(
-    cell: T.Buffer((1,), "int32"),
-    old_values: T.Buffer((2,), "int32"),
-    final_value: T.Buffer((1,), "int32"),
+    cell: T.Tensor((1,), "int32"),
+    old_values: T.Tensor((2,), "int32"),
+    final_value: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old_values[0] = T.cuda.atomic_cas(cell.ptr_to([0]), T.int32(7), T.int32(11))
         old_values[1] = T.cuda.atomic_cas(cell.ptr_to([0]), T.int32(7), T.int32(13))
         final_value[0] = cell[0]
 
 
-@T.prim_func
-def mega_st_bulk_zero(output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "uint32", scope="shared")
+@T.function
+def mega_st_bulk_zero(output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "uint32")
     if lane < 4:
         shared[lane] = T.cast(lane + 1, "uint32")
     T.cuda.warp_sync()
@@ -257,12 +245,11 @@ def mega_st_bulk_zero(output: T.Buffer((4,), "uint32")):
         output[lane] = shared[lane]
 
 
-@T.prim_func
-def lane_wise_st_bulk_zero(output: T.Buffer((64,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "uint32", scope="shared")
+@T.function
+def lane_wise_st_bulk_zero(output: T.Tensor((64,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "uint32")
     shared[lane * 2] = T.uint32(lane + 1)
     shared[lane * 2 + 1] = T.uint32(lane + 101)
     T.cuda.warp_sync()
@@ -272,12 +259,11 @@ def lane_wise_st_bulk_zero(output: T.Buffer((64,), "uint32")):
     output[lane * 2 + 1] = shared[lane * 2 + 1]
 
 
-@T.prim_func
-def lane_wise_bulk_s2g(source: T.Buffer((128,), "uint32"), destination: T.Buffer((128,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint32", scope="shared")
+@T.function
+def lane_wise_bulk_s2g(source: T.Tensor((128,), "uint32"), destination: T.Tensor((128,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint32")
     base = lane * 4
     for index in T.serial(4):
         shared[base + index] = source[base + index]
@@ -290,13 +276,12 @@ def lane_wise_bulk_s2g(source: T.Buffer((128,), "uint32"), destination: T.Buffer
     T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
-def mega_bulk_roundtrip(source: T.Buffer((32,), "uint8"), destination: T.Buffer((32,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def mega_bulk_roundtrip(source: T.Tensor((32,), "uint8"), destination: T.Tensor((32,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -322,15 +307,14 @@ def mega_bulk_roundtrip(source: T.Buffer((32,), "uint8"), destination: T.Buffer(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
+@T.function
 def mega_bulk_roundtrip_without_cache_hint(
-    source: T.Buffer((32,), "uint8"), destination: T.Buffer((32,), "uint8")
+    source: T.Tensor((32,), "uint8"), destination: T.Tensor((32,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -349,15 +333,14 @@ def mega_bulk_roundtrip_without_cache_hint(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
+@T.function
 def mega_bulk_roundtrip_alternate_cache_hints(
-    source: T.Buffer((32,), "uint8"), destination: T.Buffer((32,), "uint8")
+    source: T.Tensor((32,), "uint8"), destination: T.Tensor((32,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -383,15 +366,13 @@ def mega_bulk_roundtrip_alternate_cache_hints(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
-def mega_bulk_g2s_multicast(source: T.Buffer((16,), "uint8"), output: T.Buffer((2, 16), "uint8")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def mega_bulk_g2s_multicast(source: T.Tensor((16,), "uint8"), output: T.Tensor((2, 16), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -415,12 +396,11 @@ def mega_bulk_g2s_multicast(source: T.Buffer((16,), "uint8"), output: T.Buffer((
         output[cta, lane] = shared[lane]
 
 
-@T.prim_func
-def mega_bulk_s2g_cp_mask(source: T.Buffer((16,), "uint8"), destination: T.Buffer((16,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+@T.function
+def mega_bulk_s2g_cp_mask(source: T.Tensor((16,), "uint8"), destination: T.Tensor((16,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     if lane < 16:
         shared[lane] = source[lane]
     T.cuda.warp_sync()
@@ -437,16 +417,15 @@ def mega_bulk_s2g_cp_mask(source: T.Buffer((16,), "uint8"), destination: T.Buffe
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
+@T.function
 def bulk_s2g_read_then_full_wait(
-    source: T.Buffer((16,), "uint8"),
-    destination: T.Buffer((16,), "uint8"),
-    observed: T.Buffer((2,), "uint8"),
+    source: T.Tensor((16,), "uint8"),
+    destination: T.Tensor((16,), "uint8"),
+    observed: T.Tensor((2,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     if lane == 0:
         for index in T.serial(16):
             shared[index] = source[index]
@@ -464,16 +443,15 @@ def bulk_s2g_read_then_full_wait(
         observed[1] = destination[0]
 
 
-@T.prim_func
+@T.function
 def bulk_s2g_multiple_groups(
-    source: T.Buffer((32,), "uint8"),
-    destination: T.Buffer((32,), "uint8"),
-    observed: T.Buffer((2,), "uint8"),
+    source: T.Tensor((32,), "uint8"),
+    destination: T.Tensor((32,), "uint8"),
+    observed: T.Tensor((2,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     if lane == 0:
         for index in T.serial(16):
             shared[index] = source[index]
@@ -502,14 +480,13 @@ def bulk_s2g_multiple_groups(
         observed[1] = destination[16]
 
 
-@T.prim_func
+@T.function
 def bulk_s2g_read_only_exit(
-    source: T.Buffer((16,), "uint8"), destination: T.Buffer((16,), "uint8")
+    source: T.Tensor((16,), "uint8"), destination: T.Tensor((16,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     if lane == 0:
         for index in T.serial(16):
             shared[index] = source[index]
@@ -524,13 +501,11 @@ def bulk_s2g_read_only_exit(
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
-def mega_cluster_arrive_wait(exchange: T.Buffer((2,), "int32"), output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def mega_cluster_arrive_wait(exchange: T.Tensor((2,), "int32"), output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         exchange[cta] = cta + 11
     T.ptx.barrier.cluster.arrive.release.aligned()
@@ -539,15 +514,13 @@ def mega_cluster_arrive_wait(exchange: T.Buffer((2,), "int32"), output: T.Buffer
         output[cta] = exchange[1 - cta]
 
 
-@T.prim_func
+@T.function
 def mega_cluster_arrive_only_participant(
-    exchange: T.Buffer((2,), "int32"), output: T.Buffer((1,), "int32")
+    exchange: T.Tensor((2,), "int32"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         exchange[cta] = cta + 21
     T.ptx.barrier.cluster.arrive.release.aligned()
@@ -559,35 +532,33 @@ def mega_cluster_arrive_only_participant(
         T.evaluate(0)
 
 
-@T.prim_func
-def mega_lane_private_mbarrier_init(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((32,), "uint64", scope="shared")
+@T.function
+def mega_lane_private_mbarrier_init(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((32,), "uint64")
     T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane]), 1)
     if lane == 0:
         output[0] = 17
 
 
-@T.prim_func
-def invalid_partially_aliased_mbarrier_init(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((16,), "uint64", scope="shared")
+@T.function
+def invalid_partially_aliased_mbarrier_init(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((16,), "uint64")
     T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([lane // 2]), 1)
     if lane == 0:
         output[0] = 17
 
 
-@T.prim_func
+@T.function
 def global_acquire_poll_woken_by_atomic(
-    signal: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")
+    signal: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     current = T.local_scalar("uint32")
     if warp == 0:
         if lane == 0:
@@ -599,13 +570,13 @@ def global_acquire_poll_woken_by_atomic(
         T.ptx.atom.release.gpu.global_.add.u32(current, signal.ptr_to([0]), T.uint32(1))
 
 
-@T.prim_func
+@T.function
 def global_acquire_poll_woken_by_cross_cluster_atomic(
-    signal: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")
+    signal: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     current = T.local_scalar("uint32")
     if cta == 0:
         if lane == 0:
@@ -617,15 +588,15 @@ def global_acquire_poll_woken_by_cross_cluster_atomic(
         T.ptx.atom.release.gpu.global_.add.u32(current, signal.ptr_to([0]), T.uint32(1))
 
 
-@T.prim_func
+@T.function
 def direct_global_acquire_poll_woken_by_same_cluster_atomic(
-    done_counter: T.Buffer((1,), "int32"),
-    work_total: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    done_counter: T.Tensor((1,), "int32"),
+    work_total: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     old = T.local_scalar("int32")
     current = T.local_scalar("int32")
     if warp == 0:
@@ -638,13 +609,12 @@ def direct_global_acquire_poll_woken_by_same_cluster_atomic(
         T.ptx.atom.release.gpu.global_.add.s32(old, done_counter.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
+@T.function
 def global_volatile_poll_zero_init_first_reload(
-    signal: T.Buffer((1,), "uint64"), output: T.Buffer((1,), "uint64")
+    signal: T.Tensor((1,), "uint64"), output: T.Tensor((1,), "uint64")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     current = T.local_scalar("uint64")
     if lane == 0:
         current = T.uint64(0)
@@ -653,13 +623,13 @@ def global_volatile_poll_zero_init_first_reload(
         output[0] = current
 
 
-@T.prim_func
+@T.function
 def global_acquire_poll_two_lane_ranges(
-    signal: T.Buffer((2,), "uint32"), output: T.Buffer((2,), "uint32")
+    signal: T.Tensor((2,), "uint32"), output: T.Tensor((2,), "uint32")
 ):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     current = T.local_scalar("uint32")
     if warp == 0:
         if lane < 2:
@@ -677,13 +647,12 @@ def global_acquire_poll_two_lane_ranges(
         T.ptx.bar.sync(T.uint32(0), T.uint32(64))
 
 
-@T.prim_func
+@T.function
 def non_polling_loop_with_extra_body_effect(
-    signal: T.Buffer((1,), "uint32"), output: T.Buffer((1,), "uint32")
+    signal: T.Tensor((1,), "uint32"), output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     current = T.local_scalar("uint32")
     mirror = T.local_scalar("uint32")
     if lane == 0:
@@ -694,13 +663,12 @@ def non_polling_loop_with_extra_body_effect(
         output[0] = mirror
 
 
-@T.prim_func
+@T.function
 def direct_global_poll_with_body_effect(
-    signal: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")
+    signal: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     current = T.local_scalar("int32")
     if lane == 0:
         T.ptx.ld.acquire.gpu.global_.s32(current, signal.ptr_to([0]))
@@ -709,13 +677,12 @@ def direct_global_poll_with_body_effect(
             T.ptx.ld.acquire.gpu.global_.s32(current, signal.ptr_to([0]))
 
 
-@T.prim_func
+@T.function
 def direct_global_poll_with_two_watched_loads(
-    left: T.Buffer((1,), "int32"), right: T.Buffer((1,), "int32")
+    left: T.Tensor((1,), "int32"), right: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     left_current = T.local_scalar("int32")
     right_current = T.local_scalar("int32")
     if lane == 0:
@@ -726,13 +693,13 @@ def direct_global_poll_with_two_watched_loads(
             T.ptx.ld.acquire.gpu.global_.s32(right_current, right.ptr_to([0]))
 
 
-@T.prim_func
+@T.function
 def plain_global_buffer_poll_two_lane_ranges(
-    signal: T.Buffer((2,), "int32"), output: T.Buffer((2,), "int32")
+    signal: T.Tensor((2,), "int32"), output: T.Tensor((2,), "int32")
 ):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     current = T.local_scalar("int32")
     old = T.local_scalar("int32")
     if warp == 0:
@@ -751,49 +718,45 @@ def plain_global_buffer_poll_two_lane_ranges(
         T.ptx.bar.sync(T.uint32(0), T.uint32(64))
 
 
-@T.prim_func
+@T.function
 def plain_global_buffer_poll_with_body_effect(
-    signal: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")
+    signal: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         while signal[0] < T.int32(1):
             output[0] = output[0] + T.int32(1)
 
 
-@T.prim_func
+@T.function
 def plain_global_buffer_poll_with_two_loads(
-    left: T.Buffer((1,), "int32"), right: T.Buffer((1,), "int32")
+    left: T.Tensor((1,), "int32"), right: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         while left[0] < right[0]:
             T.evaluate(0)
 
 
 _INVALID_ST_BULK_SIZE_SOURCE = """
-@T.prim_func
+@T.function
 def invalid():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((2,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((2,), "uint32")
     if lane == 0:
         T.ptx.st_bulk.shared__cta(shared.ptr_to([0]), T.float32(8))
 """
 
 _INVALID_G2S_MASK_WITHOUT_MULTICAST_SOURCE = """
-@T.prim_func
-def invalid(source: T.Buffer((16,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def invalid(source: T.Tensor((16,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx["cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes"](
             shared.ptr_to([0]), source.ptr_to([0]), T.uint32(16),
@@ -802,12 +765,11 @@ def invalid(source: T.Buffer((16,), "uint8")):
 """
 
 _INVALID_S2G_MASK_WITHOUT_MODIFIER_SOURCE = """
-@T.prim_func
-def invalid(destination: T.Buffer((16,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
+@T.function
+def invalid(destination: T.Tensor((16,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
     if lane == 0:
         T.ptx["cp.async.bulk.global.shared::cta.bulk_group"](
             destination.ptr_to([0]), shared.ptr_to([0]),
@@ -816,13 +778,10 @@ def invalid(destination: T.Buffer((16,), "uint8")):
 """
 
 
-@T.prim_func
-def cluster_barrier_default_and_release_forms(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def cluster_barrier_default_and_release_forms(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.barrier.cluster.arrive()
     T.ptx.barrier.cluster.wait()
     T.ptx.barrier.cluster.arrive.release()
@@ -831,13 +790,10 @@ def cluster_barrier_default_and_release_forms(output: T.Buffer((1,), "int32")):
         output[0] = 1
 
 
-@T.prim_func
-def cluster_barrier_unaligned_divergent_arrive(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def cluster_barrier_unaligned_divergent_arrive(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 16:
         T.ptx.barrier.cluster.arrive()
     else:
@@ -1326,8 +1282,8 @@ def test_all_native_while_shapes_use_engine_loop_budget(kernel, inputs, tmp_path
     ],
 )
 def test_table_driven_bulk_memory_syntax_rejects_unbound_operands(source: str, message: str):
-    with pytest.raises((ValueError, tvm.error.DiagnosticError), match=message):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises((ValueError, ValueError), match=message):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_cluster_barrier_accepts_default_release_and_unaligned_forms(tmp_path):

@@ -23,57 +23,55 @@ from tests.numsim.support.kernels import (
 )
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_bit_type_relaxed_roundtrip(
-    source_f32: T.Buffer((32,), "float32"),
-    source_i32: T.Buffer((32,), "int32"),
-    output_f32: T.Buffer((32,), "float32"),
-    output_i32: T.Buffer((32,), "int32"),
+    source_f32: T.Tensor((32,), "float32"),
+    source_i32: T.Tensor((32,), "int32"),
+    output_f32: T.Tensor((32,), "float32"),
+    output_i32: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_f32 = T.alloc_buffer((32,), "uint32", scope="shared")
-    shared_i32 = T.alloc_buffer((32,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_f32 = T.alloc_shared((32,), "uint32")
+    shared_i32 = T.alloc_shared((32,), "uint32")
     T.ptx.st.shared.b32(shared_f32.ptr_to([lane]), source_f32[lane])
     T.ptx.st.shared.b32(shared_i32.ptr_to([lane]), source_i32[lane])
     T.ptx.ld.shared.b32(output_f32[lane], shared_f32.ptr_to([lane]))
     T.ptx.ld.shared.b32(output_i32[lane], shared_i32.ptr_to([lane]))
 
 
-@T.prim_func
+@T.function
 def raw_integer_type_relaxed_roundtrip(
-    source_i8: T.Buffer((32,), "int8"),
-    source_u8: T.Buffer((32,), "uint8"),
-    source_i16: T.Buffer((32,), "int16"),
-    source_u16: T.Buffer((32,), "uint16"),
-    source_i32: T.Buffer((32,), "int32"),
-    source_u32: T.Buffer((32,), "uint32"),
-    source_i64: T.Buffer((32,), "int64"),
-    source_u64: T.Buffer((32,), "uint64"),
-    output_i8: T.Buffer((32,), "int8"),
-    output_u8: T.Buffer((32,), "uint8"),
-    output_i16: T.Buffer((32,), "int16"),
-    output_u16: T.Buffer((32,), "uint16"),
-    output_i32: T.Buffer((32,), "int32"),
-    output_u32: T.Buffer((32,), "uint32"),
-    output_i64: T.Buffer((32,), "int64"),
-    output_u64: T.Buffer((32,), "uint64"),
+    source_i8: T.Tensor((32,), "int8"),
+    source_u8: T.Tensor((32,), "uint8"),
+    source_i16: T.Tensor((32,), "int16"),
+    source_u16: T.Tensor((32,), "uint16"),
+    source_i32: T.Tensor((32,), "int32"),
+    source_u32: T.Tensor((32,), "uint32"),
+    source_i64: T.Tensor((32,), "int64"),
+    source_u64: T.Tensor((32,), "uint64"),
+    output_i8: T.Tensor((32,), "int8"),
+    output_u8: T.Tensor((32,), "uint8"),
+    output_i16: T.Tensor((32,), "int16"),
+    output_u16: T.Tensor((32,), "uint16"),
+    output_i32: T.Tensor((32,), "int32"),
+    output_u32: T.Tensor((32,), "uint32"),
+    output_i64: T.Tensor((32,), "int64"),
+    output_u64: T.Tensor((32,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_u8 = T.alloc_buffer((32,), "uint8", scope="shared")
-    shared_s8 = T.alloc_buffer((32,), "uint8", scope="shared")
-    shared_u16 = T.alloc_buffer((32,), "uint16", scope="shared")
-    shared_s16 = T.alloc_buffer((32,), "uint16", scope="shared")
-    shared_u32 = T.alloc_buffer((32,), "uint32", scope="shared")
-    shared_s32 = T.alloc_buffer((32,), "uint32", scope="shared")
-    shared_u64 = T.alloc_buffer((32,), "uint64", scope="shared")
-    shared_s64 = T.alloc_buffer((32,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_u8 = T.alloc_shared((32,), "uint8")
+    shared_s8 = T.alloc_shared((32,), "uint8")
+    shared_u16 = T.alloc_shared((32,), "uint16")
+    shared_s16 = T.alloc_shared((32,), "uint16")
+    shared_u32 = T.alloc_shared((32,), "uint32")
+    shared_s32 = T.alloc_shared((32,), "uint32")
+    shared_u64 = T.alloc_shared((32,), "uint64")
+    shared_s64 = T.alloc_shared((32,), "uint64")
     loaded_u8_as_i8 = T.local_scalar("int8")
     loaded_s8_as_u8 = T.local_scalar("uint8")
     loaded_u16_as_i16 = T.local_scalar("int16")
@@ -108,36 +106,33 @@ def raw_integer_type_relaxed_roundtrip(
     output_u64[lane] = loaded_s64_as_u64
 
 
-@T.prim_func
-def raw_global_nc_load(source: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_global_nc_load(source: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.ld.global_.ca.nc.s32(output[lane], source.ptr_to([lane]))
 
 
-@T.prim_func
+@T.function
 def raw_predicated_global_store(
-    source: T.Buffer((32,), "uint32"),
-    predicate: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    predicate: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.st.global_.u32(output.ptr_to([lane]), source[lane], pred=predicate[lane])
 
 
-@T.prim_func
+@T.function
 def raw_subword_vector_stores(
-    source: T.Buffer((128,), "uint16"),
-    output_v2: T.Buffer((64,), "uint16"),
-    output_v4: T.Buffer((128,), "uint16"),
+    source: T.Tensor((128,), "uint16"),
+    output_v2: T.Tensor((64,), "uint16"),
+    output_v4: T.Tensor((128,), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint16")
     source_base = lane * 4
     T.ptx.st.global_.v2.b16(
         output_v2.ptr_to([lane * 2]), source[source_base], source[source_base + 1]
@@ -154,23 +149,21 @@ def raw_subword_vector_stores(
         output_v4[source_base + element] = shared[source_base + element]
 
 
-@T.prim_func
-def raw_global_v4_u32_load(source: T.Buffer((128,), "uint32"), output: T.Buffer((128,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_global_v4_u32_load(source: T.Tensor((128,), "uint32"), output: T.Tensor((128,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     values = T.alloc_local((4,), "uint32")
     T.ptx.ld.global_.v4.b32(values[0], values[1], values[2], values[3], source.ptr_to([lane * 4]))
     for index in T.unroll(4):
         output[lane * 4 + index] = values[index]
 
 
-@T.prim_func
-def raw_shared_v4_load_to_local(source: T.Buffer((4,), "uint32"), output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "uint32", scope="shared")
+@T.function
+def raw_shared_v4_load_to_local(source: T.Tensor((4,), "uint32"), output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "uint32")
     local = T.alloc_local((4,), "uint32")
     if lane == 0:
         for i in T.serial(4):
@@ -180,13 +173,12 @@ def raw_shared_v4_load_to_local(source: T.Buffer((4,), "uint32"), output: T.Buff
             output[i] = local[i]
 
 
-@T.prim_func
+@T.function
 def raw_global_nc_v4_load_to_each_lane(
-    source: T.Buffer((4,), "uint64"), output: T.Buffer((32, 4), "uint64")
+    source: T.Tensor((4,), "uint64"), output: T.Tensor((32, 4), "uint64")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     local = T.alloc_local((4,), "uint64")
     T.ptx["ld.global.nc.L1::no_allocate.L2::evict_normal.L2::256B.v4.u64"](
         local[0], local[1], local[2], local[3], source.ptr_to([0])
@@ -195,17 +187,16 @@ def raw_global_nc_v4_load_to_each_lane(
         output[lane, i] = local[i]
 
 
-@T.prim_func
+@T.function
 def raw_global_v2_and_v8_destination_loads(
-    source32: T.Buffer((256,), "uint32"),
-    source64: T.Buffer((64,), "uint64"),
-    out_v2_32: T.Buffer((64,), "uint32"),
-    out_v8_32: T.Buffer((256,), "uint32"),
-    out_v2_64: T.Buffer((64,), "uint64"),
+    source32: T.Tensor((256,), "uint32"),
+    source64: T.Tensor((64,), "uint64"),
+    out_v2_32: T.Tensor((64,), "uint32"),
+    out_v8_32: T.Tensor((256,), "uint32"),
+    out_v2_64: T.Tensor((64,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     pair32 = T.alloc_local((2,), "uint32")
     eight32 = T.alloc_local((8,), "uint32")
     pair64 = T.alloc_local((2,), "uint64")
@@ -229,16 +220,15 @@ def raw_global_v2_and_v8_destination_loads(
         out_v8_32[lane * 8 + index] = eight32[index]
 
 
-@T.prim_func
+@T.function
 def raw_shared_v2_ordered_destination_loads(
-    source: T.Buffer((64,), "uint32"),
-    relaxed: T.Buffer((64,), "uint32"),
-    acquired: T.Buffer((64,), "uint32"),
+    source: T.Tensor((64,), "uint32"),
+    relaxed: T.Tensor((64,), "uint32"),
+    acquired: T.Tensor((64,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "uint32")
     relaxed_pair = T.alloc_local((2,), "uint32")
     acquired_pair = T.alloc_local((2,), "uint32")
     for index in T.unroll(2):
@@ -253,14 +243,13 @@ def raw_shared_v2_ordered_destination_loads(
         acquired[lane * 2 + index] = acquired_pair[index]
 
 
-@T.prim_func
+@T.function
 def raw_shared_v2_volatile_destination_load(
-    source: T.Buffer((64,), "uint32"), output: T.Buffer((64,), "uint32")
+    source: T.Tensor((64,), "uint32"), output: T.Tensor((64,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "uint32")
     pair = T.alloc_local((2,), "uint32")
     for index in T.unroll(2):
         shared[lane * 2 + index] = source[lane * 2 + index]
@@ -270,15 +259,14 @@ def raw_shared_v2_volatile_destination_load(
         output[lane * 2 + index] = pair[index]
 
 
-@T.prim_func
+@T.function
 def raw_shared_ordered_b128_load(
-    source: T.Buffer((32, 4), "uint32"),
-    output: T.Buffer((32, 4), "uint32"),
+    source: T.Tensor((32, 4), "uint32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32, 4), "uint32", scope="shared", align=16)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32, 4), "uint32", align=16)
     loaded = T.alloc_local((1,), "uint128")
     for index in T.unroll(4):
         shared[lane, index] = source[lane, index]
@@ -291,12 +279,11 @@ def raw_shared_ordered_b128_load(
         output[lane, index] = loaded.view("uint32")[index]
 
 
-@T.prim_func
-def raw_shared_misaligned_ordered_b128_load(output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8,), "uint32", scope="shared", align=16)
+@T.function
+def raw_shared_misaligned_ordered_b128_load(output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8,), "uint32", align=16)
     loaded = T.alloc_local((1,), "uint128")
     if lane == 0:
         for index in T.serial(8):
@@ -309,12 +296,11 @@ def raw_shared_misaligned_ordered_b128_load(output: T.Buffer((4,), "uint32")):
             output[index] = loaded.view("uint32")[index]
 
 
-@T.prim_func
-def raw_volatile_b128_uninitialized(output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
+@T.function
+def raw_volatile_b128_uninitialized(output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "uint32", align=16)
     loaded = T.alloc_local((1,), "uint128")
     if lane == 0:
         T.ptx.ld.volatile.shared.b128(loaded[0], shared.ptr_to([0]))
@@ -322,13 +308,12 @@ def raw_volatile_b128_uninitialized(output: T.Buffer((4,), "uint32")):
             output[index] = loaded.view("uint32")[index]
 
 
-@T.prim_func
+@T.function
 def raw_global_nc_v2_destination_load(
-    source: T.Buffer((64,), "uint32"), output: T.Buffer((64,), "uint32")
+    source: T.Tensor((64,), "uint32"), output: T.Tensor((64,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     pair = T.alloc_local((2,), "uint32")
     T.ptx.ld.global_.nc.v2.u32(pair[0], pair[1], source.ptr_to([lane * 2]))
     for index in T.unroll(2):
@@ -340,13 +325,12 @@ def raw_global_nc_v2_destination_load(
 # '.v8.b32/.v4.b64' type with '.L2::evict_normal' modifier"), so the L2
 # spellings are covered by the form-key sweep and by
 # `raw_memory_family_eviction_and_prefetch_hints`, which stays NumSim-only.
-@T.prim_func
+@T.function
 def raw_global_nc_eviction_and_prefetch_hint_matrix(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32, 6), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32, 6), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["ld.global.nc.L1::evict_normal.u32"](output[lane, 0], source.ptr_to([lane]))
     T.ptx["ld.global.nc.L1::evict_unchanged.u32"](output[lane, 1], source.ptr_to([lane]))
     T.ptx["ld.global.nc.L1::evict_first.u32"](output[lane, 2], source.ptr_to([lane]))
@@ -355,25 +339,24 @@ def raw_global_nc_eviction_and_prefetch_hint_matrix(
     T.ptx["ld.global.nc.L2::128B.u32"](output[lane, 5], source.ptr_to([lane]))
 
 
-@T.prim_func
+@T.function
 def raw_sub_word_global_roundtrip(
-    source: T.Buffer((32,), "int32"),
-    out_b8: T.Buffer((32,), "uint32"),
-    out_s8: T.Buffer((32,), "int32"),
-    out_b16: T.Buffer((32,), "uint16"),
-    out_s16: T.Buffer((32,), "int16"),
-    out_b8_wide: T.Buffer((32,), "uint16"),
-    out_b8_pair: T.Buffer((32, 2), "uint16"),
-    out_b16_wide: T.Buffer((32,), "uint32"),
-    out_s16_wide: T.Buffer((32,), "int32"),
-    out_u16_wide_store: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "int32"),
+    out_b8: T.Tensor((32,), "uint32"),
+    out_s8: T.Tensor((32,), "int32"),
+    out_b16: T.Tensor((32,), "uint16"),
+    out_s16: T.Tensor((32,), "int16"),
+    out_b8_wide: T.Tensor((32,), "uint16"),
+    out_b8_pair: T.Tensor((32, 2), "uint16"),
+    out_b16_wide: T.Tensor((32,), "uint32"),
+    out_s16_wide: T.Tensor((32,), "int32"),
+    out_u16_wide_store: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    bytes8 = T.alloc_buffer((32,), "uint8", scope="shared")
-    halves = T.alloc_buffer((32,), "uint16", scope="shared")
-    halves_from_wide = T.alloc_buffer((32,), "uint16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    bytes8 = T.alloc_shared((32,), "uint8")
+    halves = T.alloc_shared((32,), "uint16")
+    halves_from_wide = T.alloc_shared((32,), "uint16")
     value: T.let = source[lane]
     loaded_b8 = T.local_scalar("uint8")
     loaded_b8_wide = T.local_scalar("uint16")
@@ -410,18 +393,17 @@ def raw_sub_word_global_roundtrip(
     out_u16_wide_store[lane] = loaded_u16_wide_store
 
 
-@T.prim_func
+@T.function
 def raw_sub_word_ordered_forms(
-    source: T.Buffer((32,), "uint32"),
-    acquired_u8: T.Buffer((32,), "uint32"),
-    acquired_u16: T.Buffer((32,), "uint16"),
-    volatile_s16: T.Buffer((32,), "int16"),
+    source: T.Tensor((32,), "uint32"),
+    acquired_u8: T.Tensor((32,), "uint32"),
+    acquired_u16: T.Tensor((32,), "uint16"),
+    volatile_s16: T.Tensor((32,), "int16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    bytes8 = T.alloc_buffer((32,), "uint8", scope="shared")
-    halves = T.alloc_buffer((32,), "uint16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    bytes8 = T.alloc_shared((32,), "uint8")
+    halves = T.alloc_shared((32,), "uint16")
     loaded_u8 = T.local_scalar("uint8")
     loaded_u16 = T.local_scalar("uint16")
     loaded_s16 = T.local_scalar("int16")
@@ -436,15 +418,14 @@ def raw_sub_word_ordered_forms(
     volatile_s16[lane] = loaded_s16
 
 
-@T.prim_func
+@T.function
 def raw_memory_family_eviction_and_prefetch_hints(
-    source: T.Buffer((32,), "uint32"),
-    loaded: T.Buffer((32, 5), "uint32"),
-    stored: T.Buffer((32, 3), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    loaded: T.Tensor((32, 5), "uint32"),
+    stored: T.Tensor((32, 3), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["ld.global.L1::evict_first.L2::128B.u32"](loaded[lane, 0], source.ptr_to([lane]))
     T.ptx["ld.relaxed.gpu.global.L1::evict_unchanged.L2::64B.u32"](
         loaded[lane, 1], source.ptr_to([lane])
@@ -457,14 +438,13 @@ def raw_memory_family_eviction_and_prefetch_hints(
     T.ptx.st.release.gpu.global_.u32(stored.ptr_to([lane, 2]), source[lane])
 
 
-@T.prim_func
+@T.function
 def raw_shared_u32_address_b128_source_store(
-    source: T.Buffer((32, 4), "uint32"), output: T.Buffer((32, 4), "uint32")
+    source: T.Tensor((32, 4), "uint32"), output: T.Tensor((32, 4), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32, 4), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32, 4), "uint32")
     local = T.alloc_local((4,), "uint32")
     for i in T.unroll(4):
         local[i] = source[lane, i]

@@ -4,19 +4,18 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def profiled_branch(
-    source: T.Buffer((64,), "uint32"),
-    output: T.Buffer((64,), "uint32"),
+    source: T.Tensor((64,), "uint32"),
+    output: T.Tensor((64,), "uint32"),
     choose_add: T.int32,
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     index = cta * 32 + lane
     seen = T.alloc_local((1,), "uint32")
     if choose_add != 0:

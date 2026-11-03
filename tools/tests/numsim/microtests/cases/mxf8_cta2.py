@@ -3,9 +3,8 @@
 import numpy as np
 from tests.numsim.microtests.harness import PairedBuffer
 
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
 from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.script import tirx as T
 
 _A_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (64, 32))
 _B_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (16, 32))
@@ -13,31 +12,25 @@ _B_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (16
 
 @T.jit
 def _raw_mxf8_cta2_m128(
-    a: T.Buffer((2, 64, 32), "float8_e4m3fn"),
-    b: T.Buffer((2, 16, 32), "float8_e4m3fn"),
-    scale_a: T.Buffer((2, 4, 32), "uint32"),
-    scale_b: T.Buffer((2, 2, 4, 32), "uint32"),
-    output: T.Buffer((2, 4, 32, 16), "float32"),
+    a: T.Tensor((2, 64, 32), "float8_e4m3fn"),
+    b: T.Tensor((2, 16, 32), "float8_e4m3fn"),
+    scale_a: T.Tensor((2, 4, 32), "uint32"),
+    scale_b: T.Tensor((2, 2, 4, 32), "uint32"),
+    output: T.Tensor((2, 4, 32, 16), "float32"),
     *,
     REPLICAS: T.constexpr,
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared", layout=None)
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((64, 32), "float8_e4m3fn", scope="shared", layout=_A_LAYOUT)
-    shared_b = T.alloc_buffer((16, 32), "float8_e4m3fn", scope="shared", layout=_B_LAYOUT)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32", layout=None)
+    barriers = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((64, 32), "float8_e4m3fn", layout=_A_LAYOUT)
+    shared_b = T.alloc_shared((16, 32), "float8_e4m3fn", layout=_B_LAYOUT)
     # Declare the physical allocation used by the raw TMEM addresses below.
-    tmem = T.decl_buffer(  # noqa: F841
-        (128, 32),
-        "uint32",
-        scope="tmem",
-        layout=tmem_datapath_layout("D", 128, 32),
-        allocated_addr=address[0],
+    tmem = T.tmem(  # noqa: F841
+        (128, 32), "uint32", allocated_addr=address[0], layout=tmem_datapath_layout("D", 128, 32)
     )
     registers = T.alloc_local((16,), "uint32")
     desc_i: T.uint32
@@ -45,8 +38,10 @@ def _raw_mxf8_cta2_m128(
     desc_b: T.uint64
 
     if warp == 0 and lane == 0:
-        Tx.copy(shared_a[:, :], a[cta, :, :])
-        Tx.copy(shared_b[:, :], b[cta, :, :])
+        for _i0_0, _i0_1 in T.grid(shared_a.shape[0], shared_a.shape[1]):
+            shared_a[_i0_0, _i0_1] = a[cta, _i0_0, _i0_1]
+        for _i1_0, _i1_1 in T.grid(shared_b.shape[0], shared_b.shape[1]):
+            shared_b[_i1_0, _i1_1] = b[cta, _i1_0, _i1_1]
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
         if lane == 0:
@@ -85,8 +80,6 @@ def _raw_mxf8_cta2_m128(
             b_dtype="float8_e4m3fn",
             sfa_dtype="float8_e8m0fnu",
             sfb_dtype="float8_e8m0fnu",
-            sfa_tmem_addr=0,
-            sfb_tmem_addr=0,
             M=128,
             N=32,
             K=32,
@@ -145,7 +138,7 @@ def _raw_mxf8_cta2_m128(
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(16):
-        output[cta, warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[cta, warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cluster_sync()
 
     if warp == 0:

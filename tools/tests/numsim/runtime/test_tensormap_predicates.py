@@ -2,10 +2,10 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # Address-space dispatch and integer/float bit carriers are independent.
 TENSOR_MAP_PREDICATE_CASES = (
@@ -23,13 +23,13 @@ def tensor_map_predicate_case(space, *, fault=None, carrier="uint"):
     pointer = f"{image}.ptr_to([lane * 128])"
     invalid_pointer = f"{image}.ptr_to([1024])"
     if not space:
-        pointer = f'T.reinterpret("handle", T.reinterpret("uint64", {pointer}))'
-        invalid_pointer = f'T.reinterpret("handle", T.reinterpret("uint64", {invalid_pointer}))'
+        pointer = f'T.reinterpret(T.reinterpret("uint64", {pointer}), ty="handle")'
+        invalid_pointer = f'T.reinterpret(T.reinterpret("uint64", {invalid_pointer}), ty="handle")'
     qualifier = f"{space}." if space else ""
     # Every replacement entry available on SM100, using one compatible image.
     # The non-issuing lanes have different values and out-of-bounds pointers.
     fields = (
-        ("global_address", "b64", "", 'T.reinterpret("uint64", replacement.ptr_to([lane * 4]))'),
+        ("global_address", "b64", "", 'T.reinterpret(replacement.ptr_to([lane * 4]), ty="uint64")'),
         ("rank", "b32", "", "T.uint32(lane + 1)"),
         ("global_dim", "b32", "0, ", "T.uint32(lane + 2)"),
         ("box_dim", "b32", "0, ", "T.uint32(lane + 4)"),
@@ -47,7 +47,7 @@ def tensor_map_predicate_case(space, *, fault=None, carrier="uint"):
         if carrier != "uint" and not value.isdecimal():
             # Dimension fields have the narrower b32i domain, unlike rank/b64.
             kind = "int" if carrier == "float" and ordinal and width == "b32" else carrier
-            value = f'T.reinterpret("{kind}{width[1:]}", {value})'
+            value = f'T.reinterpret({value}, ty="{kind}{width[1:]}")'
         updates.append(
             f'    T.ptx["tensormap_replace.tile.{field}.{qualifier}b1024.{width}"]('
             f"{pointer}, {ordinal}{value}, pred=lane == 0 and enabled != 0)"
@@ -61,17 +61,16 @@ def tensor_map_predicate_case(space, *, fault=None, carrier="uint"):
         else "T.ptx.fence.proxy.tensormap__generic.release.gpu("
         f"pred=lane == 0 and enabled {'< 0' if fault == 'release' else '!= 0'})"
     )
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(descriptor: T.Buffer((128,), "uint8"), destination: T.Buffer((128,), "uint8"),
-           replacement: T.Buffer((16,), "uint32"), output: T.Buffer((4,), "uint32"), enabled: T.int32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    image = T.alloc_buffer((128,), "uint8", scope="shared", align=128)
-    data = T.alloc_buffer((4,), "uint32", scope="shared", align=128)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(descriptor: T.Tensor((128,), "uint8"), destination: T.Tensor((128,), "uint8"),
+           replacement: T.Tensor((16,), "uint32"), output: T.Tensor((4,), "uint32"), enabled: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    image = T.alloc_shared((128,), "uint8", align=128)
+    data = T.alloc_shared((4,), "uint32", align=128)
+    barrier = T.alloc_shared((1,), "uint64")
     for i in T.serial(4):
         {image}[i * 32 + lane] = descriptor[i * 32 + lane]
     T.cuda.cta_sync()

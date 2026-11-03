@@ -3,22 +3,21 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_rm_zero_sign(
-    scalar_one: T.Buffer((32,), "float32"),
-    scalar_negative_one: T.Buffer((32,), "float32"),
-    packed_f16_one: T.Buffer((32,), "uint32"),
-    wide_one: T.Buffer((32,), "uint64"),
-    wide_negative_one: T.Buffer((32,), "uint64"),
-    scalar_output: T.Buffer((4, 32), "float32"),
-    mixed_output: T.Buffer((12, 32), "uint64"),
+    scalar_one: T.Tensor((32,), "float32"),
+    scalar_negative_one: T.Tensor((32,), "float32"),
+    packed_f16_one: T.Tensor((32,), "uint32"),
+    wide_one: T.Tensor((32,), "uint64"),
+    wide_negative_one: T.Tensor((32,), "uint64"),
+    scalar_output: T.Tensor((4, 32), "float32"),
+    mixed_output: T.Tensor((12, 32), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     T.ptx["mad.rn.f32"](
         scalar_output[0, lane], scalar_one[lane], scalar_one[lane], scalar_negative_one[lane]

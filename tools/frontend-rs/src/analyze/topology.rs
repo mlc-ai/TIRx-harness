@@ -607,7 +607,12 @@ pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
         )));
     }
     for (key, value) in kernel_attrs(region)? {
-        if !KERNEL_ATTRS.contains(&key.as_str()) || value <= 0 {
+        let valid = match key.as_str() {
+            // A bool flag: tvm-tirx records the unset default as 0.
+            "required_block_size" => value == 0 || value == 1,
+            other => KERNEL_ATTRS.contains(&other) && value > 0,
+        };
+        if !valid {
             return Ok(Some(format!(
                 "RegionStmt({op_name}) kernel attribute {key}={value} is unsupported"
             )));

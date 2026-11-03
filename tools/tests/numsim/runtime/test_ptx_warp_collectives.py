@@ -6,17 +6,16 @@ import pytest
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_ptx_warp_collectives(
-    source: T.Buffer((32,), "float32"),
-    output: T.Buffer((32, 6), "uint32"),
+    source: T.Tensor((32,), "float32"),
+    output: T.Tensor((32, 6), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     shuffled = T.alloc_local((1,), "uint32")
     shuffled_p = T.alloc_local((1,), "uint32")
     in_range = T.alloc_local((1,), "uint32")
@@ -49,14 +48,13 @@ def raw_ptx_warp_collectives(
     output[lane, 5] = is_elected[0]
 
 
-@T.prim_func
+@T.function
 def raw_ptx_shuffle_sparse_sources(
-    selector: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    selector: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     source = T.alloc_local((1,), "float32")
     shuffled = T.alloc_local((1,), "uint32")
 
@@ -64,7 +62,7 @@ def raw_ptx_shuffle_sparse_sources(
         source[0] = T.cast(lane + 100, "float32")
     T.ptx.shfl_sync.idx.b32(
         shuffled[0],
-        T.reinterpret("uint32", source[0]),
+        T.reinterpret(source[0], ty="uint32"),
         selector[lane],
         T.uint32(31),
         T.uint32(0xFFFFFFFF),
@@ -72,15 +70,14 @@ def raw_ptx_shuffle_sparse_sources(
     output[lane] = shuffled[0]
 
 
-@T.prim_func
+@T.function
 def raw_ptx_f32_reductions(
-    source: T.Buffer((32,), "float32"),
-    zeros: T.Buffer((32,), "float32"),
-    output: T.Buffer((32, 6), "float32"),
+    source: T.Tensor((32,), "float32"),
+    zeros: T.Tensor((32,), "float32"),
+    output: T.Tensor((32, 6), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     full = T.uint32(0xFFFFFFFF)
     T.ptx.redux_sync.max.NaN.f32(output[lane, 0], source[lane], full)
     T.ptx.redux_sync.min.NaN.f32(output[lane, 1], source[lane], full)
@@ -90,15 +87,14 @@ def raw_ptx_f32_reductions(
     T.ptx.redux_sync.min.f32(output[lane, 5], zeros[lane], full)
 
 
-@T.prim_func
+@T.function
 def raw_ptx_vote_and_integer_reductions(
-    predicates: T.Buffer((32,), "bool"),
-    values: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32, 6), "uint32"),
+    predicates: T.Tensor((32,), "bool"),
+    values: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32, 6), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     full = T.uint32(0xFFFFFFFF)
     T.ptx.vote_sync.any.pred(output[lane, 0], predicates[lane], full)
     T.ptx.vote_sync.all.pred(output[lane, 1], predicates[lane], full)
@@ -108,16 +104,15 @@ def raw_ptx_vote_and_integer_reductions(
     T.ptx.redux_sync.min.u32(output[lane, 5], values[lane], full)
 
 
-@T.prim_func
+@T.function
 def raw_ptx_vote_predicate_carrier(
-    predicates: T.Buffer((32,), "uint32"),
-    output_u32: T.Buffer((32,), "uint32"),
-    output_i32: T.Buffer((32,), "int32"),
-    output_f32: T.Buffer((32,), "float32"),
+    predicates: T.Tensor((32,), "uint32"),
+    output_u32: T.Tensor((32,), "uint32"),
+    output_i32: T.Tensor((32,), "int32"),
+    output_f32: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.vote_sync.ballot.b32(
         output_u32[lane],
         T.ptx.pred(predicates[lane]),
@@ -135,16 +130,15 @@ def raw_ptx_vote_predicate_carrier(
     )
 
 
-@T.prim_func
+@T.function
 def raw_ptx_match_redux_and_activemask(
-    source32: T.Buffer((32,), "uint32"),
-    source64: T.Buffer((32,), "uint64"),
-    partial_mask: T.Buffer((1,), "uint32"),
-    output: T.Buffer((32, 13), "uint32"),
+    source32: T.Tensor((32,), "uint32"),
+    source64: T.Tensor((32,), "uint64"),
+    partial_mask: T.Tensor((1,), "uint32"),
+    output: T.Tensor((32, 13), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     full = T.uint32(0xFFFFFFFF)
     active = T.alloc_local((1,), "uint32")
     all_equal = T.alloc_local((1,), "uint32")
@@ -166,17 +160,16 @@ def raw_ptx_match_redux_and_activemask(
     T.ptx.redux_sync.xor.b32(output[lane, 10], source32[lane], full)
 
 
-@T.prim_func
+@T.function
 def raw_ptx_match_float_carriers(
-    source32: T.Buffer((32,), "float32"),
-    source64: T.Buffer((32,), "float64"),
-    output32: T.Buffer((32,), "int32"),
-    output64: T.Buffer((32,), "uint32"),
-    active: T.Buffer((32,), "float32"),
+    source32: T.Tensor((32,), "float32"),
+    source64: T.Tensor((32,), "float64"),
+    output32: T.Tensor((32,), "int32"),
+    output64: T.Tensor((32,), "uint32"),
+    active: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     mask = T.alloc_local((1,), "float32")
     T.ptx.match.any.sync.b32(output32[lane], source32[lane], T.uint32(0xFFFFFFFF))
     T.ptx.match.any.sync.b64(output64[lane], source64[lane], T.uint32(0xFFFFFFFF))
@@ -184,14 +177,13 @@ def raw_ptx_match_float_carriers(
     active[lane] = mask[0]
 
 
-@T.prim_func
+@T.function
 def raw_ptx_movmatrix_b16(
-    source: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     transposed = T.alloc_local((1,), "uint32")
     T.ptx["movmatrix.sync.aligned.m8n8.trans.b16"](
         transposed[0],

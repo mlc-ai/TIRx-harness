@@ -10,8 +10,8 @@ from tests.numsim.support.kernels import fixed_width_integer_expression_mix
 from tests.numsim.support.manifest import device_kernel, emitted_module, parse_kernel
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.cache import rust_tool
-from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
+from tvm_tirx.script import tirx as T
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
@@ -83,44 +83,41 @@ def test_float_immediates_preserve_bits_through_native_rust_literals(tmp_path, d
     np.testing.assert_array_equal(result.outputs["output"].view(unsigned), expected.view(unsigned))
 
 
-@T.prim_func
+@T.function
 def low_precision_expression_chain(
-    fp16_a: T.Buffer((32,), "float16"),
-    fp16_b: T.Buffer((32,), "float16"),
-    fp16_c: T.Buffer((32,), "float16"),
-    bf16_a: T.Buffer((32,), "bfloat16"),
-    bf16_b: T.Buffer((32,), "bfloat16"),
-    bf16_c: T.Buffer((32,), "bfloat16"),
-    fp16_output: T.Buffer((32,), "float32"),
-    bf16_output: T.Buffer((32,), "float32"),
+    fp16_a: T.Tensor((32,), "float16"),
+    fp16_b: T.Tensor((32,), "float16"),
+    fp16_c: T.Tensor((32,), "float16"),
+    bf16_a: T.Tensor((32,), "bfloat16"),
+    bf16_b: T.Tensor((32,), "bfloat16"),
+    bf16_c: T.Tensor((32,), "bfloat16"),
+    fp16_output: T.Tensor((32,), "float32"),
+    bf16_output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     fp16_output[lane] = T.cast((fp16_a[lane] + fp16_b[lane]) + fp16_c[lane], "float32")
     bf16_output[lane] = T.cast((bf16_a[lane] + bf16_b[lane]) + bf16_c[lane], "float32")
 
 
-@T.prim_func
-def truncating_integer_expression_mix(output: T.Buffer((32, 3), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def truncating_integer_expression_mix(output: T.Tensor((32, 3), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     dividend: T.let = lane - T.int32(7)
     output[lane, 0] = T.truncdiv(dividend, T.int32(2))
     output[lane, 1] = T.truncmod(dividend, T.int32(2))
     output[lane, 2] = T.floordiv(dividend, T.int32(2))
 
 
-@T.prim_func
+@T.function
 def captured_expression_inputs(
-    source: T.Buffer((32,), "int32"),
-    scratch: T.Buffer((32,), "int32"),
-    output: T.Buffer((32, 6), "int32"),
+    source: T.Tensor((32,), "int32"),
+    scratch: T.Tensor((32,), "int32"),
+    output: T.Tensor((32, 6), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane, 0] = source[lane] * T.int32(2) + T.int32(2)
     output[lane, 1] = source[lane] * T.int32(2) + T.int32(3)
     scratch[lane] = source[lane] * T.int32(3) + T.int32(2)
@@ -173,11 +170,10 @@ def _body(statements: str, *parameters: str) -> str:
     return emitted_module(
         parse_kernel(
             f"""
-@T.prim_func
+@T.function
 def kernel({signature}):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 {statements}
 """
         )
@@ -207,7 +203,7 @@ def test_uniform_integer_casts_preserve_target_width(
     body = _body(
         f'    output[lane] = T.cast(value, "{target_dtype}")',
         f"value: T.{source_dtype}",
-        f'output: T.Buffer((32,), "{target_dtype}")',
+        f'output: T.Tensor((32,), "{target_dtype}")',
     )
 
     splats = _lines_with(body, "WarpValue::splat(")
@@ -223,7 +219,7 @@ def test_varying_casts_and_arithmetic_keep_fixed_width_types():
         """    as_u32: T.uint32 = T.cast(lane, "uint32")
     as_u64: T.uint64 = T.cast(as_u32, "uint64")
     output[lane] = T.cast(as_u64 + T.uint64(3) < T.uint64(10), "uint32")""",
-        'output: T.Buffer((32,), "uint32")',
+        'output: T.Tensor((32,), "uint32")',
     )
 
     assert "frontend_expr::i32::cast::u32(" in body
@@ -240,7 +236,7 @@ def test_varying_mask_algebra_uses_native_bit_operations():
     output[lane] = T.cast(left and right, "uint32")
     output[lane] = T.cast(left or right, "uint32")
     output[lane] = T.cast(not left, "uint32")""",
-        'output: T.Buffer((32,), "uint32")',
+        'output: T.Tensor((32,), "uint32")',
     )
 
     assert "let and_rhs_mask_" in body
@@ -255,7 +251,7 @@ def test_composite_mask_is_atomic_when_embedded_in_select_branch_masks():
         """    left: T.bool = lane < 16
     right: T.bool = lane % 2 == 0
     output[lane] = T.Select(left or right, T.int32(1), T.int32(0))""",
-        'output: T.Buffer((32,), "int32")',
+        'output: T.Tensor((32,), "int32")',
     )
 
     assert "ctx.set_active_mask(or_rhs_mask_" in body
@@ -274,7 +270,7 @@ def test_varying_mask_and_uniform_boolean_avoid_lane_scan(
     body = _body(
         f'    output[lane] = T.cast({lhs} {operator} {rhs}, "uint32")',
         "flag: T.int32",
-        'output: T.Buffer((32,), "uint32")',
+        'output: T.Tensor((32,), "uint32")',
     )
 
     assert f"ctx.set_active_mask({kind.lower()}_rhs_mask_" in body
@@ -298,8 +294,8 @@ def test_fixed_width_arithmetic_and_comparison_use_the_tir_dtype(dtype: str, rus
         f"""    output[lane] = value + T.{dtype}(3)
     compared[lane] = T.cast(value >= T.{dtype}(7), "uint32")""",
         f"value: T.{dtype}",
-        f'output: T.Buffer((32,), "{dtype}")',
-        'compared: T.Buffer((32,), "uint32")',
+        f'output: T.Tensor((32,), "{dtype}")',
+        'compared: T.Tensor((32,), "uint32")',
     )
 
     added = _lines_with(body, ".wrapping_add(")
@@ -324,8 +320,8 @@ def test_varying_integer_casts_preserve_target_width(
 ):
     body = _body(
         f'    output[lane] = T.cast(values[lane], "{target_dtype}")',
-        f'values: T.Buffer((32,), "{source_dtype}")',
-        f'output: T.Buffer((32,), "{target_dtype}")',
+        f'values: T.Tensor((32,), "{source_dtype}")',
+        f'output: T.Tensor((32,), "{target_dtype}")',
     )
 
     casts = _lines_with(body, f"frontend_expr::{source_rust_type}::cast::{target_rust_type}(")
@@ -340,7 +336,7 @@ def test_unsigned_floor_operations_keep_uint32_semantics(kind: str, method: str)
     body = _body(
         f"    output[lane] = T.{kind}(value, T.uint32(5))",
         "value: T.uint32",
-        'output: T.Buffer((32,), "uint32")',
+        'output: T.Tensor((32,), "uint32")',
     )
 
     operations = _lines_with(body, f".{method}(")
@@ -356,7 +352,7 @@ def test_truncating_integer_operations_keep_checked_overflow_semantics(kind: str
     body = _body(
         f"    output[lane] = T.{kind}(value, T.int32(-1))",
         "value: T.int32",
-        'output: T.Buffer((32,), "int32")',
+        'output: T.Tensor((32,), "int32")',
     )
 
     operations = _lines_with(body, f".{method}(")
@@ -368,8 +364,8 @@ def test_truncating_integer_operations_keep_checked_overflow_semantics(kind: str
 def test_float_division_uses_native_f32_semantics():
     body = _body(
         "    output[lane] = values[lane] / T.float32(2.0)",
-        'values: T.Buffer((32,), "float32")',
-        'output: T.Buffer((32,), "float32")',
+        'values: T.Tensor((32,), "float32")',
+        'output: T.Tensor((32,), "float32")',
     )
 
     divisions = _lines_with(body, "frontend_expr::f32::div::")
@@ -381,8 +377,8 @@ def test_float_division_uses_native_f32_semantics():
 def test_signed_index_adapter_is_explicit_for_varying_unsigned_values():
     body = _body(
         "    output[lane] = values[values[lane]]",
-        'values: T.Buffer((32,), "uint64")',
-        'output: T.Buffer((32,), "uint64")',
+        'values: T.Tensor((32,), "uint64")',
+        'output: T.Tensor((32,), "uint64")',
     )
 
     assert re.search(r"frontend_expr::u64::cast::i64\(&load_\d+\)", body)
@@ -395,9 +391,9 @@ def test_integer_narrowing_and_boolean_casts_have_typed_rust_code():
     as_bool[lane] = T.cast(T.cast(unsigned, "bool"), "uint32")""",
         "signed: T.int32",
         "unsigned: T.uint32",
-        'as_i8: T.Buffer((32,), "int8")',
-        'as_u16: T.Buffer((32,), "uint16")',
-        'as_bool: T.Buffer((32,), "uint32")',
+        'as_i8: T.Tensor((32,), "int8")',
+        'as_u16: T.Tensor((32,), "uint16")',
+        'as_bool: T.Tensor((32,), "uint32")',
     )
 
     assert re.search(r"\(buffers\.scalar_\d+\) as i8", body)
@@ -408,8 +404,8 @@ def test_integer_narrowing_and_boolean_casts_have_typed_rust_code():
 def test_bfloat_cast_rounds_through_the_engine_codec():
     body = _body(
         '    output[lane] = T.cast(values[lane], "bfloat16")',
-        'values: T.Buffer((32,), "float32")',
-        'output: T.Buffer((32,), "bfloat16")',
+        'values: T.Tensor((32,), "float32")',
+        'output: T.Tensor((32,), "bfloat16")',
     )
 
     assert "f32_to_bf16_bits" in body
@@ -426,7 +422,7 @@ def test_bfloat_cast_rounds_through_the_engine_codec():
 def test_float8_immediates_use_numeric_codec(dtype: str, decoder: str, encoder: str):
     body = _body(
         f"    output[lane] = T.{dtype}(1.0)",
-        f'output: T.Buffer((32,), "{dtype}")',
+        f'output: T.Tensor((32,), "{dtype}")',
     )
 
     immediates = [line for line in _lines_with(body, "1.0_f32") if "splat" in line]

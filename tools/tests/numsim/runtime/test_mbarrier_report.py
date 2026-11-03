@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def report_kernel(pattern, *, cluster=False, layout=1, tensor=False):
@@ -27,21 +27,20 @@ def report_kernel(pattern, *, cluster=False, layout=1, tensor=False):
                 )
     query_source = "\n            ".join(q.replace("\n", "\n            ") for q in queries)
     report = "disabled" if pattern == "disabled" else f"validity::{pattern}"
-    parameter = "input_map: T.TensorMap()" if tensor else 'source: T.Buffer((32,), "uint8")'
+    parameter = "input_map: T.Ptr(T.TensorMap)" if tensor else 'source: T.Tensor((32,), "uint8")'
     source_operands = (
         "T.address_of(input_map), phase * 16"
         if tensor
         else "source.ptr_to([phase * 16]), T.uint32(16)"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel({parameter}, out: T.Buffer((2, 12), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared = T.alloc_buffer((16,), "uint8", scope="shared", align=128)
+@T.function
+def kernel({parameter}, out: T.Tensor((2, 12), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
+    shared = T.alloc_shared((16,), "uint8", align=128)
     state = T.alloc_local((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     report = T.alloc_local((1,), "uint32")
@@ -103,15 +102,14 @@ def test_tensor_copy_report(cluster, tmp_path):
 
 
 def gather4_report_case(pattern, matched, override=False):
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(input_map: T.TensorMap(), out: T.Buffer((17,), "uint32"){', replacement: T.Buffer((32768,), "uint32")' if override else ""}):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint32", scope="shared", align=128)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(input_map: T.Ptr(T.TensorMap), out: T.Tensor((17,), "uint32"){', replacement: T.Tensor((32768,), "uint32")' if override else ""}):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint32", align=128)
+    barrier = T.alloc_shared((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     report = T.alloc_local((1,), "uint32")
     if lane == 0:
@@ -121,7 +119,7 @@ def kernel(input_map: T.TensorMap(), out: T.Buffer((17,), "uint32"){', replaceme
     if lane == 0:
         T.ptx.mbarrier.arrive.expect_tx.shared.b64(barrier.ptr_to([0]), 64)
         T.ptx["cp.async.bulk.tensor.2d.shared::cta.global.tile::gather4.mbarrier::complete_tx::bytes.mbarrier::report::validity::{pattern}{".override::global_address" if override else ""}"](
-            shared.ptr_to([0]), T.address_of(input_map){', T.reinterpret("uint64", replacement.ptr_to([0]))' if override else ""}, 0, 3, 1, 3, 9, barrier.ptr_to([0]))
+            shared.ptr_to([0]), T.address_of(input_map){', T.reinterpret(replacement.ptr_to([0]), ty="uint64")' if override else ""}, 0, 3, 1, 3, 9, barrier.ptr_to([0]))
         T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
         T.ptx["mbarrier.test_wait.parity.phase_type::primary.shared.b64"](
             ready[0], report[0], barrier.ptr_to([0]), 0)
@@ -166,21 +164,19 @@ def test_gather4_report_samples_only_selected_source_rows(pattern, matched, tmp_
 
 @pytest.mark.parametrize("tensor,scope", [(False, None), (False, "cluster"), (True, None)])
 def test_multicast_report_targets(tensor, scope, tmp_path):
-    parameter = "input_map: T.TensorMap()" if tensor else 'source: T.Buffer((16,), "uint8")'
+    parameter = "input_map: T.Ptr(T.TensorMap)" if tensor else 'source: T.Tensor((16,), "uint8")'
     operands = "T.address_of(input_map), 0" if tensor else "source.ptr_to([0]), T.uint32(16)"
     family = ".tensor.1d" if tensor else f".relaxed.{scope}" if scope else ""
     element = ".b128" if scope else ""
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel({parameter}, out: T.Buffer((3,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([3])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared = T.alloc_buffer((16,), "uint8", scope="shared", align=128)
+@T.function
+def kernel({parameter}, out: T.Tensor((3,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32, cluster=3))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
+    shared = T.alloc_shared((16,), "uint8", align=128)
     ready = T.alloc_local((1,), "uint32")
     report = T.alloc_local((1,), "uint32")
     if lane == 0:

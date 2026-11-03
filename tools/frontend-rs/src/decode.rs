@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use tvm_tirx::ir::prim::{add, AddObj, CastObj};
-use tvm_tirx::ir::{BindObj, CallObj, Expr, Op, Stmt, Var};
+use tvm_tirx::ir::{BindObj, CallObj, Expr, Op, Stmt, TupleObj, Var};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{ObjectRefCast, ObjectRefCore};
@@ -14,8 +14,8 @@ pub mod pointers;
 
 use self::ptx::{DecodedPtx, PtxDecode};
 use crate::analyze::util::{
-    as_buffer, buffer_name, dtype_of, ffi_error, ffi_text, is_tensor_var, not_covered, oref, same,
-    unsupported, AResult, Failure, IdMap,
+    as_buffer, buffer_name, buffer_scope, dtype_of, ffi_error, ffi_text, is_tensor_var,
+    not_covered, oref, same, unsupported, AResult, Failure, IdMap,
 };
 use crate::analyze::Ctx;
 use crate::emit::ptx_addr::validate_decoded_ptx_addr_operands;
@@ -181,7 +181,8 @@ pub enum TensorDecl {
     Alloc,
     /// `tirx.decl_tensor(data)`: a view of existing data.
     View(Expr),
-    /// `tirx.cuda.decl_tmem(address)`: a TMEM view at a column address.
+    /// `tirx.cuda.decl_tmem(address)` or a TMEM `tirx.alloc_tensor` placed at
+    /// `address`: a TMEM view at a column address.
     Tmem(Expr),
 }
 
@@ -197,11 +198,22 @@ pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
     let op = call.and_then(|call| call.op.clone().try_cast::<Op>().ok());
     let decl = match (op.map(|op| ffi_text(&op.name)).as_deref(), call) {
         (Some("tirx.alloc_tensor"), Some(call)) if call.args.is_empty() => TensorDecl::Alloc,
-        (Some("tirx.alloc_tensor"), Some(_)) => {
-            return unsupported(format!(
-                "buffer:{}:alloc_tensor placement is not modeled",
-                buffer_name(&bind.var)
-            ))
+        // A placed TMEM allocation names columns `tcgen05.alloc` already owns.
+        (Some("tirx.alloc_tensor"), Some(call)) => {
+            let placement = call.args.get(0)?;
+            let fields: Vec<Expr> = match placement.as_node::<TupleObj>() {
+                Some(tuple) => tuple.fields.iter().collect(),
+                None => Vec::new(),
+            };
+            match fields.as_slice() {
+                [address] if buffer_scope(&bind.var) == "tmem" => TensorDecl::Tmem(address.clone()),
+                _ => {
+                    return unsupported(format!(
+                        "buffer:{}:alloc_tensor placement is only modeled as one TMEM address",
+                        buffer_name(&bind.var)
+                    ))
+                }
+            }
         }
         (Some(DECL_TENSOR), Some(call)) if call.args.len() == 1 => {
             TensorDecl::View(call.args.get(0)?)

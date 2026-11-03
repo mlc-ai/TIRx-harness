@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
 from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
+from tvm_tirx.script import tirx as T
 
 
 def cvt_carrier_case(ptx_type):
@@ -101,12 +101,11 @@ def cvt_carrier_case(ptx_type):
                     expected[row, lane, :dbytes] = list(value.to_bytes(dbytes, "little"))
                 elif mode == 1:
                     expected[row, lane, :dbytes] = 0
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer((32, 16), "uint8"), output: T.Buffer(({len(expected)}, 32, 16), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor((32, 16), "uint8"), output: T.Tensor(({len(expected)}, 32, 16), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 {chr(10).join(lines)}
 """,
         {"T": T},

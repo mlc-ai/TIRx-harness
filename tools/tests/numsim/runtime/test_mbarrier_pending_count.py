@@ -3,21 +3,20 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def pending_count_kernel(*, drop=False):
     action = "arrive_drop" if drop else "arrive"
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def pending_counts(out: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def pending_counts(out: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     saved = T.alloc_local((1,), "uint64")
     scratch = T.alloc_local((1,), "uint64")
     count = T.alloc_local((1,), "uint32")

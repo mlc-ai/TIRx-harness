@@ -2,12 +2,12 @@
 
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::cuda_arch::{cuda_arch, CUDA_ARCH_FIELD};
-use crate::analyze::util::{
-    dtype_of, oref, prim, repr_text, simplify, static_string, unsupported, AResult, Failure,
-};
+use crate::analyze::util::{dtype_of, ffi_text, oref, prim, unsupported, AResult, Failure};
 use crate::analyze::Ctx;
-use crate::tvm_compat::int_value;
-use tvm_tirx::ir::{CallObj, IntImmObj};
+use tvm_tirx::backend::cuda::{
+    TCGen05InstrDescriptorAttrsObj, TCGen05InstrDescriptorBlockScaledAttrsObj,
+};
+use tvm_tirx::ir::CallObj;
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -454,24 +454,6 @@ fn static_int(ctx: &Ctx, value: &ObjectRef, field: &str, requirement: &str) -> A
     crate::analyze::util::static_int(&ctx.analyzer, &prim(value)?, field, requirement)
 }
 
-fn static_bool(ctx: &Ctx, value: &ObjectRef, field: &str) -> AResult<bool> {
-    let simplified = simplify(&ctx.analyzer, &prim(value)?)?;
-    let node = oref(simplified);
-    let Some(imm) = node.as_node::<IntImmObj>() else {
-        return unsupported(format!(
-            "{field} must specialize to a static bool, got {}",
-            repr_text(value)?
-        ));
-    };
-    if dtype_of(&node)? != "bool" {
-        return unsupported(format!(
-            "{field} must specialize to a static bool, got {}",
-            repr_text(value)?
-        ));
-    }
-    Ok(int_value(imm)? != 0)
-}
-
 fn null_handle(ctx: &Ctx, expression: &ObjectRef) -> AResult<bool> {
     let Some(call) = expression.as_node::<CallObj>() else {
         return Ok(false);
@@ -540,61 +522,49 @@ pub fn parse_tcgen_descriptor_call(
             encoded_u32: None,
         }));
     }
-    let requirement = "must specialize to a static integer";
-    if op_name == "tirx.cuda.tcgen05_encode_instr_descriptor" {
-        require_signature(
-            &op_name,
-            &args,
-            &[
-                "handle", "", "", "", "int32", "int32", "int32", "bool", "bool", "int32", "bool",
-                "bool", "bool", "bool",
-            ],
-        )?;
-        let encoded = encode_dense_instr_descriptor_fields(
-            &static_string(&args[1], "dense.d_dtype")?,
-            &static_string(&args[2], "dense.a_dtype")?,
-            &static_string(&args[3], "dense.b_dtype")?,
-            static_int(ctx, &args[4], "dense.M", requirement)?,
-            static_int(ctx, &args[5], "dense.N", requirement)?,
-            static_int(ctx, &args[6], "dense.K", requirement)?,
-            static_bool(ctx, &args[7], "dense.trans_a")?,
-            static_bool(ctx, &args[8], "dense.trans_b")?,
-            static_int(ctx, &args[9], "dense.n_cta_groups", requirement)?,
-            static_bool(ctx, &args[10], "dense.neg_a")?,
-            static_bool(ctx, &args[11], "dense.neg_b")?,
-            static_bool(ctx, &args[12], "dense.sat_d")?,
-            static_bool(ctx, &args[13], "dense.is_sparse")?,
-        )?;
-        return Ok(Some(TcgenDescriptorCall {
-            args,
-            matrix_source_is_null: false,
-            encoded_u32: Some(encoded),
-        }));
-    }
-    require_signature(
-        &op_name,
-        &args,
-        &[
-            "handle", "", "", "", "", "", "int32", "int32", "int32", "int32", "int32", "bool",
-            "bool", "int32", "bool", "bool", "bool",
-        ],
-    )?;
-    let encoded = encode_block_scaled_instr_descriptor_fields(
-        &static_string(&args[1], "block.d_dtype")?,
-        &static_string(&args[2], "block.a_dtype")?,
-        &static_string(&args[3], "block.b_dtype")?,
-        &static_string(&args[4], "block.sfa_dtype")?,
-        &static_string(&args[5], "block.sfb_dtype")?,
-        static_int(ctx, &args[8], "block.M", requirement)?,
-        static_int(ctx, &args[9], "block.N", requirement)?,
-        static_int(ctx, &args[10], "block.K", requirement)?,
-        static_bool(ctx, &args[11], "block.trans_a")?,
-        static_bool(ctx, &args[12], "block.trans_b")?,
-        static_int(ctx, &args[13], "block.n_cta_groups", requirement)?,
-        static_bool(ctx, &args[14], "block.neg_a")?,
-        static_bool(ctx, &args[15], "block.neg_b")?,
-        static_bool(ctx, &args[16], "block.is_sparse")?,
-    )?;
+    // Instruction descriptors take only their destination; the fields are attributes.
+    require_signature(&op_name, &args, &["handle"])?;
+    let attrs = call.attrs.as_ref();
+    let encoded = if let Some(dense) =
+        attrs.and_then(|attrs| attrs.as_node::<TCGen05InstrDescriptorAttrsObj>())
+    {
+        encode_dense_instr_descriptor_fields(
+            &ffi_text(&dense.d_dtype),
+            &ffi_text(&dense.a_dtype),
+            &ffi_text(&dense.b_dtype),
+            dense.M,
+            dense.N,
+            dense.K,
+            dense.trans_a,
+            dense.trans_b,
+            dense.n_cta_groups,
+            dense.neg_a,
+            dense.neg_b,
+            dense.sat_d,
+            dense.is_sparse,
+        )?
+    } else if let Some(block) =
+        attrs.and_then(|attrs| attrs.as_node::<TCGen05InstrDescriptorBlockScaledAttrsObj>())
+    {
+        encode_block_scaled_instr_descriptor_fields(
+            &ffi_text(&block.d_dtype),
+            &ffi_text(&block.a_dtype),
+            &ffi_text(&block.b_dtype),
+            &ffi_text(&block.sfa_dtype),
+            &ffi_text(&block.sfb_dtype),
+            block.M,
+            block.N,
+            block.K,
+            block.trans_a,
+            block.trans_b,
+            block.n_cta_groups,
+            block.neg_a,
+            block.neg_b,
+            block.is_sparse,
+        )?
+    } else {
+        return unsupported(format!("{op_name} requires its descriptor attributes"));
+    };
     Ok(Some(TcgenDescriptorCall {
         args,
         matrix_source_is_null: false,

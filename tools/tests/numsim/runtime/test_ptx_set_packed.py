@@ -5,7 +5,7 @@ import operator
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _PACKED_FORMS = (
     *(("u8x4", cmp) for cmp in ("eq", "ne", "lt", "le", "gt", "ge", "lo", "ls", "hi", "hs")),
@@ -15,15 +15,14 @@ _PACKED_FORMS = (
 )
 
 
-@T.prim_func
+@T.function
 def ptx_set_packed_semantics(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32, 32), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["set.eq.u8x4"](output[0, lane], lhs[lane], rhs[lane])
     T.ptx["set.ne.u8x4"](output[1, lane], lhs[lane], rhs[lane])
     T.ptx["set.lt.u8x4"](output[2, lane], lhs[lane], rhs[lane])
@@ -58,21 +57,20 @@ def ptx_set_packed_semantics(
     T.ptx["set.ge.s16x2"](output[31, lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_set_packed_b32_carriers(
-    lhs_u32: T.Buffer((32,), "uint32"),
-    lhs_i32: T.Buffer((32,), "int32"),
-    lhs_f32: T.Buffer((32,), "float32"),
-    rhs_u32: T.Buffer((32,), "uint32"),
-    rhs_i32: T.Buffer((32,), "int32"),
-    rhs_f32: T.Buffer((32,), "float32"),
-    output_u32: T.Buffer((9, 32), "uint32"),
-    output_i32: T.Buffer((9, 32), "int32"),
-    output_f32: T.Buffer((9, 32), "float32"),
+    lhs_u32: T.Tensor((32,), "uint32"),
+    lhs_i32: T.Tensor((32,), "int32"),
+    lhs_f32: T.Tensor((32,), "float32"),
+    rhs_u32: T.Tensor((32,), "uint32"),
+    rhs_i32: T.Tensor((32,), "int32"),
+    rhs_f32: T.Tensor((32,), "float32"),
+    output_u32: T.Tensor((9, 32), "uint32"),
+    output_i32: T.Tensor((9, 32), "int32"),
+    output_f32: T.Tensor((9, 32), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     T.ptx["set.lt.u8x4"](output_u32[0, lane], lhs_u32[lane], rhs_u32[lane])
     T.ptx["set.lt.u8x4"](output_u32[1, lane], lhs_u32[lane], rhs_i32[lane])

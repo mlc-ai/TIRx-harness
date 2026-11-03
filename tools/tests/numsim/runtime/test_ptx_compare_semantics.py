@@ -5,11 +5,11 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_walk
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PtxCallDecodeError, decode_ptx_call
-from tvm.script import tirx as T
 from tvm_tirx import ir
+from tvm_tirx.script import tirx as T
 
 _FLOAT_COMPARISONS = (
     "eq",
@@ -31,19 +31,18 @@ _BOOL_OPS = ("and", "or", "xor")
 _CLASSES = ("finite", "infinite", "number", "notanumber", "normal", "subnormal")
 
 
-@T.prim_func
+@T.function
 def ptx_setp_bit_carriers(
-    a16: T.Buffer((32,), "int16"),
-    b16: T.Buffer((32,), "uint16"),
-    a32: T.Buffer((32,), "float32"),
-    b32: T.Buffer((32,), "int32"),
-    a64: T.Buffer((32,), "float64"),
-    b64: T.Buffer((32,), "uint64"),
-    output: T.Buffer((9, 32), "uint32"),
+    a16: T.Tensor((32,), "int16"),
+    b16: T.Tensor((32,), "uint16"),
+    a32: T.Tensor((32,), "float32"),
+    b32: T.Tensor((32,), "int32"),
+    a64: T.Tensor((32,), "float64"),
+    b64: T.Tensor((32,), "uint64"),
+    output: T.Tensor((9, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.setp.eq.b16(output[0, lane], a16[lane], b16[lane])
     T.ptx.setp.ne.b16(output[1, lane], a16[lane], b16[lane])
     T.ptx.setp.eq.b32(output[2, lane], a32[lane], b32[lane])
@@ -115,42 +114,41 @@ def test_setp_bit_size_relational_comparison_remains_rejected():
 
 def _comparison_kernel():
     parameters = (
-        'lhs_f32: T.Buffer((32,), "float32")',
-        'rhs_f32: T.Buffer((32,), "float32")',
-        'lhs_f64: T.Buffer((32,), "float64")',
-        'rhs_f64: T.Buffer((32,), "float64")',
-        'lhs_f16: T.Buffer((32,), "uint16")',
-        'rhs_f16: T.Buffer((32,), "uint16")',
-        'lhs_bf16: T.Buffer((32,), "uint16")',
-        'rhs_bf16: T.Buffer((32,), "uint16")',
-        'lhs_f16x2: T.Buffer((32,), "uint32")',
-        'rhs_f16x2: T.Buffer((32,), "uint32")',
-        'lhs_bf16x2: T.Buffer((32,), "uint32")',
-        'rhs_bf16x2: T.Buffer((32,), "uint32")',
-        'lhs_i32: T.Buffer((32,), "int32")',
-        'rhs_i32: T.Buffer((32,), "int32")',
-        'lhs_i64: T.Buffer((32,), "int64")',
-        'rhs_i64: T.Buffer((32,), "int64")',
-        'lhs_u64: T.Buffer((32,), "uint64")',
-        'rhs_u64: T.Buffer((32,), "uint64")',
-        'predicate: T.Buffer((32,), "uint32")',
-        'regular_set: T.Buffer((17, 32), "uint32")',
-        'integer_set: T.Buffer((32,), "int32")',
-        'float_set: T.Buffer((32,), "float32")',
-        'double_set: T.Buffer((32,), "uint32")',
-        'half_set: T.Buffer((17, 32), "uint32")',
-        'half_scalar_set: T.Buffer((4, 32), "uint16")',
-        'predicate_set: T.Buffer((12, 32), "uint32")',
-        'classes: T.Buffer((12, 32), "uint32")',
+        'lhs_f32: T.Tensor((32,), "float32")',
+        'rhs_f32: T.Tensor((32,), "float32")',
+        'lhs_f64: T.Tensor((32,), "float64")',
+        'rhs_f64: T.Tensor((32,), "float64")',
+        'lhs_f16: T.Tensor((32,), "uint16")',
+        'rhs_f16: T.Tensor((32,), "uint16")',
+        'lhs_bf16: T.Tensor((32,), "uint16")',
+        'rhs_bf16: T.Tensor((32,), "uint16")',
+        'lhs_f16x2: T.Tensor((32,), "uint32")',
+        'rhs_f16x2: T.Tensor((32,), "uint32")',
+        'lhs_bf16x2: T.Tensor((32,), "uint32")',
+        'rhs_bf16x2: T.Tensor((32,), "uint32")',
+        'lhs_i32: T.Tensor((32,), "int32")',
+        'rhs_i32: T.Tensor((32,), "int32")',
+        'lhs_i64: T.Tensor((32,), "int64")',
+        'rhs_i64: T.Tensor((32,), "int64")',
+        'lhs_u64: T.Tensor((32,), "uint64")',
+        'rhs_u64: T.Tensor((32,), "uint64")',
+        'predicate: T.Tensor((32,), "uint32")',
+        'regular_set: T.Tensor((17, 32), "uint32")',
+        'integer_set: T.Tensor((32,), "int32")',
+        'float_set: T.Tensor((32,), "float32")',
+        'double_set: T.Tensor((32,), "uint32")',
+        'half_set: T.Tensor((17, 32), "uint32")',
+        'half_scalar_set: T.Tensor((4, 32), "uint16")',
+        'predicate_set: T.Tensor((12, 32), "uint32")',
+        'classes: T.Tensor((12, 32), "uint32")',
     )
     lines = [
-        "@T.prim_func",
+        "@T.function",
         "def ptx_compare_semantics(",
         *(f"    {parameter}," for parameter in parameters),
         "):",
-        "    T.device_entry()",
-        "    _warp = T.warp_id([1])",
-        "    lane = T.lane_id([32])",
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+        "    lane = T.cuda.lane_id()",
     ]
     for row, comparison in enumerate(_FLOAT_COMPARISONS):
         lines.append(
@@ -198,30 +196,29 @@ def _comparison_kernel():
         lines.append(
             f'    T.ptx["testp.{classification}.f64"](classes[{6 + offset}, lane], lhs_f64[lane])'
         )
-    return tvm.script.from_source("\n".join(lines), {"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), {"T": T})
 
 
 def _slct_kernel():
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         """
-@T.prim_func
+@T.function
 def ptx_slct_semantics(
-    a16: T.Buffer((32,), "bfloat16"),
-    b16: T.Buffer((32,), "int16"),
-    c_i32: T.Buffer((32,), "int32"),
-    a32: T.Buffer((32,), "float32"),
-    b32: T.Buffer((32,), "int32"),
-    c_f32: T.Buffer((32,), "float32"),
-    a64: T.Buffer((32,), "uint64"),
-    b64: T.Buffer((32,), "int64"),
-    out16: T.Buffer((32,), "float16"),
-    out32: T.Buffer((32,), "uint32"),
-    out32_ftz: T.Buffer((32,), "int32"),
-    out64: T.Buffer((32,), "float64"),
+    a16: T.Tensor((32,), "bfloat16"),
+    b16: T.Tensor((32,), "int16"),
+    c_i32: T.Tensor((32,), "int32"),
+    a32: T.Tensor((32,), "float32"),
+    b32: T.Tensor((32,), "int32"),
+    c_f32: T.Tensor((32,), "float32"),
+    a64: T.Tensor((32,), "uint64"),
+    b64: T.Tensor((32,), "int64"),
+    out16: T.Tensor((32,), "float16"),
+    out32: T.Tensor((32,), "uint32"),
+    out32_ftz: T.Tensor((32,), "int32"),
+    out64: T.Tensor((32,), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["slct.b16.s32"](out16[lane], a16[lane], b16[lane], c_i32[lane])
     T.ptx["slct.f32.f32"](out32[lane], a32[lane], b32[lane], c_f32[lane])
     T.ptx["slct.ftz.f32.f32"](out32_ftz[lane], out32[lane], a32[lane], c_f32[lane])

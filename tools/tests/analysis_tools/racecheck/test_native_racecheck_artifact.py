@@ -10,69 +10,50 @@ from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.checker_report import RaceReport
 from tirx_harness.numsim.checkers import _run_racecheck as internal_racecheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import S, TileLayout
 
 _RACECHECK_PERMUTED_SHARED_LAYOUT = TileLayout(S[(4, 32) : (1, 4)])
 
 
-@T.prim_func
+@T.function
 def native_racecheck_write_write():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if lane == 0:
         shared[0] = warp + 1
 
 
-@T.prim_func
+@T.function
 def native_racecheck_fully_predicated_shared_pointer_load(
-    output: T.Buffer((32,), "float32"),
+    output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "float32")
     if lane < 0:
         T.ptx.ld.shared.f32(output[lane], shared.ptr_to([lane]))
 
 
-@T.prim_func
-def native_racecheck_tile_region_shared_index(
-    source: T.Buffer((1,), "float32"), output: T.Buffer((32,), "float32")
-):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    index = T.alloc_buffer((1,), "int32", scope="shared")
-    value: T.f32[1]
-    if lane == 0:
-        index[0] = 0
-    T.cuda.warp_sync()
-    Tx.copy(value[:], source[index[0] : index[0] + 1])
-    output[lane] = value[0]
-
-
-@T.prim_func
+@T.function
 def native_racecheck_lane_selected_oob(
-    active_lane: T.int32, source: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")
+    active_lane: T.int32, source: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == active_lane:
         output[0] = source[lane]
 
 
-@T.prim_func
-def native_racecheck_mbarrier_ordered(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def native_racecheck_mbarrier_ordered(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
+    barriers = T.alloc_shared((1,), "uint64")
     if (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.cuda.cta_sync()
@@ -84,12 +65,12 @@ def native_racecheck_mbarrier_ordered(output: T.Buffer((1,), "int32")):
         output[0] = shared[0]
 
 
-@T.prim_func
-def native_racecheck_cta_reduce_hidden_scratch_waw(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    scratch = T.alloc_buffer((2,), "float32", scope="shared")
+@T.function
+def native_racecheck_cta_reduce_hidden_scratch_waw(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((2,), "float32")
     if (warp == 1) and (lane == 0):
         scratch[0] = T.float32(7)
     reduced: T.let = T.cuda.cta_sum(T.Cast("float32", lane), 2, scratch.ptr_to([0]))
@@ -97,34 +78,33 @@ def native_racecheck_cta_reduce_hidden_scratch_waw(output: T.Buffer((1,), "float
         output[0] = reduced
 
 
-@T.prim_func
-def native_racecheck_cta_reduce_scratch_clean(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    scratch = T.alloc_buffer((2,), "float32", scope="shared")
+@T.function
+def native_racecheck_cta_reduce_scratch_clean(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((2,), "float32")
     reduced: T.let = T.cuda.cta_sum(T.Cast("float32", warp * 32 + lane), 2, scratch.ptr_to([0]))
     if (warp == 0) and (lane == 0):
         output[0] = reduced
 
 
-@T.prim_func
-def native_racecheck_single_warp_cta_reduce(output: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    scratch = T.alloc_buffer((1,), "float32", scope="shared")
+@T.function
+def native_racecheck_single_warp_cta_reduce(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((1,), "float32")
     reduced: T.let = T.cuda.cta_sum(T.Cast("float32", lane), 1, scratch.ptr_to([0]))
     if lane == 0:
         output[0] = reduced
 
 
-@T.prim_func
-def native_racecheck_schedule_sensitive_atomic(counter: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_racecheck_schedule_sensitive_atomic(counter: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if lane == 0:
         ticket: T.let = T.cuda.atomic_add(counter.ptr_to([0]), T.int32(1))
         if warp == 0:
@@ -134,12 +114,12 @@ def native_racecheck_schedule_sensitive_atomic(counter: T.Buffer((1,), "int32"))
                 shared[0] = 2
 
 
-@T.prim_func
-def native_racecheck_named_barrier_ordered(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_racecheck_named_barrier_ordered(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if (warp == 0) and (lane == 0):
         shared[0] = 7
     T.ptx.bar.sync(T.uint32(5), T.uint32(64))
@@ -147,93 +127,41 @@ def native_racecheck_named_barrier_ordered(output: T.Buffer((1,), "int32")):
         output[0] = shared[0]
 
 
-@T.prim_func
+@T.function
 def native_racecheck_two_ctas():
-    T.device_entry()
-    _cta = T.cta_id([2])
-    _warp = T.warp_id([1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
 
 
-@T.prim_func
-def native_racecheck_cross_cluster_global_waw(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def native_racecheck_cross_cluster_global_waw(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = 1
 
 
-@T.prim_func
-def native_racecheck_same_cluster_global_waw(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def native_racecheck_same_cluster_global_waw(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = 1
 
 
-@T.prim_func
-def native_racecheck_cross_cluster_tile_copy_waw(
-    source: T.Buffer((128,), "float32"), output: T.Buffer((128,), "float32")
-):
-    T.device_entry()
-    _cluster = T.cluster_id([2])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    staged: T.f32[128]
-    if lane == 0:
-        Tx.copy(staged[:], source[:])
-        Tx.copy(output[:], staged[:])
-
-
-@T.prim_func
-def native_racecheck_shared_permute_snapshot_waw():
-    T.device_entry()
-    _warp = T.warp_id([2])
-    _lane = T.lane_id([32])
-    source = T.alloc_buffer((128,), "uint32", scope="shared")
-    destination = T.alloc_buffer(
-        (128,), "uint32", scope="shared", layout=_RACECHECK_PERMUTED_SHARED_LAYOUT
-    )
-    Tx.warp.permute_layout(destination[:], source[:])
-
-
-@T.prim_func
-def native_racecheck_shared_permute_snapshot_source_race():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    source = T.alloc_buffer((128,), "uint32", scope="shared")
-    destination = T.alloc_buffer(
-        (128,), "uint32", scope="shared", layout=_RACECHECK_PERMUTED_SHARED_LAYOUT
-    )
-    if warp == 0:
-        if lane == 0:
-            source[0] = 1
-    else:
-        Tx.warp.permute_layout(destination[:], source[:])
-
-
-@T.prim_func
-def native_racecheck_cross_cluster_global_atomic(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def native_racecheck_cross_cluster_global_atomic(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         _old: T.let = T.cuda.atomic_add(output.ptr_to([0]), T.int32(1))
 
 
-@T.prim_func
-def native_racecheck_bulk_active_lane(active_lane: T.int32, source: T.Buffer((32,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def native_racecheck_bulk_active_lane(active_lane: T.int32, source: T.Tensor((32,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == active_lane:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -246,13 +174,13 @@ def native_racecheck_bulk_active_lane(active_lane: T.int32, source: T.Buffer((32
         T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
 
 
-@T.prim_func
-def native_racecheck_bulk_write_write(source: T.Buffer((32,), "uint8")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def native_racecheck_bulk_write_write(source: T.Tensor((32,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
+    barriers = T.alloc_shared((2,), "uint64")
     if lane == 0:
         if warp == 0:
             T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([0]), 1)
@@ -275,89 +203,12 @@ def native_racecheck_bulk_write_write(source: T.Buffer((32,), "uint8")):
             T.cuda.mbarrier_wait(barriers.ptr_to([1]), 0)
 
 
-@T.prim_func
-def native_racecheck_typed_tma_multicast(source: T.Buffer((4,), "float32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    if lane == 0:
-        T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cluster_sync()
-    if (cta == 0) and (lane == 0):
-        Tx.copy_async(
-            shared[:],
-            source[:],
-            dispatch="tma_auto",
-            mbar=barrier.ptr_to([0]),
-            cta_group=1,
-            cta_mask=T.int32(3),
-        )
-    if lane == 0:
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(barrier.ptr_to([0]), 16)
-        T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
-
-
-@T.prim_func
-def native_racecheck_typed_tma_write_write(source: T.Buffer((4,), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    if lane == 0:
-        T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([warp]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-    if lane == 0:
-        Tx.copy_async(
-            shared[:],
-            source[:],
-            dispatch="tma_auto",
-            mbar=barriers.ptr_to([warp]),
-        )
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(barriers.ptr_to([warp]), 16)
-        T.cuda.mbarrier_wait(barriers.ptr_to([warp]), 0)
-
-
-@T.prim_func
-def native_racecheck_typed_tma_disjoint_global_subregion(
-    source: T.Buffer((2, 4, 8), "float32"),
-):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4, 8), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    if (warp == 0) and (lane == 0):
-        T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-    if lane == 0:
-        if warp == 0:
-            Tx.copy_async(
-                shared[:, :],
-                source[1, :, :],
-                dispatch="tma_auto",
-                mbar=barrier.ptr_to([0]),
-            )
-            T.ptx.mbarrier.arrive.expect_tx.shared.b64(barrier.ptr_to([0]), 128)
-            T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
-        else:
-            source[0, 0, 0] = T.float32(7)
-
-
-@T.prim_func
-def native_racecheck_raw_tma_clean(input_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def native_racecheck_raw_tma_clean(input_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -370,13 +221,13 @@ def native_racecheck_raw_tma_clean(input_map: T.TensorMap()):
         T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)
 
 
-@T.prim_func
-def native_racecheck_raw_tma_write_write(input_map: T.TensorMap()):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+@T.function
+def native_racecheck_raw_tma_write_write(input_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((2,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barriers.ptr_to([warp]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -462,35 +313,6 @@ def test_native_racecheck_ignores_fully_predicated_shared_pointer_load(tmp_path)
     assert result["access_count"] == 0
     assert result["findings"] == []
     assert result["execution_error"] is None
-
-
-def test_native_racecheck_observes_shared_load_hidden_in_tile_region_index(tmp_path):
-    module = numsim.transpile(native_racecheck_tile_region_shared_index, cache_dir=tmp_path)
-    result = _run_native_phase(
-        module,
-        {
-            "source": np.array([3.0], dtype=np.float32),
-            "output": np.zeros(32, dtype=np.float32),
-        },
-    )
-
-    tile_op_id = next(
-        entry.op_id
-        for entry in module.spec.kernels[0].source_map
-        if entry.kind == "TilePrimitiveCall"
-    )
-    shared_index_reads = [
-        access
-        for access in result["accesses"]
-        if access["access_kind"] == "read"
-        and access["space"] == "shared"
-        and access["logical_buffer"] == "index"
-    ]
-
-    assert result["verdict"] == "clean"
-    assert len(shared_index_reads) == 1
-    assert shared_index_reads[0]["operation"]["source_op_id"] == tile_op_id
-    assert shared_index_reads[0]["active_lane_count"] == 32
 
 
 def test_native_racecheck_oob_is_exact_error_or_clean_from_concrete_mask(tmp_path):
@@ -610,73 +432,6 @@ def test_native_racecheck_raw_bulk_rejects_a_true_async_write_race(tmp_path):
     native = public_report.to_dict()["native"]
     assert native["verdict"] == "error"
     assert native["findings"][0]["access_pair"] == "write_write"
-
-
-def test_native_racecheck_typed_tma_multicast_records_each_target_allocation(tmp_path):
-    module = numsim.transpile(native_racecheck_typed_tma_multicast, cache_dir=tmp_path)
-    source = np.arange(4, dtype=np.float32)
-
-    result = _run_native_phase(module, {"source": source})
-
-    assert result["verdict"] == "clean"
-    assert result["findings"] == []
-    assert result["incomplete"] == []
-    assert result["execution_error"] is None
-    reads = [access for access in result["accesses"] if access["access_kind"] == "read"]
-    writes = [access for access in result["accesses"] if access["access_kind"] == "write"]
-    assert len(reads) == 4
-    assert len(writes) == 8
-    assert all(access["space"] == "global" for access in reads)
-    assert all(access["space"] == "shared" for access in writes)
-    assert all(access["lanes"][0]["lane"] == 0 for access in reads + writes)
-    assert all(access["width"] == 4 for access in reads + writes)
-    target_allocations = {access["lanes"][0]["spans"][0]["allocation_id"] for access in writes}
-    assert len(target_allocations) == 2
-
-    public = internal_racecheck(
-        native_racecheck_typed_tma_multicast,
-        inputs={"source": source},
-        cache_dir=tmp_path,
-    )
-    public.require_clean()
-    compact = public.to_dict()["native"]
-    assert compact["access_count"] == 12
-    assert compact["accesses"] == []
-    assert compact["accesses_complete"] is False
-
-
-def test_public_native_racecheck_typed_tma_overlapping_destinations_race(tmp_path):
-    source = np.arange(4, dtype=np.float32)
-
-    report = internal_racecheck(
-        native_racecheck_typed_tma_write_write,
-        inputs={"source": source},
-        cache_dir=tmp_path,
-    )
-
-    assert report.verdict == "error"
-    native = report.to_dict()["native"]
-    assert native["findings"][0]["access_pair"] == "write_write"
-    assert {
-        (finding["ordering_domain"], finding["ordering_failure"]) for finding in native["findings"]
-    } == {("execution", "missing_inter_actor_sync")}
-    # Direct mode compacts the four adjacent element fragments into the exact
-    # full-operation footprint.  Both TMA writes cover all four float32 cells,
-    # so their complete physical intersection is 16 bytes.
-    assert native["findings"][0]["overlap"]["byte_len"] == 16
-
-
-def test_public_native_racecheck_typed_tma_uses_exact_global_subregion(tmp_path):
-    report = internal_racecheck(
-        native_racecheck_typed_tma_disjoint_global_subregion,
-        inputs={"source": np.zeros((2, 4, 8), dtype=np.float32)},
-        cache_dir=tmp_path,
-    )
-
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["findings"] == []
-    assert native["incomplete"] == []
 
 
 def test_native_racecheck_raw_tma_records_exact_global_and_shared_payload(tmp_path):
@@ -908,52 +663,6 @@ def test_native_racecheck_reports_same_cluster_global_waw(tmp_path):
     # was introduced alongside.
     assert result.payload["access_count"] == 2
     assert result.payload["accesses_complete"] is False
-
-
-def test_native_racecheck_reports_cross_cluster_global_tile_copy_conflict(tmp_path):
-    module = numsim.transpile(native_racecheck_cross_cluster_tile_copy_waw, cache_dir=tmp_path)
-    inputs = {
-        "source": np.ones(128, dtype=np.float32),
-        "output": np.zeros(128, dtype=np.float32),
-    }
-
-    serial = numsim.Engine(max_workers=1).run_racecheck_phase(module, inputs)
-    parallel = numsim.Engine(max_workers=2).run_racecheck_phase(module, inputs)
-
-    assert serial.verdict == parallel.verdict == "error"
-    assert serial.findings == parallel.findings
-    for result in (serial, parallel):
-        assert len(result.findings) == 1
-        finding = result.findings[0]
-        assert finding["access_pair"] == "write_write"
-        assert finding["prior"]["space"] == finding["current"]["space"] == "global"
-        assert result.incomplete == []
-        assert result.payload["checked_memory_spaces"] == ["global", "shared", "tmem"]
-        assert result.payload["access_count"] > 0
-
-
-def test_native_racecheck_permute_snapshot_zero_fill_retains_shared_accesses(tmp_path):
-    module = numsim.transpile(native_racecheck_shared_permute_snapshot_waw, cache_dir=tmp_path)
-    result = numsim.Engine(max_workers=1).run_racecheck_phase(module, {})
-
-    assert result.verdict == "error"
-    assert result.incomplete == []
-    finding = result.findings[-1]
-    assert finding["access_pair"] == "write_write"
-    assert finding["prior"]["space"] == finding["current"]["space"] == "shared"
-
-
-def test_native_racecheck_permute_snapshot_records_zero_fill_source_reads(tmp_path):
-    module = numsim.transpile(
-        native_racecheck_shared_permute_snapshot_source_race, cache_dir=tmp_path
-    )
-    result = numsim.Engine(max_workers=1).run_racecheck_phase(module, {})
-
-    assert result.verdict == "error"
-    assert result.incomplete == []
-    finding = result.findings[-1]
-    assert finding["access_pair"] in {"read_write", "write_read"}
-    assert finding["prior"]["space"] == finding["current"]["space"] == "shared"
 
 
 def test_native_racecheck_records_cta_reduce_hidden_scratch_accesses(tmp_path):

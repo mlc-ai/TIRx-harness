@@ -4,23 +4,22 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def packed_ptx_cvt(
-    high: T.Buffer((8,), "float32"),
-    low: T.Buffer((8,), "float32"),
-    e4m3x2: T.Buffer((8,), "uint16"),
-    packed_bf16: T.Buffer((32,), "uint32"),
-    packed_e8m0: T.Buffer((32,), "uint16"),
-    unpacked_e8m0: T.Buffer((32,), "uint32"),
-    unpacked_e4m3_bf16: T.Buffer((32,), "uint32"),
-    unpacked_e4m3_f16: T.Buffer((32,), "uint32"),
+    high: T.Tensor((8,), "float32"),
+    low: T.Tensor((8,), "float32"),
+    e4m3x2: T.Tensor((8,), "uint16"),
+    packed_bf16: T.Tensor((32,), "uint32"),
+    packed_e8m0: T.Tensor((32,), "uint16"),
+    unpacked_e8m0: T.Tensor((32,), "uint32"),
+    unpacked_e4m3_bf16: T.Tensor((32,), "uint32"),
+    unpacked_e4m3_f16: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     index: T.let = lane % 8
     packed = T.local_scalar("uint16")
     T.ptx.cvt.rn.bf16x2.f32(packed_bf16[lane], high[index], low[index])
@@ -31,48 +30,46 @@ def packed_ptx_cvt(
     T.ptx.cvt.rn.f16x2.e4m3x2(unpacked_e4m3_f16[lane], e4m3x2[index])
 
 
-@T.prim_func
+@T.function
 def canonical_cvt_modifiers(
-    source: T.Buffer((8,), "float32"),
-    high: T.Buffer((8,), "float32"),
-    low: T.Buffer((8,), "float32"),
-    saturated: T.Buffer((8,), "float32"),
-    packed: T.Buffer((8,), "uint32"),
+    source: T.Tensor((8,), "float32"),
+    high: T.Tensor((8,), "float32"),
+    low: T.Tensor((8,), "float32"),
+    saturated: T.Tensor((8,), "float32"),
+    packed: T.Tensor((8,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 8:
         T.ptx["cvt.sat.f32.f32"](saturated[lane], source[lane])
         T.ptx["cvt.rn.satfinite.bf16x2.f32"](packed[lane], high[lane], low[lane])
 
 
-@T.prim_func
-def warp_early_return(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def warp_early_return(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         return 0
     output[warp * 32 + lane] = warp * 100 + lane
 
 
-@T.prim_func
+@T.function
 def low_precision_scalar_reinterpret(
-    bf16_bits: T.Buffer((32,), "uint16"),
-    fp16_bits: T.Buffer((32,), "uint16"),
-    decoded: T.Buffer((32, 2), "float32"),
-    roundtrip: T.Buffer((32, 2), "uint16"),
+    bf16_bits: T.Tensor((32,), "uint16"),
+    fp16_bits: T.Tensor((32,), "uint16"),
+    decoded: T.Tensor((32, 2), "float32"),
+    roundtrip: T.Tensor((32, 2), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    bf16: T.let = T.reinterpret("bfloat16", bf16_bits[lane])
-    fp16: T.let = T.reinterpret("float16", fp16_bits[lane])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    bf16: T.let = T.reinterpret(bf16_bits[lane], ty="bfloat16")
+    fp16: T.let = T.reinterpret(fp16_bits[lane], ty="float16")
     decoded[lane, 0] = T.cast(bf16, "float32")
     decoded[lane, 1] = T.cast(fp16, "float32")
-    roundtrip[lane, 0] = T.reinterpret("uint16", bf16)
-    roundtrip[lane, 1] = T.reinterpret("uint16", fp16)
+    roundtrip[lane, 0] = T.reinterpret(bf16, ty="uint16")
+    roundtrip[lane, 1] = T.reinterpret(fp16, ty="uint16")
 
 
 def _packed_cvt_inputs() -> dict[str, np.ndarray]:

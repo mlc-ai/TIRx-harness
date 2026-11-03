@@ -2,38 +2,41 @@
 
 import numpy as np
 
+from tests.numsim.support.execution import specialize
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def read_sm_id(output: T.Buffer((3, 32), "uint32")):
-    cta = T.cta_id([3])
-    lane = T.thread_id([32])
+@T.function
+def read_sm_id(output: T.Tensor((3, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.linear_thread_id()
     output[cta, lane] = T.cuda.mov_sreg(32, "smid")
 
 
-@T.prim_func
-def observe_pointer_address(source: T.Buffer((32,), "uint8"), output: T.Buffer((32,), "uint64")):
-    lane = T.thread_id([32])
-    address = T.reinterpret("uint64", source.ptr_to([lane]))
+@T.function
+def observe_pointer_address(source: T.Tensor((32,), "uint8"), output: T.Tensor((32,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.linear_thread_id()
+    address = T.reinterpret(source.ptr_to([lane]), ty="uint64")
     output[lane] = address & T.uint64(255)
 
 
-@T.prim_func
-def exclusive_lifecycle(columns: T.uint32, output: T.Buffer((2,), "uint32")):
-    T.func_attr({"tirx.cuda_arch": "sm_107a"})
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.thread_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def exclusive_lifecycle(columns: T.uint32, output: T.Tensor((2,), "uint32")):
+    T.func_attr({"backend_config": '{"cuda": {"arch": "sm_107a"}}'})
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.linear_thread_id()
+    address = T.alloc_shared((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.exclusive.sync.aligned.shared__cta.b32(
         T.address_of(address[0]),
         columns,
     )
     if columns == 96:
         # The model deliberately permits ordinary allocation while exclusive is live.
-        ordinary = T.alloc_buffer((1,), "uint32", scope="shared")
+        ordinary = T.alloc_shared((1,), "uint32")
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(
             T.address_of(ordinary[0]),
             32,
@@ -80,7 +83,7 @@ def test_pointer_bits_preserve_binding_address_and_subview_offset(tmp_path):
 def test_exclusive_tmem_uses_cta_local_lifecycle_without_placement(tmp_path):
     engine = numsim.Engine(max_workers=2)
     for columns in (96, 576):
-        kernel = exclusive_lifecycle.specialize({exclusive_lifecycle.params[0]: columns})
+        kernel = specialize(exclusive_lifecycle, {exclusive_lifecycle.params[0]: columns})
         modules = {
             name: numsim.transpile(kernel, cache_dir=tmp_path, _analysis_checker=name)
             for name in (None, "synccheck", "racecheck")

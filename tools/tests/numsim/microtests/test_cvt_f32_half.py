@@ -132,7 +132,7 @@ def _case():
             sentinel = 0xABCD01235A5A if dst_type == "uint64" else 0x5A5A
             operand = f"source[{size if mode == 3 else 'lane'}]"
             if not wide_source:
-                operand = f'T.reinterpret("float32", T.cast({operand}, "uint32"))'
+                operand = f'T.reinterpret(T.cast({operand}, "uint32"), ty="float32")'
             append_cvt_mode(lines, expected, row, spelling, dst_type, operand, converted, sentinel)
     return scalar_cvt_kernel(source, expected, lines)
 

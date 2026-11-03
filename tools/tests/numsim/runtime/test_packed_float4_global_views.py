@@ -5,37 +5,34 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_LAYOUT = ComposeLayout(0, 0, 0, TileLayout(S[(2, 2) : (4, 1)]))
 
 
-@T.prim_func
-def read_four_float4(source: T.Buffer((4,), "float4_e2m1fn"), output: T.Buffer((4,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def read_four_float4(source: T.Tensor((4,), "float4_e2m1fn"), output: T.Tensor((4,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 4:
         output[lane] = T.cast(source[lane], "float32")
 
 
-@T.prim_func
-def read_three_float4(source: T.Buffer((3,), "float4_e2m1fn"), output: T.Buffer((3,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def read_three_float4(source: T.Tensor((3,), "float4_e2m1fn"), output: T.Tensor((3,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 3:
         output[lane] = T.cast(source[lane], "float32")
 
 
-@T.prim_func
-def padded_global_alias(storage: T.Buffer((6,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    padded = T.decl_buffer(
-        (2, 2), "uint32", data=storage.data, scope="global", layout=_PADDED_LAYOUT
+@T.function
+def padded_global_alias(storage: T.Tensor((6,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    padded = T.decl_tensor(
+        storage.data, ty_args=[T.Tensor((2, 2), "uint32", scope="global", layout=_PADDED_LAYOUT)]
     )
     if lane == 0:
         storage[2] = 90

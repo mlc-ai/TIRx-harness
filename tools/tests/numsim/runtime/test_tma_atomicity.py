@@ -2,11 +2,11 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_tma_u6 import u6_case
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def atomicity_case(
@@ -47,7 +47,7 @@ def atomicity_case(
         T.ptx.cp.async_.bulk.commit_group()
         T.ptx.cp.async_.bulk.wait_group(0)
 """
-        parameters = 'values: T.Buffer((128,), "uint32"), backing: T.Buffer((132,), "uint32")'
+        parameters = 'values: T.Tensor((128,), "uint32"), backing: T.Tensor((132,), "uint32")'
         expected = np.concatenate((values, base[128:]))
     else:
         body = f"""
@@ -67,7 +67,7 @@ def atomicity_case(
         for i in T.serial(164):
             output[i] = shared[i]
 """
-        parameters = 'output: T.Buffer((164,), "uint32")'
+        parameters = 'output: T.Tensor((164,), "uint32")'
         expected = np.full(164, 0xA5B6C7D8, np.uint32)
         for i, value in enumerate(values):
             physical = shared_base + i * 4
@@ -75,9 +75,9 @@ def atomicity_case(
             if flip and (i // 32 + shared_base // 128) % 2:
                 physical ^= 8
             expected[physical // 4] = value
-    descriptor_type = "T.TensorMap()"
+    descriptor_type = "T.Ptr(T.TensorMap)"
     if restore_swizzle:
-        descriptor_type = 'T.Buffer((128,), "uint8")'
+        descriptor_type = 'T.Tensor((128,), "uint8")'
         body = body.replace("T.address_of(descriptor)", "descriptor.ptr_to([0])")
         body = (
             """
@@ -88,12 +88,11 @@ def atomicity_case(
 """
             + body
         )
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
 def kernel(descriptor: {descriptor_type}, {parameters}):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((164,), "uint32", align=1024)
     {body}
 """,

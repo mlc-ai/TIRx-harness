@@ -3,25 +3,25 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 _TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
+@T.function
 def raw_tf32_layout_f_hole_poison(
     consume_holes: T.int32,
-    a: T.Buffer((64, 8), "float32"),
-    b_physical: T.Buffer((4096,), "uint8"),
-    valid: T.Buffer((64, 32), "float32"),
-    holes: T.Buffer((4, 16), "uint32"),
+    a: T.Tensor((64, 8), "float32"),
+    b_physical: T.Tensor((4096,), "uint8"),
+    valid: T.Tensor((64, 32), "float32"),
+    holes: T.Tensor((4, 16), "uint32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
-    shared_b = T.alloc_buffer((4096,), "uint8", scope="shared")
-    tmem = T.decl_buffer((128, 136), "uint32", scope="tmem", layout=_TMEM_D_136, allocated_addr=0)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared_b = T.alloc_shared((4096,), "uint8")
+    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
     readback = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
@@ -36,9 +36,9 @@ def raw_tf32_layout_f_hole_poison(
             row = row_group * 32 + lane
             physical_lane = (row // 16) * 32 + row % 16
             for k in T.unroll(8):
-                tmem[physical_lane, k] = T.reinterpret("uint32", a[row, k])
+                tmem[physical_lane, k] = T.reinterpret(a[row, k], ty="uint32")
             for col in T.serial(32):
-                tmem[physical_lane, 16 + col] = T.reinterpret("uint32", T.float32(4))
+                tmem[physical_lane, 16 + col] = T.reinterpret(T.float32(4), ty="uint32")
     if lane < 8:
         tmem[warp * 32 + 16 + lane, 16] = T.uint32(0x3F400000)
     T.cuda.cta_sync()
@@ -81,7 +81,7 @@ def raw_tf32_layout_f_hole_poison(
         row = warp * 32 + lane
         physical_lane = (row // 16) * 32 + row % 16
         for col in T.serial(32):
-            valid[row, col] = T.reinterpret("float32", tmem[physical_lane, 16 + col])
+            valid[row, col] = T.reinterpret(tmem[physical_lane, 16 + col], ty="float32")
     if consume_holes != 0:
         if lane >= 16:
             holes[warp, lane - 16] = readback[0]

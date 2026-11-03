@@ -4,20 +4,20 @@ from tvm_ffi import structural_walk
 
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness.numsim.transpiler import native_frontend
-from tvm.script import tirx as T
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def all_lop3_shapes(
-    a: T.Buffer((1,), "uint32"),
-    b: T.Buffer((1,), "int32"),
-    c: T.Buffer((1,), "float32"),
-    d: T.Buffer((1,), "uint32"),
-    p: T.Buffer((1,), "uint32"),
-    q: T.Buffer((1,), "uint32"),
+    a: T.Tensor((1,), "uint32"),
+    b: T.Tensor((1,), "int32"),
+    c: T.Tensor((1,), "float32"),
+    d: T.Tensor((1,), "uint32"),
+    p: T.Tensor((1,), "uint32"),
+    q: T.Tensor((1,), "uint32"),
 ):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.lop3.b32(d[0], a[0], b[0], c[0], 0)
     T.ptx.lop3.b32(d[0], a[0], b[0], c[0], 255)
     T.ptx.lop3.and_.b32(d[0], p[0], a[0], b[0], c[0], 0x40, T.ptx.pred(q[0]))

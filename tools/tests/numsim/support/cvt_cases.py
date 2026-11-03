@@ -2,8 +2,8 @@
 
 import numpy as np
 
-import tvm
-from tvm.script import tirx as T
+import tvm_tirx
+from tvm_tirx.script import tirx as T
 
 
 def append_cvt_mode(lines, expected, row, spelling, dtype, operand, converted, sentinel):
@@ -24,8 +24,8 @@ def append_cvt_mode(lines, expected, row, spelling, dtype, operand, converted, s
     result = f"dst_{row}[0]"
     if dtype.startswith("float"):
         bits = dtype.removeprefix("float")
-        initial = f'T.reinterpret("{dtype}", T.uint{bits}({sentinel}))'
-        result = f'T.reinterpret("uint{bits}", {result})'
+        initial = f'T.reinterpret(T.uint{bits}({sentinel}), ty="{dtype}")'
+        result = f'T.reinterpret({result}, ty="uint{bits}")'
     lines.append(f'    dst_{row} = T.alloc_local((1,), "{dtype}")')
     if mode:
         lines.append(f"    dst_{row}[0] = {initial}")
@@ -38,13 +38,13 @@ def append_cvt_mode(lines, expected, row, spelling, dtype, operand, converted, s
 def scalar_cvt_kernel(source, expected, lines):
     """Keep the existing two-warp CTA shape and raw uint64 input/output buffers."""
     size = source.shape[-1]
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer({source.shape}, "uint64"), output: T.Buffer({expected.shape}, "uint64")):
-    T.device_entry()
-    block = T.cta_id([{size // 64}])
-    warp = T.warp_id([2])
-    local_lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor({source.shape}, "uint64"), output: T.Tensor({expected.shape}, "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid={size // 64}, block=64))
+    block = T.cuda.block_idx("x")
+    warp = T.cuda.warp_id()
+    local_lane = T.cuda.lane_id()
     lane = block * 64 + warp * 32 + local_lane
 {chr(10).join(lines)}
 """,
