@@ -9,7 +9,7 @@ use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
     CallObj, Expr, ExprObj, FloatImm, FloatImmObj, GlobalVarObj, IntImm, IntImmObj, Location,
-    LocationObj, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, SequentialSpanObj, TensorLoadObj,
+    LocationObj, OpaqueExprObj, PrimType, PrimTypeObj, Range, PtrTypeObj, SequentialSpanObj, TensorLoadObj,
     TupleGetItemObj, TupleObj, Type, Var, VarObj,
 };
 use tvm_tirx::ir::prim::{
@@ -495,6 +495,24 @@ pub fn int_imm(node: &ObjectRef) -> Option<i64> {
 pub fn int_imm_expr(expr: &Expr) -> Option<i64> {
     expr.as_node::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
+}
+
+/// Constrain each variable to its range in `analyzer`, as the old `Analyzer::bind` did.
+///
+/// tvm-tirx takes the ranges as one constraint context, which replaces the facts of any
+/// context synchronized before.
+pub fn bind_ranges(analyzer: &Analyzer, ranges: impl IntoIterator<Item = (Var, Range)>) -> AResult<()> {
+    let context: ObjectRef = tvm_ffi::cached_global_func!("sym.ConstraintContext")
+        .call_tuple((None::<ObjectRef>, 0_i64))?
+        .try_into()?;
+    for (var, range) in ranges {
+        let constraint: ObjectRef =
+            tvm_ffi::cached_global_func!("sym.RangeConstraint").call_tuple((var, range))?.try_into()?;
+        tvm_ffi::cached_global_func!("sym.ConstraintContextAppend")
+            .call_tuple((context.clone(), constraint))?;
+    }
+    analyzer.sync_constraint_context(&context)?;
+    Ok(())
 }
 
 pub fn simplify(analyzer: &Analyzer, expr: &Expr) -> AResult<Expr> {

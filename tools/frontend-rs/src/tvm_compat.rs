@@ -1,50 +1,15 @@
 //! Checked access to fields whose native representation changed in Apache TVM.
 
-use std::slice;
-
 use tvm_tirx::ir::IntImmObj;
-use tvm_tirx::tvm_ffi::{Any, Error, Result, VALUE_ERROR};
+use tvm_tirx::tvm_ffi::{BigInt, Error, Result, VALUE_ERROR};
 
-#[repr(C)]
-struct ByteArray {
-    data: *const i64,
-    size: usize,
-}
-
-extern "C" {
-    fn TVMFFIBigIntGetContentByteArray(value: *const Any) -> ByteArray;
-}
-
-fn integer_value(value: &Any) -> Result<i128> {
-    let bytes = unsafe { TVMFFIBigIntGetContentByteArray(value) };
-    if bytes.size % std::mem::size_of::<i64>() != 0 {
-        return Err(Error::new(
-            VALUE_ERROR,
-            "BigInt content is not a whole number of 64-bit words",
-            "",
-        ));
-    }
-    let word_count = bytes.size / std::mem::size_of::<i64>();
-    if word_count > 2 {
-        return Err(Error::new(
+fn integer_value(value: &BigInt) -> Result<i128> {
+    value.to_i128().ok_or_else(|| {
+        Error::new(
             VALUE_ERROR,
             "integer literal exceeds the frontend's 128-bit conversion range",
             "",
-        ));
-    }
-    let words = if word_count == 0 {
-        &[]
-    } else {
-        if bytes.data.is_null() {
-            return Err(Error::new(VALUE_ERROR, "null BigInt content", ""));
-        }
-        unsafe { slice::from_raw_parts(bytes.data, word_count) }
-    };
-    Ok(match words {
-        [] => 0,
-        [low] => i128::from(*low),
-        [low, high] => (i128::from(*high) << 64) | i128::from(*low as u64),
-        _ => unreachable!(),
+        )
     })
 }
 

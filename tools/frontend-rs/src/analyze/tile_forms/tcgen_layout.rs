@@ -9,6 +9,7 @@ use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
     String as FfiString,
 };
+use crate::analyze::util::bind_ranges;
 use crate::analyze::util::int_const;
 use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::TensorVarExt;
@@ -219,16 +220,17 @@ pub(super) fn validate_tcgen_smem_layout(
         Ok(origin)
     };
     let bind_variables = |analyzer: &Analyzer| -> AResult<()> {
+        let mut ranges = Vec::new();
         for (variable, extent) in variables.iter().zip(shape.iter()) {
             if variable.as_node::<tvm_tirx::ir::VarObj>().is_some() {
                 let var = variable.clone().try_cast::<Var>()?;
-                analyzer.bind(
-                    &var,
-                    &Range::from_min_extent(int_expr(0)?, int_expr(*extent)?, Location::unknown())?,
-                )?;
+                ranges.push((
+                    var,
+                    Range::from_min_extent(int_expr(0)?, int_expr(*extent)?, Location::unknown())?,
+                ));
             }
         }
-        Ok(())
+        bind_ranges(analyzer, ranges)
     };
     if layout_kind == "TileLayout" {
         let layout = layout.clone().expect("tile layout");

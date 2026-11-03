@@ -20,7 +20,7 @@ use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, ControlProvenance, Emitter, RustValue, Uniformity, Variables};
 use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, phase_binding_name};
-use tvm_tirx::ir::{Call, CallObj, Expr, Op, PrimType, PtrTypeObj, Var};
+use tvm_tirx::ir::{Call, CallObj, Expr, Location, Op, PrimType, PtrTypeObj, Type, Var};
 use tvm_tirx::ir::prim::SelectObj;
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -1507,11 +1507,15 @@ pub(super) fn reinterpret(dtype: &str, value: &ObjectRef) -> AResult<ObjectRef> 
     if dtype_of(value)? == dtype {
         return Ok(value.clone());
     }
+    let ty: Type = prim_type(dtype)?.into();
     let call = Call::new(
-        prim_type(dtype)?,
+        Some(&ty),
         Op::get("tirx.reinterpret")?,
         vec![Expr::try_from(Any::from(value.clone()))?],
-    );
+        None,
+        Vec::<Type>::new(),
+        Location::unknown(),
+    )?;
     Ok(oref(call))
 }
 

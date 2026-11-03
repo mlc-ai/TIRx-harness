@@ -73,7 +73,9 @@ split_thresholds! {
 }
 
 fn static_positive_for_extent(loop_stmt: &ForObj) -> Option<i64> {
-    int_imm(&oref(loop_stmt.extent.clone())).filter(|extent| *extent > 0)
+    let begin = int_imm(&oref(loop_stmt.begin.clone()))?;
+    let end = int_imm(&oref(loop_stmt.end.clone()))?;
+    Some(end - begin).filter(|extent| *extent > 0)
 }
 
 pub fn allows_bounded_transfer_split(loop_stmt: &ForObj, thresholds: &SplitThresholds) -> bool {
@@ -1034,9 +1036,9 @@ impl<'a> Emitter<'a> {
         };
         let checkpoint = self.partition_checkpoint();
         let mut bodies =
-            vec![self.capture_split_arm(&branch.then_case, initial_stmt, borrow_non_copy)?];
+            vec![self.capture_split_arm(&Stmt::from(branch.then_case.clone()), initial_stmt, borrow_non_copy)?];
         if let Some(else_case) = &branch.else_case {
-            bodies.push(self.capture_split_arm(else_case, initial_stmt, borrow_non_copy)?);
+            bodies.push(self.capture_split_arm(&Stmt::from(else_case.clone()), initial_stmt, borrow_non_copy)?);
         }
         let arguments: Option<Vec<_>> = bodies
             .iter()
@@ -1150,7 +1152,7 @@ impl<'a> Emitter<'a> {
         _stmt: &Stmt,
         loop_stmt: &ForObj,
     ) -> AResult<Option<SplitHelper>> {
-        let has_loop_transfer = self.contains_current_loop_transfer(&loop_stmt.body)?;
+        let has_loop_transfer = self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?;
         let allow_loop_transfer = self
             .outer_loop_live_split_permissions
             .last()
@@ -1174,7 +1176,7 @@ impl<'a> Emitter<'a> {
             .push(allow_loop_transfer || allow_large_transfer_body);
         self.nested_for_statement_split_permissions
             .push(allow_nested_for_split);
-        let body = self.capture_split_arm(&loop_stmt.body, None, true);
+        let body = self.capture_split_arm(&Stmt::from(loop_stmt.body.clone()), None, true);
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
         let body = body?;
@@ -1218,7 +1220,7 @@ impl<'a> Emitter<'a> {
                     .copied()
                     .unwrap_or(false))
             || self.capturing_for_statements.contains(&identity)
-            || !self.contains_current_loop_transfer(&loop_stmt.body)?
+            || !self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?
         {
             return Ok(None);
         }

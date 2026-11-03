@@ -3,11 +3,13 @@
 //! `emit_store` / `logical_buffer_name`, and `physical_tmem_coordinates`.
 
 use tvm_tirx::sym::{Analyzer, ProofStrength};
-use tvm_tirx::ir::{Expr, IntImm, Range, Var};
+use tvm_tirx::ir::prim::sub;
+use tvm_tirx::ir::{Expr, IntImm, Location, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::bind_ranges;
 use crate::analyze::util::tensor_var;
 use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
@@ -55,10 +57,11 @@ impl<'a> TmemNaming<'a> {
         let mut loop_ranges = Vec::new();
         for statement in &emitter.plan.statements {
             if let Some(loop_stmt) = statement.as_node::<ForObj>() {
+                let extent = sub(loop_stmt.end.clone(), loop_stmt.begin.clone())?;
                 loop_ranges.push((
-                    loop_stmt.loop_var.clone(),
-                    bindings.resolve_expression_with(&loop_stmt.min, &substitutions)?,
-                    bindings.resolve_expression_with(&loop_stmt.extent, &substitutions)?,
+                    loop_stmt.var.clone(),
+                    bindings.resolve_expression_with(&loop_stmt.begin, &substitutions)?,
+                    bindings.resolve_expression_with(&extent, &substitutions)?,
                 ));
             }
         }
@@ -111,11 +114,15 @@ impl<'a> TmemNaming<'a> {
             return Ok(false);
         }
         let analyzer = Analyzer::new();
+        let mut ranges = Vec::new();
         for (variable, minimum, extent) in &self.loop_ranges {
-            let range = Range::from_complete_fields(minimum.clone(), extent.clone(), None);
-            if analyzer.bind(variable, &range).is_err() {
-                return Ok(false);
-            }
+            ranges.push((
+                variable.clone(),
+                Range::from_min_extent(minimum.clone(), extent.clone(), Location::unknown())?,
+            ));
+        }
+        if bind_ranges(&analyzer, ranges).is_err() {
+            return Ok(false);
         }
         let starts = op_binary(
             "_OpLE",
@@ -145,7 +152,7 @@ impl<'a> Emitter<'a> {
             let buffers = &self.memory_plan.buffers;
             let Some(plan_index) = buffers
                 .iter()
-                .position(|candidate| same(candidate.buffer, buffer))
+                .position(|candidate| same(&candidate.buffer, buffer))
             else {
                 return Err(Failure::Ffi(ffi_error("TMEM view has no memory plan")));
             };

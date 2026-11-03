@@ -166,7 +166,7 @@ impl Context<'_> {
             .func
             .params
             .iter()
-            .any(|parameter| same(&parameter, buffer))
+            .any(|parameter| same(&parameter, &buffer))
         {
             Ok((ffi_text(&buffer.name), serialized))
         } else {
@@ -362,7 +362,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         implicit_tensor_map_metadata(&func)?;
         return Ok(func);
     }
-    let body = function_body(func)?;
+    let body = function_body(&func)?;
     let statements: Vec<Stmt> = match body.as_node::<SeqStmtObj>() {
         Some(sequence) => sequence.seq.iter().collect(),
         None => vec![body],
@@ -493,7 +493,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         return unsupported(format!("host TensorMaps are not encoded: {missing:?}"));
     }
     let bindings = BufferBindings::build(
-        &crate::walk_statements(function_body(func)?)?
+        &crate::walk_statements(function_body(&func)?)?
             .iter()
             .collect::<Vec<_>>(),
     )?;

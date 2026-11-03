@@ -12,7 +12,7 @@ use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::{json_string, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{CallObj, IntImmObj, PrimType, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, IntImmObj, Location, PrimType, PtrTypeObj, TensorLoadObj};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -1026,6 +1026,7 @@ impl<'a> Emitter<'a> {
                         "uint64"
                     })?,
                     prim(&parsed.arguments[1])?,
+                    Location::unknown(),
                 )?;
                 let value =
                     self.v2_register_operand(&oref(operand), "u64", "tensor_map_replace_value")?;

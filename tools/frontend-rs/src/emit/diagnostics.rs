@@ -154,7 +154,7 @@ impl<'a> Emitter<'a> {
             // Its bounds failed, so the loop variable has no emitted value.
             self.diagnostics
                 .invalid_values
-                .add(oref(loop_stmt.loop_var.clone()));
+                .add(oref(loop_stmt.var.clone()));
         }
         let is_loop = stmt.as_node::<ForObj>().is_some() || stmt.as_node::<WhileObj>().is_some();
         if is_loop {

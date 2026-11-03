@@ -1,7 +1,7 @@
 //! Statement and buffer-access emission.
 
 use tvm_tirx::ir::{Expr, IntImmObj, PtrTypeObj, Var};
-use tvm_tirx::ir::prim::RampObj;
+use tvm_tirx::ir::prim::{sub, RampObj};
 use tvm_tirx::ir::{
     AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
     SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
@@ -138,7 +138,7 @@ impl<'a> Emitter<'a> {
         let mut seen: Vec<Var> = Vec::new();
         while !seen
             .iter()
-            .any(|candidate| same(candidate, current))
+            .any(|candidate| same(candidate, &current))
         {
             seen.push(current.clone());
             let data = self.buffer_bindings.declared_data(&current);
@@ -856,9 +856,9 @@ impl<'a> Emitter<'a> {
         } else if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
             self.contains_current_loop_transfer(&attr.body)?
         } else if let Some(branch) = stmt.as_node::<IfObj>() {
-            self.contains_current_loop_transfer(&branch.then_case)?
+            self.contains_current_loop_transfer(&Stmt::from(branch.then_case.clone()))?
                 || match &branch.else_case {
-                    Some(else_case) => self.contains_current_loop_transfer(else_case)?,
+                    Some(else_case) => self.contains_current_loop_transfer(&Stmt::from(else_case.clone()))?,
                     None => false,
                 }
         } else if matches!(
@@ -1345,7 +1345,7 @@ impl<'a> Emitter<'a> {
             }
             self.emit_line(&format!("if {} {{", condition.code));
             self.indent += 1;
-            self.emit_scoped(&branch.then_case, initial_stmt)?;
+            self.emit_scoped(&Stmt::from(branch.then_case.clone()), initial_stmt)?;
             self.indent -= 1;
             let Some(else_case) = &branch.else_case else {
                 self.emit_line("}");
@@ -1353,7 +1353,7 @@ impl<'a> Emitter<'a> {
             };
             self.emit_line("} else {");
             self.indent += 1;
-            self.emit_scoped(else_case, initial_stmt)?;
+            self.emit_scoped(&Stmt::from(else_case.clone()), initial_stmt)?;
             self.indent -= 1;
             self.emit_line("}");
             return Ok(());
@@ -1411,7 +1411,7 @@ impl<'a> Emitter<'a> {
         };
         self.emit_line(&branch_context(&then_mask, branch_variant));
         match &split_helpers {
-            None => self.emit_scoped(&branch.then_case, initial_stmt)?,
+            None => self.emit_scoped(&Stmt::from(branch.then_case.clone()), initial_stmt)?,
             Some((then_helper, _)) => {
                 let codes = split_call_codes.as_ref().map(|codes| codes.0.clone());
                 self.emit_split_call(then_helper, codes);
@@ -1425,7 +1425,7 @@ impl<'a> Emitter<'a> {
             self.indent += 1;
             self.emit_line(&branch_context(&else_mask, branch_variant));
             match &split_helpers {
-                None => self.emit_scoped(else_case, initial_stmt)?,
+                None => self.emit_scoped(&Stmt::from(else_case.clone()), initial_stmt)?,
                 Some((_, else_helper)) => {
                     let helper = else_helper.as_ref().expect("else helper");
                     let codes = split_call_codes.as_ref().and_then(|codes| codes.1.clone());
@@ -1527,7 +1527,7 @@ impl<'a> Emitter<'a> {
                 self.emit_split_call(&helper, None);
                 return Ok(());
             }
-            self.emit_scoped(&loop_stmt.body, None)
+            self.emit_scoped(&Stmt::from(loop_stmt.body.clone()), None)
         })();
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
@@ -1536,12 +1536,13 @@ impl<'a> Emitter<'a> {
 
     fn emit_for(&mut self, stmt: &Stmt, loop_stmt: &ForObj) -> AResult<()> {
         let loop_site_id = self.static_op_id(&oref(stmt.clone()))?;
-        let extent_node = oref(loop_stmt.extent.clone());
+        // The loop runs begin + offset for offset = 0, step, ... below end - begin.
+        let extent_node = oref(sub(loop_stmt.end.clone(), loop_stmt.begin.clone())?);
         let static_extent = match int_imm(&extent_node) {
             Some(value) if value == 0 || value == 1 => Some(value),
             _ => None,
         };
-        let has_loop_transfer = self.contains_current_loop_transfer(&loop_stmt.body)?;
+        let has_loop_transfer = self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?;
         let bounded =
             super::scaffold::allows_bounded_transfer_split(loop_stmt, &self.split_thresholds);
         let allow_live_mutation = has_loop_transfer && bounded;
@@ -1553,16 +1554,13 @@ impl<'a> Emitter<'a> {
         self.emit_line(&format!("let {parent} = ctx.active_mask();"));
         self.emit_line(&format!("if !{parent}.is_empty() {{"));
         self.indent += 1;
-        let minimum = self.emit_expr(&oref(loop_stmt.min.clone()))?;
+        let minimum = self.emit_expr(&oref(loop_stmt.begin.clone()))?;
         let minimum = self.as_i64(minimum)?;
         let extent = self.emit_expr(&extent_node)?;
         let extent = self.as_i64(extent)?;
-        let mut step = RustValue::new("1_i64", "i64", Uniformity::Uniform);
-        if let Some(step_expr) = &loop_stmt.step {
-            let value = self.emit_expr(&oref(step_expr.clone()))?;
-            step = self.as_i64(value)?;
-        }
-        let loop_var = loop_stmt.loop_var.clone();
+        let step = self.emit_expr(&oref(loop_stmt.step.clone()))?;
+        let step = self.as_i64(step)?;
+        let loop_var = loop_stmt.var.clone();
         let loop_var_ref = oref(loop_var.clone());
         let loop_dtype = prim_dtype(&loop_var.ty).map(dtype_text).unwrap_or_default();
         let loop_rust_type = stmt_rust_scalar_by_dtype(&loop_dtype);
@@ -1816,7 +1814,7 @@ impl<'a> Emitter<'a> {
         // continue is carried by the returned context's active mask.
         self.outer_loop_live_split_permissions.push(true);
         self.nested_for_statement_split_permissions.push(true);
-        let result = self.emit_scoped(&stmt.body, None);
+        let result = self.emit_scoped(&Stmt::from(stmt.body.clone()), None);
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
         self.loop_depth -= 1;

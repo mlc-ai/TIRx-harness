@@ -99,7 +99,7 @@ pub struct MemoryPlan {
 impl MemoryPlan {
     pub fn resolve(&self, buffer: &Var) -> AResult<&BufferPlan> {
         for candidate in &self.buffers {
-            if same(candidate.buffer, buffer) {
+            if same(&candidate.buffer, buffer) {
                 return Ok(candidate);
             }
         }
@@ -331,7 +331,7 @@ pub(in crate::analyze) fn build_memory_plan(
             }
             if !tmem_buffers
                 .iter()
-                .any(|candidate| same(candidate, buffer))
+                .any(|candidate| same(candidate, &buffer))
             {
                 tmem_buffers.push(buffer.clone());
             }
@@ -374,7 +374,7 @@ pub(in crate::analyze) fn build_memory_plan(
         append_buffer(builder, &buffer, false);
         if is_alloc {
             if let Some(allocation) = &builder.allocation {
-                if !same(allocation, buffer) {
+                if !same(allocation, &buffer) {
                     return unsupported(format!(
                         "buffer:{}:multiple AllocBuffer nodes share one data variable",
                         buffer_name(&buffer)
@@ -458,7 +458,7 @@ pub(in crate::analyze) fn build_memory_plan(
         };
         let owner_info = infos
             .iter()
-            .find(|(buffer, _, _, _)| same(buffer, owner))
+            .find(|(buffer, _, _, _)| same(buffer, &owner))
             .map(|(_, _, info, _)| info.clone())
             .expect("owner layout");
         if owner_info.dynamic_elem_offset.is_some() {
@@ -503,7 +503,7 @@ pub(in crate::analyze) fn build_memory_plan(
             if zero_extent_pool_owner {
                 let mut evidenced: Vec<i64> = Vec::new();
                 for (buffer, _, info, _) in &infos {
-                    if same(buffer, owner) {
+                    if same(buffer, &owner) {
                         continue;
                     }
                     if info.dynamic_elem_offset.is_none() && info.element_count.is_some() {
@@ -532,7 +532,7 @@ pub(in crate::analyze) fn build_memory_plan(
             )?,
         };
         for (buffer, is_parameter, info, _) in &infos {
-            if same(buffer, owner) {
+            if same(buffer, &owner) {
                 continue;
             }
             if info.dynamic_elem_offset.is_some() {
@@ -684,7 +684,7 @@ pub(in crate::analyze) fn build_memory_plan(
         let info = ctx.inspect_layout(&buffer, &bindings)?;
         let referenced_view = dynamic_referenced
             .iter()
-            .any(|candidate| same(candidate, buffer));
+            .any(|candidate| same(candidate, &buffer));
         buffer_plans.push(BufferPlan {
             buffer: buffer.clone(),
             name: buffer_name(&buffer),

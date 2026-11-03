@@ -186,7 +186,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         if let Some(captured) = self
             .frozen_buffers
             .iter()
-            .find(|captured| same(captured.source, source))
+            .find(|captured| same(&captured.source, source))
         {
             return Ok((captured.shape.clone(), captured.values.clone()));
         }

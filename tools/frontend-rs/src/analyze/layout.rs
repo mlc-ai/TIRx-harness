@@ -47,8 +47,8 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
     }
     Ok(TileLayout::new(
         vec![Iter::new(size, one, Axis::get("m")?)],
-        Vec::new(),
-        Map::new(),
+        Vec::<Iter>::new(),
+        &Map::new(),
     )
     .into())
 }

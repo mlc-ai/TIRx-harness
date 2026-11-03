@@ -556,6 +556,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
                     condition,
                     gather4[index].clone(),
                     selected,
+                    Location::unknown(),
                 )?))?;
             }
             let row_dtype = dtype_text(region.mins[0].dtype());

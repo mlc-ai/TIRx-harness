@@ -122,7 +122,7 @@ fn same_expression(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr) -> AResult<bool>
 }
 
 fn same_region(analyzer: &Analyzer, lhs: &TileRegion, rhs: &TileRegion) -> AResult<bool> {
-    if !(same(lhs.buffer, rhs.buffer)
+    if !(same(&lhs.buffer, &rhs.buffer)
         && lhs.dtype == rhs.dtype
         && lhs.extents == rhs.extents
         && lhs.mins.len() == rhs.mins.len())
