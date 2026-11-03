@@ -56,8 +56,13 @@ independent reference identifies numerical mismatches.
 import tirx_kernels.tirx_lite as txl
 
 
-@txl.kernel(warps=1, arch="sm_100a", grid=1)
-def kernel(a: txl.gptr(txl.f32), b: txl.gptr(txl.f32), out: txl.gptr(txl.f32)):
+@txl.kernel()
+def kernel(
+    a: txl.Tensor((32,), "float32"),
+    b: txl.Tensor((32,), "float32"),
+    out: txl.Tensor((32,), "float32"),
+):
+    txl.device_entry(launch=txl.cuda.LaunchConfig(grid=1, block=32))
     lane = txl.lane_id()
     x = txl.local_scalar("float32")
     y = txl.local_scalar("float32")
@@ -335,7 +340,7 @@ then run `python inspect_vector_add.py`:
 
 ```python
 from vector_add import kernel
-from tvm.target import Target
+from tvm_tirx.target import Target
 
 target = Target({"kind": "cuda", "arch": "sm_100a"})
 with target:

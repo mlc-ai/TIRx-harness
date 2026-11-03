@@ -58,7 +58,7 @@ source .venv/bin/activate
 After any of these methods, check imports (this does not run checks or GPU kernels):
 
 ```bash
-python -c "import tvm.tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
+python -c "import tvm_tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
 ```
 
 ## Install kcoral server dependencies

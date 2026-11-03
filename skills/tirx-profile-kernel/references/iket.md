@@ -54,10 +54,10 @@ Compilation is the on/off switch; do not maintain a second kernel or gate the
 annotations behind a source-level profiling flag:
 
 ```python
-module = tvm.IRModule({"main": func})
+module = tvm_tirx.IRModule({"main": func})
 
 # Off: the TIRx pipeline strips IKET annotations and their token storage.
-plain = tvm.compile(module, target=target, tir_pipeline="tirx")
+plain = tvm_tirx.compile(module, target=target, pipeline="tirx")
 
 # On: preserve and lower the annotations for official IKET capture.
 instrumented = iket.IketProfiler().compile(

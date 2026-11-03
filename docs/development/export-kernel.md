@@ -1,36 +1,35 @@
 # Export a kernel
 
 Export a kernel as CUDA C++ source with its host launch wrapper, then build and
-run it with `tvm-ffi`. Consumers need no TVM, `tirx-kernels`, or `tirx-harness`
+run it with `tvm-ffi`. Consumers need no TIRx, `tirx-kernels`, or `tirx-harness`
 installation. You can also distribute a compiled shared library so consumers
 can skip compilation.
 
-This workflow uses TVM's
-[`export_cuda_host`](https://github.com/apache/tvm/blob/ea0cfa320fcdea0567e2f4c19d363625c66630d1/python/tvm/backend/cuda/host.py)
-API.
+This workflow uses TIRx's `tvm_tirx.backend.cuda.export_cuda_host` API.
 
 ## Export in the development environment
 
 Exporting requires a compatible CUDA
-toolchain because `tvm.compile` also compiles the device code.
+toolchain because compiling the kernel also compiles the device code.
 
 Save this as `export_zero.py`:
 
 ```python
 from pathlib import Path
 
-import tvm
-from tvm.backend.cuda import export_cuda_host
+import tvm_tirx
+from tvm_tirx.backend.cuda import export_cuda_host
 
 import tirx_kernels.tirx_lite as txl
 
 
-@txl.kernel(warps=1, arch="sm_100a", grid=1)
-def zero(out: txl.gptr(txl.f32)):
+@txl.kernel()
+def zero(out: txl.Tensor((32,), "float32")):
+    txl.device_entry(launch=txl.cuda.LaunchConfig(grid=1, block=32))
     txl.ptx.st.global_.f32(out.ptr_to([txl.lane_id()]), txl.float32(0))
 
 
-target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"}, host="cuda_host")
+target = tvm_tirx.target.Target({"kind": "cuda", "arch": "sm_100a"}, host="cuda_host")
 compiled = zero.compile(target=target)
 Path("zero.cu").write_text(export_cuda_host(compiled.mod), encoding="utf-8")
 ```
@@ -40,8 +39,8 @@ python export_zero.py
 ```
 
 For an existing TIRx-lite kernel, replace `zero` with your `Kernel` object.
-For a native TIRx `PrimFunc` or `IRModule`, use
-`tvm.compile(kernel, target=target, tir_pipeline="tirx")` and pass the result's
+For a native TIRx `Function` or `IRModule`, use
+`tvm_tirx.tirx.compile(kernel, target=target, pipeline="tirx")` and pass the result's
 `.mod` to `export_cuda_host` in the same way.
 
 The `.cu` file contains both device code and the host wrapper, including FFI
@@ -56,7 +55,7 @@ Copy `zero.cu` to the consumer's project. In a separate Python environment,
 install the FFI package with its build dependencies:
 
 ```bash
-python -m pip install "apache-tvm-ffi[cpp]>=0.1.14.post0,<0.2"
+python -m pip install "apache-tvm-ffi[cpp]>=0.1.15.post1,<0.2"
 ```
 
 Building requires a C++ compiler and a CUDA Toolkit with `nvcc` that supports
@@ -74,6 +73,7 @@ library = tvm_ffi.cpp.build(
     sources=["zero.cu"],
     build_directory=str(Path("build").resolve()),
     backend="cuda",
+    extra_ldflags=["-lcuda"],
 )
 print(library)
 ```
@@ -86,7 +86,8 @@ TVM_FFI_CUDA_ARCH_LIST=10.0a python build_zero.py
 
 This produces `build/zero.so`. `tvm-ffi` supplies its own headers, DLPack
 headers, and link options. The generated source already exports the kernel's
-FFI entry point.
+FFI entry point. It loads the embedded device binary through the CUDA driver
+API, so the library links the driver with `-lcuda`.
 
 ## Load and call the kernel
 
@@ -114,7 +115,7 @@ shape, dtype, layout, and device requirements. Launches use the CUDA stream
 provided through `tvm-ffi`; synchronize before reading results on the CPU.
 
 To ship a binary, distribute `zero.so` and use only the load-and-call step.
-Install `apache-tvm-ffi>=0.1.14.post0,<0.2` without the `[cpp]` extra on machines
+Install `apache-tvm-ffi>=0.1.15.post1,<0.2` without the `[cpp]` extra on machines
 that only load the library. They need compatible GPU, CUDA runtime, host
 platform, and FFI versions; they do not need `nvcc` or a C++ compiler.
 Document those requirements and the kernel's argument contract alongside the
@@ -122,15 +123,13 @@ artifact. Shipping `.cu` lets consumers rebuild for their deployment environment
 
 ## Kernels with additional requirements
 
-- TMA tensor-map encoding must use `tirx.tensormap_encode_tiled`. The older
+- TMA tensor-map encoding must use `tirx.cuda.tensormap_encode_tiled`. The older
   `call_packed("runtime.cuTensorMapEncodeTiled", ...)` form is rejected with
   `cuda_host requires tensormap_encode_tiled instead of a packed tensor-map encoder`.
-  TIRx-lite provides `txl.cu_tensor_map_encode_tiled(...)` for this purpose;
-  `tirx-kernels` 0.1.2.post1 includes the migration for FP16/BF16 GEMM and
-  DeepSeek-V4 MLA. If the generated wrapper encodes tensor maps, add
-  `extra_ldflags=["-lcuda"]` to `tvm_ffi.cpp.build` to link the CUDA driver
-  library. Any tensor-map arguments prepared outside the exported function
-  still need equivalent preparation in the consumer application.
+  TIRx-lite provides `txl.cu_tensor_map_encode_tiled(...)` for this purpose, and
+  the FP16/BF16 GEMM and DeepSeek-V4 MLA kernels in `tirx-kernels` use it. Any
+  tensor-map arguments prepared outside the exported function still need
+  equivalent preparation in the consumer application.
 - Preserve any extra CUDA headers and compiler options required by your
   kernel. The export helper concatenates source; it does not package external
   headers or Python input preparation.

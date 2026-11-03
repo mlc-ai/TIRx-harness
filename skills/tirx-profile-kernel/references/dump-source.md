@@ -6,13 +6,13 @@ text plus the `ptxas -v` register/spill/SMEM report.
 
 ## Python API
 
-Call `dump_module()` on the `tvm.compile` output (the `Executable`, or a
+Call `dump_module()` on the `tvm_tirx.compile` output (the `Executable`, or a
 runtime `Module`):
 
 ```python
 from tirx_harness.dump_kernel import dump_cuda, dump_module
 
-ex = tvm.compile(tvm.IRModule({"main": pf}), target="cuda", tir_pipeline="tirx")
+ex = tvm_tirx.compile(tvm_tirx.IRModule({"main": pf}), target="cuda", pipeline="tirx")
 
 d = dump_module(ex, ptx=True)         # -> DumpResult
 assert d.ok, d.errors                 # d.ok is False if a requested stage failed
@@ -42,7 +42,7 @@ stderr only when `quiet=False`).
   `<name>.{cu,ptx,cubin,sass,ptxas.log}` and their paths returned in `.paths`;
   otherwise a temp dir is used and cleaned up.
 
-`dump_module` accepts either the `Executable` from `tvm.compile` or a runtime
+`dump_module` accepts either the `Executable` from `tvm_tirx.compile` or a runtime
 `Module`; `dump_cuda` extracts just the CUDA source (walks the imported-module
 tree — the host module alone doesn't carry the device source).
 
