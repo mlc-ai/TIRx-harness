@@ -666,18 +666,14 @@ pub fn validate_attr_stmt(ctx: &Ctx, attr: &AttrStmtObj) -> AResult<Option<Strin
 }
 
 pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
-    let kind_value = loop_stmt.kind.as_raw();
-    if kind_value != ForKind::kSerial.as_raw() && kind_value != ForKind::kUnrolled.as_raw() {
+    let kind_value = loop_stmt.kind;
+    if kind_value != ForKind::Default as i32 && kind_value != ForKind::Unrolled as i32 {
         let kind_name = match kind_value {
             1 => "PARALLEL".to_owned(),
             2 => "VECTORIZED".to_owned(),
-            4 => "THREAD_BINDING".to_owned(),
             other => other.to_string(),
         };
         return Ok(Some(format!("For(kind={kind_name}) is unsupported")));
-    }
-    if loop_stmt.thread_binding.is_some() {
-        return Ok(Some("For(thread_binding=...) is unsupported".to_owned()));
     }
     let mut annotations: Vec<(String, Any)> = loop_stmt
         .annotations
@@ -689,7 +685,7 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
         .iter()
         .map(|(key, _)| (key).to_string())
         .collect();
-    if kind_value == ForKind::kUnrolled.as_raw() {
+    if kind_value == ForKind::Unrolled as i32 {
         if !annotations.is_empty() {
             return Ok(Some(format!(
                 "For(kind=UNROLLED) has unsupported annotations {:?}",
@@ -719,12 +715,12 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
     for (key, value) in &annotations {
         let is_true = value.type_index() == TypeIndex::kTVMFFIBool as i32
             && bool::try_from(value.clone()).unwrap_or(false);
-        if key == "pragma_unroll" {
+        if key == "tirx.pragma_unroll" {
             let positive_int = value.type_index() == TypeIndex::kTVMFFIInt as i32
                 && i64::try_from(value.clone()).is_ok_and(|factor| factor > 0);
             if !(is_true || positive_int) {
                 return Ok(Some(
-                    "For(kind=SERIAL) annotation 'pragma_unroll' must be true or a positive integer factor".to_owned(),
+                    "For(kind=SERIAL) annotation 'tirx.pragma_unroll' must be true or a positive integer factor".to_owned(),
                 ));
             }
         } else if !is_true {

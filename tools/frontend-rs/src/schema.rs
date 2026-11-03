@@ -108,7 +108,7 @@ const SEMANTIC_ATTRS: &[&str] = &[
     "tirx.dyn_smem_bytes",
     "tirx.pool_max_bytes",
 ];
-const SERIAL_LOOP_ANNOTATIONS: &[&str] = &["pragma_unroll", "disable_unroll"];
+const SERIAL_LOOP_ANNOTATIONS: &[&str] = &["tirx.pragma_unroll", "tirx.disable_unroll"];
 pub const INTEGER_BINARY_NODE_KINDS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Mod", "FloorDiv", "FloorMod", "Min", "Max",
 ];
