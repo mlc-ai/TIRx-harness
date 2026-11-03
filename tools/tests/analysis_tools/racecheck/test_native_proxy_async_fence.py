@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -106,10 +106,10 @@ def proxy_async_shared_cluster_g2a(
     remote_ptr: T.let[
         T.Var(
             name="proxy_async_remote_shared",
-            ty=PointerType(PrimType("float32"), "shared"),
+            ty=PtrType(PrimType("float32"), "shared"),
         )
     ] = T.reinterpret(
-        PointerType(PrimType("float32"), "shared"),
+        PtrType(PrimType("float32"), "shared"),
         _mapa_u64(shared.ptr_to([0]), 0),
     )
     remote = T.decl_buffer((4,), "float32", scope="shared", data=remote_ptr)

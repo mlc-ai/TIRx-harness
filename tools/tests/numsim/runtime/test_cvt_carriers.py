@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import tvm_ffi
 
+import tvm
 from tests.numsim.support.execution import run_checked
 from tvm.script import tirx as T
 from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for

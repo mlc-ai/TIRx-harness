@@ -5,6 +5,7 @@ import json
 import pytest
 import tvm_ffi
 
+import tvm
 from tests.numsim.integration.test_host_prelude import host_encoded_tensor_map_store
 from tests.numsim.support.kernels import lane_add
 from tirx_harness.numsim.transpiler import frontend, host_prelude, native_frontend
@@ -192,6 +193,6 @@ def test_native_ptx_metadata_keeps_typed_errors_and_source_span(native_calls, pt
     invalid = ir.Call(ptx_call.op, args, span=ptx_call.span, ret_ty=ptx_call.ty)
     with pytest.raises(PtxCallDecodeError, match="must be a StringImm, got IntImm") as caught:
         decode_ptx_call(invalid)
-    assert caught.value.source_span.same_as(ptx_call.span)
+    assert caught.value.source_span.same_as(ptx_call.loc)
     assert caught.value.unsupported == (str(ptx_call.op.name),)
     assert [name for name, _ in native_calls] == ["numsim_ptx_call_parts"]

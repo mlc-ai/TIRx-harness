@@ -30,6 +30,7 @@ from tvm_tirx.backend.cuda.ptx.table import (
 
 from ..errors import UnsupportedTIRxError
 from . import native_frontend
+from .source_map import source_span_from_tvm
 
 
 class PtxCallDecodeError(UnsupportedTIRxError):
@@ -151,7 +152,9 @@ def _op_name(call: Any) -> str:
 
 
 def _raise(call: Any, op_name: str, message: str) -> None:
-    span = getattr(call, "span", None)
+    span = getattr(call, "loc", None)
+    if source_span_from_tvm(span) is None:  # UnknownLoc
+        span = None
     location = f" at {span}" if span is not None else ""
     raise PtxCallDecodeError(
         f"{op_name}{location}: {message}",

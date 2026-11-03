@@ -1,7 +1,7 @@
 """Remote mbarrier kernels shared by NumSim and Synccheck regressions."""
 
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -31,10 +31,10 @@ def mapped_remote_mbarrier_pointer_expect_tx(output: T.Buffer((2,), "int32")):
             remote_ptr: T.let[
                 T.Var(
                     name="remote_barrier_expect_tx_ptr",
-                    ty=PointerType(PrimType("uint64"), "shared"),
+                    ty=PtrType(PrimType("uint64"), "shared"),
                 )
             ] = T.reinterpret(
-                PointerType(PrimType("uint64"), "shared"),
+                PtrType(PrimType("uint64"), "shared"),
                 _mapa_u64(barriers.ptr_to([0]), 0),
             )
             remote_barrier = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)
@@ -66,10 +66,10 @@ def mapped_remote_mbarrier_cluster_view(output: T.Buffer((2,), "int32")):
             remote_ptr: T.let[
                 T.Var(
                     name="remote_barrier_cluster_view_ptr",
-                    ty=PointerType(PrimType("uint64"), "shared"),
+                    ty=PtrType(PrimType("uint64"), "shared"),
                 )
             ] = T.reinterpret(
-                PointerType(PrimType("uint64"), "shared"),
+                PtrType(PrimType("uint64"), "shared"),
                 _mapa_u64(barriers.ptr_to([0]), 0),
             )
             remote_barrier = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)

@@ -326,4 +326,4 @@ def kernel(bar: T.handle):
     with pytest.raises(PtxCallDecodeError) as caught:
         decode_ptx_call(corrupted)
     assert "tirx.ptx.mbarrier_init" in str(caught.value)
-    assert caught.value.source_span.same_as(call.span)
+    assert caught.value.source_span.same_as(call.loc)

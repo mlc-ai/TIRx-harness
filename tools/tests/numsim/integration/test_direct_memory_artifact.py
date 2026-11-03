@@ -6,8 +6,8 @@ import pytest
 from tests.numsim.support.kernels import direct_cuda_ldg, direct_tvm_access_ptr_shared
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -58,9 +58,9 @@ def write_through_read_only_decl_buffer(
     T.device_entry()
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
-    alias_data: T.let[
-        T.Var(name="read_only_alias", ty=PointerType(PrimType("uint32"), "global"))
-    ] = source.access_ptr("r", ptr_type="uint32", offset=0, extent=32)
+    alias_data: T.let[T.Var(name="read_only_alias", ty=PtrType(PrimType("uint32"), "global"))] = (
+        source.access_ptr("r", ptr_type="uint32", offset=0, extent=32)
+    )
     alias = T.decl_buffer((32,), "uint32", data=alias_data, scope="global")
     alias[lane] = output[lane]
 
@@ -73,10 +73,10 @@ def permitted_decl_buffer_accesses(
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
     read_data: T.let[
-        T.Var(name="permitted_read_alias", ty=PointerType(PrimType("uint32"), "global"))
+        T.Var(name="permitted_read_alias", ty=PtrType(PrimType("uint32"), "global"))
     ] = source.access_ptr("r", ptr_type="uint32", offset=0, extent=32)
     write_data: T.let[
-        T.Var(name="permitted_write_alias", ty=PointerType(PrimType("uint32"), "global"))
+        T.Var(name="permitted_write_alias", ty=PtrType(PrimType("uint32"), "global"))
     ] = output.access_ptr("w", ptr_type="uint32", offset=0, extent=32)
     read_alias = T.decl_buffer((32,), "uint32", data=read_data, scope="global")
     write_alias = T.decl_buffer((32,), "uint32", data=write_data, scope="global")
@@ -87,7 +87,7 @@ def permitted_decl_buffer_accesses(
 def oversized_decl_buffer_from_access_ptr(source: T.Buffer((32,), "uint32")):
     T.device_entry()
     _warp = T.warp_id([1])
-    alias_data: T.let[T.Var(name="short_alias", ty=PointerType(PrimType("uint32"), "global"))] = (
+    alias_data: T.let[T.Var(name="short_alias", ty=PtrType(PrimType("uint32"), "global"))] = (
         source.access_ptr("r", ptr_type="uint32", offset=0, extent=1)
     )
     _alias = T.decl_buffer((2,), "uint32", data=alias_data, scope="global")

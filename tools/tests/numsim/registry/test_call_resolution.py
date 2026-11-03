@@ -25,13 +25,12 @@ from tests.numsim.support.manifest import (
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.host_abi import HostAbiError, build_host_abi
 from tirx_harness.numsim.transpiler.frontend import TensorMapSpec, analyze
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
-from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.ir import Expr, PtrType, Stmt
 from tvm_tirx.tirx import TensorMapType, Var
 
-_HANDLE = PointerType(ir.PrimType(""))
+_HANDLE = PtrType(ir.PrimType(""))
 _ARG_NAMES = itertools.count()
 
 
@@ -631,11 +630,12 @@ def test_pure_call_form_strings_must_be_compile_time_static(form: _Form):
 def test_resolver_validates_control_calls(op_name: str):
     def looped(call: ir.Call) -> tirx.Function:
         index = Var("index", "int32")
-        loop = tvm.tirx.For(
+        loop = ir.For(
             index,
             ir.IntImm("int32", 0),
             ir.IntImm("int32", 4),
-            tvm.tirx.ForKind.SERIAL,
+            ir.IntImm("int32", 1),
+            ir.ForKind.DEFAULT,
             ir.Evaluate(call),
         )
         return device_kernel(loop)
@@ -762,7 +762,7 @@ def test_tensor_map_resolution_requires_exact_primfunc_parameter_identity():
     kernel = resolved_kernel(func)
     assert kernel.tensor_maps == (TensorMapSpec("same_name", 0),)
 
-    impostor = Var("same_name", PointerType(TensorMapType()))
+    impostor = Var("same_name", PtrType(TensorMapType()))
     with pytest.raises(UnsupportedTIRxError, match="typed PrimFunc parameter identity"):
         resolved_kernel(tirx.Function([impostor], func.body, func.ret_type, func.attrs))
 

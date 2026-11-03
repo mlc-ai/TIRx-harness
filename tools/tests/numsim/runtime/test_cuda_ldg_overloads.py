@@ -3,12 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.dtype_abi import vector_dtype_abi
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
+from tvm_tirx.ir import PtrType
 
 _FLOAT8_BASE_DTYPES = frozenset(
     {
@@ -109,7 +110,7 @@ def _packed_array(itemsize: int) -> np.ndarray:
 
 
 def _cuda_ldg_raw_pointer_kernel(dtype: str):
-    pointer = tirx.Var("pointer", PointerType(ir.PrimType("uint8"), "global"))
+    pointer = tirx.Var("pointer", PtrType(ir.PrimType("uint8"), "global"))
     return tirx.Function([pointer], ir.Evaluate(T.cuda.ldg(pointer, dtype)))
 
 

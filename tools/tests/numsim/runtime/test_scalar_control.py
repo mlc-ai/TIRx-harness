@@ -7,8 +7,8 @@ import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -347,8 +347,8 @@ def canonical_mapa(output: T.Buffer((32,), "int32")):
     mapped = T.local_scalar("uint64")
     T.ptx.mapa.shared__cluster.u64(mapped, T.address_of(shared[0]), T.uint32(0))
     mapped_ptr: T.let[
-        T.Var(name="canonical_mapped_ptr", ty=PointerType(PrimType("int32"), "shared"))
-    ] = T.reinterpret(PointerType(PrimType("int32"), "shared"), mapped)
+        T.Var(name="canonical_mapped_ptr", ty=PtrType(PrimType("int32"), "shared"))
+    ] = T.reinterpret(PtrType(PrimType("int32"), "shared"), mapped)
     mapped_buffer = T.decl_buffer((1,), "int32", scope="shared", data=mapped_ptr)
     output[lane] = mapped_buffer[0]
 
@@ -371,9 +371,9 @@ def explicit_mapa_forms(output: T.Buffer((32,), "int32"), addresses: T.Buffer((3
     T.ptx.mapa.shared__cluster.u32(cluster_u32, shared_address, T.uint32(0))
     T.ptx.mapa.shared__cluster.u64(cluster_u64, T.address_of(shared[1]), T.uint32(0))
     mapped_ptr: T.let[
-        T.Var(name="explicit_mapa_shared_cluster_u64", ty=PointerType(PrimType("int32"), "shared"))
+        T.Var(name="explicit_mapa_shared_cluster_u64", ty=PtrType(PrimType("int32"), "shared"))
     ] = T.reinterpret(
-        PointerType(PrimType("int32"), "shared"),
+        PtrType(PrimType("int32"), "shared"),
         cluster_u64,
     )
     mapped = T.decl_buffer((1,), "int32", scope="shared", data=mapped_ptr)

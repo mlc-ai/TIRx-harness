@@ -12,12 +12,11 @@ from tirx_harness.numsim.transpiler.source_map import (
     flatten_source_span,
     source_span_from_tvm,
 )
-from tvm.ir import SequentialSpan, Span
-from tvm_tirx.ir import SourceName
+from tvm_tirx.ir.location import CallSiteLoc, SourceLoc, SourceName
 
 
 class RepeatedNode:
-    span = None
+    loc = None
 
     def __init__(self, identity: object) -> None:
         self.identity = identity
@@ -50,7 +49,7 @@ def test_source_entry_manifest_excludes_process_local_node_identity() -> None:
 
 
 def test_regular_span_uses_stable_structured_serialization() -> None:
-    raw = Span(SourceName("/repo/kernels/attention.py"), 142, 142, 17, 40)
+    raw = SourceLoc(SourceName("/repo/kernels/attention.py"), 142, 17, 142, 40)
 
     span = source_span_from_tvm(raw)
 
@@ -70,10 +69,10 @@ def test_regular_span_uses_stable_structured_serialization() -> None:
 
 
 def test_sequential_span_preserves_and_flattens_inline_provenance_order() -> None:
-    call_site = Span(SourceName("/repo/kernels/attention.py"), 142, 142, 17, 40)
-    wrapper = Span(SourceName("/repo/lang/pipeline.py"), 110, 110, 9, 28)
-    primitive = Span(SourceName("/repo/lang/mbarrier.py"), 44, 44, 5, 63)
-    raw = SequentialSpan([call_site, SequentialSpan([wrapper, primitive])])
+    call_site = SourceLoc(SourceName("/repo/kernels/attention.py"), 142, 17, 142, 40)
+    wrapper = SourceLoc(SourceName("/repo/lang/pipeline.py"), 110, 9, 110, 28)
+    primitive = SourceLoc(SourceName("/repo/lang/mbarrier.py"), 44, 5, 44, 63)
+    raw = CallSiteLoc(CallSiteLoc(primitive, wrapper), call_site)
 
     span = source_span_from_tvm(raw)
 

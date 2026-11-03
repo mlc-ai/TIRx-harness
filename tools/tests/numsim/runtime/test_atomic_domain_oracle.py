@@ -4,6 +4,7 @@ import numpy as np
 import tvm_ffi
 from ml_dtypes import bfloat16
 
+import tvm
 from tests.numsim.support.runtime_domains import (
     CUDA_ATOMIC_ADD_PACKED_GLOBAL_DTYPES,
     CUDA_ATOMIC_ADD_PACKED_SHARED_DTYPES,

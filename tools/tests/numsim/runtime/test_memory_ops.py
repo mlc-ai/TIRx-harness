@@ -1370,7 +1370,7 @@ def test_scalar_atomic_add_has_no_s64_form_while_min_and_max_do(op_name):
 
     pointer = tirx.Var("pointer", "handle")
     wrapper = getattr(T.ptx, op_name)
-    destination = tvm.tirx.decl_buffer((1,), "int64", name="destination")
+    destination = tirx.Var("destination", tirx.TensorType((1,), "int64"))
 
     def call(operation):
         operands = (

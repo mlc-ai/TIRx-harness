@@ -7,8 +7,8 @@ import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -64,9 +64,9 @@ def unused_out_of_bounds_shared_view(output: T.Buffer((1,), "uint32")):
     alias_data: T.let[
         T.Var(
             name="unused_out_of_bounds_shared_data",
-            ty=PointerType(PrimType("uint32"), "shared"),
+            ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
+    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
     _alias = T.decl_buffer((1,), "uint32", data=alias_data, scope="shared")
     if lane == 0:
         output[0] = T.uint32(17)
@@ -81,9 +81,9 @@ def accessed_out_of_bounds_shared_view(output: T.Buffer((1,), "uint32")):
     alias_data: T.let[
         T.Var(
             name="accessed_out_of_bounds_shared_data",
-            ty=PointerType(PrimType("uint32"), "shared"),
+            ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
+    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), storage.ptr_to([8]))
     alias = T.decl_buffer((1,), "uint32", data=alias_data, scope="shared")
     if lane == 0:
         output[0] = alias[0]

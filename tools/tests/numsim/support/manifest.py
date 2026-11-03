@@ -34,9 +34,9 @@ def parse_kernel(source: str) -> tirx.Function:
 
 
 def device_kernel(body: Stmt, params: Sequence[tirx.Var] = ()) -> tirx.Function:
-    """A device-entry PrimFunc around ``body`` (what ``T.device_entry()`` parses to)."""
+    """A device-entry Function around ``body`` (what ``T.device_entry()`` parses to)."""
 
-    entry = tvm.tirx.AttrStmt(0, DEVICE_ENTRY_ATTR, ir.IntImm("bool", 1), body)
+    entry = ir.RegionStmt(DEVICE_ENTRY_ATTR, [], [], None, body)
     return tirx.Function(list(params), entry)
 
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -17,9 +17,9 @@ def byte_pointer_uint16_alias(output: T.Buffer((32,), "uint16")):
     raw_data: T.let[
         T.Var(
             name="raw_byte_pointer",
-            ty=PointerType(PrimType("void"), "shared"),
+            ty=PtrType(PrimType("void"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("void"), "shared"), raw.ptr_to([0]))
+    ] = T.reinterpret(PtrType(PrimType("void"), "shared"), raw.ptr_to([0]))
     wide = T.decl_buffer((32,), "uint16", data=raw_data, scope="shared")
     wide[lane] = T.cast(lane * 257, "uint16")
     T.cuda.warp_sync()

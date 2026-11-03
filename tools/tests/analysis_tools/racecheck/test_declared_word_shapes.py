@@ -35,9 +35,8 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.ir import PointerType
 from tvm.script import tirx as T
-from tvm_tirx.ir import PrimType
+from tvm_tirx.ir import PrimType, PtrType
 
 GEN = 1
 WORD = (GEN << 32) | 0xDEADBEEF
@@ -84,8 +83,8 @@ def publish_via_shared_cluster(sink: T.Buffer((1,), "uint64")):
     slot = T.alloc_buffer((1,), "uint64", scope="shared")
     mapped = T.alloc_local((1,), "uint64")
     T.ptx.mapa.u64(mapped[0], slot.ptr_to([0]), T.uint32(0))
-    remote_ptr: T.let[T.Var(name="dsm_slot", ty=PointerType(PrimType("uint64"), "shared"))] = (
-        T.reinterpret(PointerType(PrimType("uint64"), "shared"), mapped[0])
+    remote_ptr: T.let[T.Var(name="dsm_slot", ty=PtrType(PrimType("uint64"), "shared"))] = (
+        T.reinterpret(PtrType(PrimType("uint64"), "shared"), mapped[0])
     )
     remote = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)
     if lane == 0:

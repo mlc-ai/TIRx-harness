@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import tvm_ffi
 
+import tvm
 from tests.numsim.microtests.cases.ptx_cvt_scalar import (
     SCALAR_CVT_COLUMNS,
     scalar_cvt_arguments,

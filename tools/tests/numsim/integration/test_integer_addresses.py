@@ -6,8 +6,8 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -29,7 +29,7 @@ def integer_address_across_alias_views(
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
     alias_data: T.let[
-        T.Var(name="integer_address_alias", ty=PointerType(PrimType("uint32"), "global"))
+        T.Var(name="integer_address_alias", ty=PtrType(PrimType("uint32"), "global"))
     ] = T.ptr_byte_offset(storage.ptr_to([0]), T.uint32(32 * 4), "uint32")
     alias = T.decl_buffer((32,), "uint32", data=alias_data, scope="global")
     slot = T.alloc_buffer((1,), "uint64", scope="local")
@@ -127,7 +127,7 @@ def inline_reinterpreted_local_view(output: T.Buffer((32,), "uint32")):
         (2,),
         "uint32",
         data=T.reinterpret(
-            PointerType(PrimType("uint32")),
+            PtrType(PrimType("uint32")),
             T.address_of(packed[0]),
         ),
         scope="local",
@@ -251,7 +251,7 @@ def wider_dynamic_view_used_only_for_address(
         (1,),
         "uint64",
         data=T.reinterpret(
-            PointerType(PrimType("uint64"), "global"),
+            PtrType(PrimType("uint64"), "global"),
             T.address_of(slot[0]),
         ),
         scope="global",

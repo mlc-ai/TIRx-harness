@@ -9,8 +9,8 @@ from tests.numsim.support.kernels import tmem_d_alias_per_cta
 from tests.numsim.support.manifest import emitted_module
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
@@ -74,9 +74,9 @@ def pointer_origin_disagrees_with_declared_scope(
     pointer: T.let[
         T.Var(
             name="global_pointer",
-            ty=PointerType(PrimType("uint32"), "shared"),
+            ty=PtrType(PrimType("uint32"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint32"), "shared"), source.ptr_to([0]))
+    ] = T.reinterpret(PtrType(PrimType("uint32"), "shared"), source.ptr_to([0]))
     alias = T.decl_buffer((4,), "uint32", data=pointer, scope="shared")
     output[0] = alias[0]
 
@@ -91,8 +91,8 @@ def mapa_shared_address_in_generic_handle(output: T.Buffer((1,), "uint32")):
     remote_bits: T.uint64
     T.ptx.mapa.u64(remote_bits, T.address_of(shared[0]), T.uint32(0))
     remote_pointer: T.let[
-        T.Var(name="remote_pointer", ty=PointerType(PrimType("uint64"), "global"))
-    ] = T.reinterpret(PointerType(PrimType("uint64"), "global"), remote_bits)
+        T.Var(name="remote_pointer", ty=PtrType(PrimType("uint64"), "global"))
+    ] = T.reinterpret(PtrType(PrimType("uint64"), "global"), remote_bits)
     remote = T.decl_buffer((1,), "uint64", data=remote_pointer)
     output[0] = T.cast(remote[0], "uint32")
 
@@ -105,8 +105,8 @@ def mapa_source_through_nominal_global_declbuffer(output: T.Buffer((1,), "uint32
     _warp = T.warp_id([1])
     shared = T.alloc_buffer((8,), "uint64", scope="shared")
     alias_pointer: T.let[
-        T.Var(name="nominal_global_alias_pointer", ty=PointerType(PrimType("uint64"), "global"))
-    ] = T.reinterpret(PointerType(PrimType("uint64"), "global"), shared.ptr_to([0]))
+        T.Var(name="nominal_global_alias_pointer", ty=PtrType(PrimType("uint64"), "global"))
+    ] = T.reinterpret(PtrType(PrimType("uint64"), "global"), shared.ptr_to([0]))
     alias = T.decl_buffer(
         (8,),
         "uint64",
@@ -233,9 +233,9 @@ def pointer_origin_through_pure_if_then_else(
     pointer: T.let[
         T.Var(
             name="selected_pointer",
-            ty=PointerType(PrimType("uint32"), "global"),
+            ty=PtrType(PrimType("uint32"), "global"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint32"), "global"), selected_bits)
+    ] = T.reinterpret(PtrType(PrimType("uint32"), "global"), selected_bits)
     alias = T.decl_buffer((4,), "uint32", data=pointer, scope="global")
     output[0] = alias[0]
 

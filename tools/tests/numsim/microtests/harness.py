@@ -165,6 +165,8 @@ def _torch_tensor_map(
     import torch
     import tvm_ffi
 
+    import tvm
+
     logical_dtype = value.logical_dtype or value.array.dtype.name
     if base is None:
         if logical_dtype != value.array.dtype.name:
@@ -425,7 +427,7 @@ def run_gpu_primfunc(
     import torch
 
     from tirx_harness.numsim.bindings import prepare_bindings
-    from tvm.ir.type import PointerType
+    from tvm_tirx.ir import PtrType
     from tvm_tirx.tirx import TensorMapType
 
     parameter_names = _parameter_names(prim_func)
@@ -434,7 +436,7 @@ def run_gpu_primfunc(
     tensor_map_names = {
         parameter.name
         for parameter in prim_func.params
-        if isinstance(parameter.ty, PointerType)
+        if isinstance(parameter.ty, PtrType)
         and isinstance(parameter.ty.element_type, TensorMapType)
     }
     missing = sorted(set(parameter_names) - set(arguments))

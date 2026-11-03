@@ -6,8 +6,8 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 _FLASHKDA_ACQUIRE_SOURCE = r"""__device__ __forceinline__ void flashkda_tensormap_acquire(const void *tmap_ptr) {
@@ -136,7 +136,7 @@ def typed_param_descriptor_scalar_copy(
     payload = T.decl_buffer(
         (16,),
         "uint64",
-        data=T.reinterpret(PointerType(PrimType("uint64"), "param"), T.address_of(source_map)),
+        data=T.reinterpret(PtrType(PrimType("uint64"), "param"), T.address_of(source_map)),
         scope="param",
     )
     if lane == 0:

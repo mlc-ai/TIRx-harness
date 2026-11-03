@@ -27,8 +27,8 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 _BULK_G2S_CTA = "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes"
@@ -627,11 +627,11 @@ def bulk_s2s_cluster_waited(source: T.Buffer((16,), "uint8"), output: T.Buffer((
     T.ptx.mapa.u64(remote_landing_bits[0], landing.ptr_to([0]), T.uint32(1))
     T.ptx.mapa.u64(remote_barrier_bits[0], barrier.ptr_to([0]), T.uint32(1))
     remote_landing: T.let[
-        T.Var(name="raw_async_remote_landing", ty=PointerType(PrimType("uint8"), "shared"))
-    ] = T.reinterpret(PointerType(PrimType("uint8"), "shared"), remote_landing_bits[0])
+        T.Var(name="raw_async_remote_landing", ty=PtrType(PrimType("uint8"), "shared"))
+    ] = T.reinterpret(PtrType(PrimType("uint8"), "shared"), remote_landing_bits[0])
     remote_barrier: T.let[
-        T.Var(name="raw_async_remote_barrier", ty=PointerType(PrimType("uint64"), "shared"))
-    ] = T.reinterpret(PointerType(PrimType("uint64"), "shared"), remote_barrier_bits[0])
+        T.Var(name="raw_async_remote_barrier", ty=PtrType(PrimType("uint64"), "shared"))
+    ] = T.reinterpret(PtrType(PrimType("uint64"), "shared"), remote_barrier_bits[0])
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -668,15 +668,15 @@ def bulk_s2s_cluster_unwaited(source: T.Buffer((16,), "uint8"), output: T.Buffer
     remote_landing: T.let[
         T.Var(
             name="raw_async_unwaited_remote_landing",
-            ty=PointerType(PrimType("uint8"), "shared"),
+            ty=PtrType(PrimType("uint8"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint8"), "shared"), remote_landing_bits[0])
+    ] = T.reinterpret(PtrType(PrimType("uint8"), "shared"), remote_landing_bits[0])
     remote_barrier: T.let[
         T.Var(
             name="raw_async_unwaited_remote_barrier",
-            ty=PointerType(PrimType("uint64"), "shared"),
+            ty=PtrType(PrimType("uint64"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("uint64"), "shared"), remote_barrier_bits[0])
+    ] = T.reinterpret(PtrType(PrimType("uint64"), "shared"), remote_barrier_bits[0])
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()

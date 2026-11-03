@@ -6,8 +6,8 @@ import pytest
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -18,7 +18,7 @@ def raw_store_through_dynamic_alias(
     T.device_entry()
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
-    alias_data: T.let[T.Var(name="offset_destination", ty=PointerType(PrimType("uint32")))] = (
+    alias_data: T.let[T.Var(name="offset_destination", ty=PtrType(PrimType("uint32")))] = (
         T.ptr_byte_offset(T.reinterpret("handle", destination.ptr_to([0])), T.uint32(4), "uint32")
     )
     alias = T.decl_buffer((32,), "uint32", data=alias_data, scope="global")

@@ -4,12 +4,12 @@ from tvm.backend.cuda.tile_primitive.gemm_async.tcgen05 import (
     sf_smem_layout,
     sf_tmem_layout,
 )
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.tirx.layout import tcgen05_atom_layout, wg_local_layout
 from tvm_tirx.backend.cuda.lang.pipeline import TCGen05Bar
 from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 from tvm_tirx.tirx.layout import Axis, ComposeLayout, R, S, TileLayout
 
@@ -1759,9 +1759,9 @@ def tcgen_commit_runtime_multicast(output: T.Buffer((2,), "uint32")):
     mapped_barrier = T.alloc_local((1,), "uint64")
     T.ptx.mapa.u64(mapped_barrier[0], barrier.ptr_to([0]), T.uint32(pair_leader))
     remote_ptr: T.let[
-        T.Var(name="tcgen_runtime_remote_barrier", ty=PointerType(PrimType("uint64"), "shared"))
+        T.Var(name="tcgen_runtime_remote_barrier", ty=PtrType(PrimType("uint64"), "shared"))
     ] = T.reinterpret(
-        PointerType(PrimType("uint64"), "shared"),
+        PtrType(PrimType("uint64"), "shared"),
         mapped_barrier[0],
     )
     remote = T.decl_buffer((1,), "uint64", data=remote_ptr, scope="shared")
@@ -2868,9 +2868,9 @@ def remote_shared_read_and_warp_reduce(output: T.Buffer((2, 3, 32), "float32")):
         mapped = T.alloc_local((1,), "uint64")
         T.ptx.mapa.u64(mapped[0], shared.ptr_to([0]), T.uint32(lane))
         remote_ptr: T.let[
-            T.Var(name="remote_read_ptr", ty=PointerType(PrimType("float32"), "shared"))
+            T.Var(name="remote_read_ptr", ty=PtrType(PrimType("float32"), "shared"))
         ] = T.reinterpret(
-            PointerType(PrimType("float32"), "shared"),
+            PtrType(PrimType("float32"), "shared"),
             mapped[0],
         )
         remote = T.decl_buffer((1,), "float32", scope="shared", data=remote_ptr)
@@ -2896,9 +2896,9 @@ def remote_shared_write_ownership(output: T.Buffer((2,), "float32")):
             mapped = T.alloc_local((1,), "uint64")
             T.ptx.mapa.u64(mapped[0], shared.ptr_to([0]), T.uint32(lane))
             remote_ptr: T.let[
-                T.Var(name="remote_write_ptr", ty=PointerType(PrimType("float32"), "shared"))
+                T.Var(name="remote_write_ptr", ty=PtrType(PrimType("float32"), "shared"))
             ] = T.reinterpret(
-                PointerType(PrimType("float32"), "shared"),
+                PtrType(PrimType("float32"), "shared"),
                 mapped[0],
             )
             remote = T.decl_buffer((1,), "float32", scope="shared", data=remote_ptr)
@@ -2933,19 +2933,19 @@ def bulk_shared_to_cluster_u64_addresses(output: T.Buffer((2, 4), "float32")):
         remote_destination_ptr: T.let[
             T.Var(
                 name="bulk_remote_destination_ptr",
-                ty=PointerType(PrimType("float32"), "shared"),
+                ty=PtrType(PrimType("float32"), "shared"),
             )
         ] = T.reinterpret(
-            PointerType(PrimType("float32"), "shared"),
+            PtrType(PrimType("float32"), "shared"),
             remote_destination[0],
         )
         remote_barrier_ptr: T.let[
             T.Var(
                 name="bulk_remote_barrier_ptr",
-                ty=PointerType(PrimType("uint64"), "shared"),
+                ty=PtrType(PrimType("uint64"), "shared"),
             )
         ] = T.reinterpret(
-            PointerType(PrimType("uint64"), "shared"),
+            PtrType(PrimType("uint64"), "shared"),
             remote_barrier[0],
         )
         T.ptx.mbarrier.arrive.expect_tx.shared__cluster.b64(
@@ -2981,9 +2981,9 @@ def parallel_cluster_remote_shared_exchange(output: T.Buffer((2, 2, 2), "float32
         mapped = T.alloc_local((1,), "uint64")
         T.ptx.mapa.u64(mapped[0], shared.ptr_to([0]), T.uint32(peer))
         remote_ptr: T.let[
-            T.Var(name="parallel_remote_read_ptr", ty=PointerType(PrimType("float32"), "shared"))
+            T.Var(name="parallel_remote_read_ptr", ty=PtrType(PrimType("float32"), "shared"))
         ] = T.reinterpret(
-            PointerType(PrimType("float32"), "shared"),
+            PtrType(PrimType("float32"), "shared"),
             mapped[0],
         )
         remote = T.decl_buffer((1,), "float32", scope="shared", data=remote_ptr)
@@ -3011,9 +3011,9 @@ def mapped_remote_mbarrier_pointer(output: T.Buffer((2,), "int32")):
             mapped = T.alloc_local((1,), "uint64")
             T.ptx.mapa.u64(mapped[0], barriers.ptr_to([0]), T.uint32(0))
             remote_ptr: T.let[
-                T.Var(name="remote_barrier_ptr", ty=PointerType(PrimType("uint64"), "shared"))
+                T.Var(name="remote_barrier_ptr", ty=PtrType(PrimType("uint64"), "shared"))
             ] = T.reinterpret(
-                PointerType(PrimType("uint64"), "shared"),
+                PtrType(PrimType("uint64"), "shared"),
                 mapped[0],
             )
             remote_barrier = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)
@@ -3034,13 +3034,13 @@ def pointer_derived_shared_raw_roundtrip(
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
     shared = T.alloc_buffer((192,), "uint8", scope="shared")
-    base_data: T.let[T.Var(name="raw_shared_base", ty=PointerType(PrimType("void"), "shared"))] = (
-        T.reinterpret(PointerType(PrimType("void"), "shared"), shared.ptr_to([32]))
+    base_data: T.let[T.Var(name="raw_shared_base", ty=PtrType(PrimType("void"), "shared"))] = (
+        T.reinterpret(PtrType(PrimType("void"), "shared"), shared.ptr_to([32]))
     )
     base = T.decl_buffer((36,), "uint32", data=base_data, scope="shared")
-    stage_data: T.let[
-        T.Var(name="raw_shared_stage", ty=PointerType(PrimType("uint32"), "shared"))
-    ] = T.ptr_byte_offset(base.data, T.uint32(16), "uint32")
+    stage_data: T.let[T.Var(name="raw_shared_stage", ty=PtrType(PrimType("uint32"), "shared"))] = (
+        T.ptr_byte_offset(base.data, T.uint32(16), "uint32")
+    )
     stage = T.decl_buffer((32,), "uint32", data=stage_data, scope="shared")
     T.ptx.st.shared.u32(stage.ptr_to([lane]), source[lane])
     T.cuda.warp_sync()
@@ -3076,8 +3076,8 @@ def raw_shared_v4_u32_roundtrip(
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
     shared = T.alloc_buffer((512,), "uint8", scope="shared")
-    words_data: T.let[T.Var(name="raw_v4_words", ty=PointerType(PrimType("void"), "shared"))] = (
-        T.reinterpret(PointerType(PrimType("void"), "shared"), shared.ptr_to([0]))
+    words_data: T.let[T.Var(name="raw_v4_words", ty=PtrType(PrimType("void"), "shared"))] = (
+        T.reinterpret(PtrType(PrimType("void"), "shared"), shared.ptr_to([0]))
     )
     words = T.decl_buffer((128,), "uint32", data=words_data, scope="shared")
     base = lane * 4
@@ -3283,8 +3283,8 @@ def raw_load_rejects_integer_address(output: T.Buffer((32,), "uint32")):
     T.device_entry()
     _warp = T.warp_id([1])
     lane = T.lane_id([32])
-    forged: T.let[T.Var(name="forged_pointer", ty=PointerType(PrimType("uint32")))] = T.reinterpret(
-        PointerType(PrimType("uint32")), T.uint64(64)
+    forged: T.let[T.Var(name="forged_pointer", ty=PtrType(PrimType("uint32")))] = T.reinterpret(
+        PtrType(PrimType("uint32")), T.uint64(64)
     )
     T.ptx.ld.global_.u32(output[lane], forged)
 

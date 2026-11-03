@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.ir.type import PointerType
 from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 
 
@@ -42,8 +42,8 @@ def pointer_offset_runtime_domain(
     T.evaluate(T.ptr_byte_offset(source_f64.ptr_to([lane]), T.uint32(4), "float64"))
     aligned_f64 = source_f64.ptr_to([lane])
     output_f64[lane] = T.cuda.ldg(aligned_f64, "float64")
-    shifted_u8: T.let[T.Var(name="shifted_u8", ty=PointerType(PrimType("uint8")))] = (
-        T.ptr_byte_offset(source_u8.ptr_to([0]), T.uint32(1), "uint8")
+    shifted_u8: T.let[T.Var(name="shifted_u8", ty=PtrType(PrimType("uint8")))] = T.ptr_byte_offset(
+        source_u8.ptr_to([0]), T.uint32(1), "uint8"
     )
     alias_u8 = T.decl_buffer((32,), "uint8", data=shifted_u8, scope="global")
     output_u8[lane] = alias_u8[lane]

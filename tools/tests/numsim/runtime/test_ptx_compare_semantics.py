@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_walk
 
+import tvm
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.ptx_dialect import PtxCallDecodeError, decode_ptx_call
 from tvm.script import tirx as T

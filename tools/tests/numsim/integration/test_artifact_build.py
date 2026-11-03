@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from tvm_ffi import structural_equal, structural_hash
 
-import tvm
 from tests.numsim.support.kernels import (
     bar_sync_after_full_warp_continue,
     bound_dynamic_cta_extent,
@@ -231,7 +230,7 @@ def test_codegen_rejects_a_spec_paired_with_different_primfuncs() -> None:
 
 def test_codegen_rejects_alpha_renamed_host_abi_with_the_same_structural_hash() -> None:
     def make_func(parameter_name: str):
-        buffer = tvm.tirx.decl_buffer((1,), "int32", name=parameter_name)
+        buffer = tirx.Var(parameter_name, tirx.TensorType((1,), "int32"))
         return tirx.Function([buffer], ir.Evaluate(ir.IntImm("int32", 0)))
 
     original = make_func("original")
