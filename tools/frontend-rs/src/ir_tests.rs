@@ -2,15 +2,11 @@
 
 use crate::analyze::buffers::BufferBindings;
 use crate::analyze::util::{int_const, oref, same};
-use tvm_tirx::ir::{Expr, IntImm, Location, SourceName, Var};
+use tvm_tirx::ir::{Expr, IntImm, Location, PrimType, SourceName, Var};
 use tvm_tirx::ir::prim::{Add, AddObj};
 use tvm_tirx::ir::{Evaluate, For, If, SeqStmt, Stmt, While};
 use tvm_tirx::tirx::{AttrStmt, DeclBuffer, TensorType};
 use tvm_tirx::tvm_ffi::{Any, AnyView, Array, Function, Map, ObjectRefCore, String as FfiString};
-
-fn initialize() {
-    tvm_tirx::libinfo::load_compiler().expect("TVM compiler for native IR tests");
-}
 
 fn save(value: Any) -> FfiString {
     Function::get_global("ffi.ToJSONGraphString")
@@ -23,7 +19,6 @@ fn save(value: Any) -> FfiString {
 
 #[test]
 fn buffer_bindings_preserve_identities_and_last_declaration() {
-    initialize();
     let ty = TensorType::new(
         "global",
         "int32",
@@ -66,7 +61,6 @@ fn buffer_bindings_preserve_identities_and_last_declaration() {
 
 #[test]
 fn cyclic_buffer_bindings_keep_each_starting_identity() {
-    initialize();
     let ty = TensorType::new(
         "global",
         "int32",
@@ -94,10 +88,9 @@ fn cyclic_buffer_bindings_keep_each_starting_identity() {
 
 #[test]
 fn substitution_keeps_same_named_variables_distinct() {
-    initialize();
-    let first = Var::new("same", "int32", Location::unknown()).unwrap();
-    let second = Var::new("same", "int32", Location::unknown()).unwrap();
-    let replacement = Var::new("replacement", "int32", Location::unknown()).unwrap();
+    let first = Var::new("same", PrimType::int(32), Location::unknown());
+    let second = Var::new("same", PrimType::int(32), Location::unknown());
+    let replacement = Var::new("replacement", PrimType::int(32), Location::unknown());
     let expression = Add::new(&first, &second, Location::unknown()).unwrap();
     let actual = crate::substitute(
         oref(expression.clone()),
@@ -115,7 +108,6 @@ fn substitution_keeps_same_named_variables_distinct() {
 
 #[test]
 fn statement_walk_preserves_occurrences_order_identity_and_spans() {
-    initialize();
     let span = Location::new(&SourceName::get("statement-order.py").unwrap(), 7, 7, 1, 9).unwrap();
     let shared: Stmt = Evaluate::with_span(int_const("int32", 1).unwrap(), Some(&span))
         .unwrap()

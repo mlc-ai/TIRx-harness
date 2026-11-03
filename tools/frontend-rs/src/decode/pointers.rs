@@ -85,23 +85,16 @@ mod tests {
     use super::super::ptx::PtxOperand;
     use super::*;
     use crate::analyze::util::same;
-    use tvm_tirx::ir::{Call, Expr, IntImm, Op, PrimType};
-
-    fn initialize() {
-        tvm_tirx::libinfo::load_compiler().expect("TVM compiler");
-    }
+    use tvm_tirx::ir::{Call, Expr, IntImm, Location, Op, PrimType, Type};
 
     fn call(name: &str, args: Vec<Expr>) -> Call {
-        Call::new(
-            prim_type("uint64").unwrap(),
-            Op::get(name).unwrap(),
-            args,
-        )
+        let ty: Type = prim_type("uint64").unwrap().into();
+        Call::new(Some(&ty), Op::get(name).unwrap(), args, None, Vec::<Type>::new(), Location::unknown())
+            .unwrap()
     }
 
     #[test]
     fn pointer_calls_preserve_sources_arity_and_address_escapes() {
-        initialize();
         let a: Expr = int_const("int32", 1).unwrap().into();
         let b: Expr = int_const("int32", 2).unwrap().into();
         let address = call("tirx.address_of", vec![a.clone()]);
@@ -159,7 +152,6 @@ mod tests {
 
     #[test]
     fn register_sources_preserve_width_destination_and_sink_guards() {
-        initialize();
         let a = oref(int_const("int32", 1).unwrap());
         let b = oref(int_const("int32", 2).unwrap());
         let mut decoded = DecodedPtx {
