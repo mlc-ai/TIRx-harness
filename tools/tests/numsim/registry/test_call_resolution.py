@@ -48,7 +48,7 @@ def _arg(dtype: str) -> Var:
 
 
 def _call(op_name: str, result_dtype: str, *args: object) -> ir.Call:
-    return ir.Call(ir.Op.get(op_name), list(args), ret_ty=_result_type(result_dtype))
+    return ir.Call(ir.Op.get(op_name), list(args), ty=_result_type(result_dtype))
 
 
 def _form(call: ir.Call) -> _Form:
@@ -703,8 +703,8 @@ def kernel():
         valid.op,
         list(valid.args),
         attrs=valid.attrs,
-        span=valid.span,
-        ret_ty=ir.PrimType("float32"),
+        loc=valid.loc,
+        ty=ir.PrimType("float32"),
     )
     with pytest.raises(UnsupportedTIRxError, match="st_bulk must return void"):
         resolved_kernel(replace_call(func, valid, nonvoid))
@@ -749,8 +749,8 @@ def test_ptx_tensormap_prefetch_rejects_a_nonvoid_result():
         prefetch.op,
         list(prefetch.args),
         attrs=prefetch.attrs,
-        span=prefetch.span,
-        ret_ty=ir.PrimType("float32"),
+        loc=prefetch.loc,
+        ty=ir.PrimType("float32"),
     )
 
     with pytest.raises(UnsupportedTIRxError, match="must return void"):

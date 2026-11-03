@@ -214,8 +214,8 @@ def with_input_descriptor(kernel):
             [parameter if arg.same_as(descriptor) else arg for arg in node.args],
             attrs=node.attrs,
             ty_args=node.ty_args,
-            span=node.span,
-            ret_ty=node.ty,
+            loc=node.loc,
+            ty=node.ty,
         )
 
     body = structural_map(kernel.body, replace)

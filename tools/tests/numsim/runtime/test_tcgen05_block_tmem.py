@@ -139,8 +139,8 @@ def test_block_scaled_tmem_a(cta_group, a_format, b_format, tmp_path):
                 operands,
                 attrs=node.attrs,
                 ty_args=node.ty_args,
-                span=node.span,
-                ret_ty=node.ty,
+                loc=node.loc,
+                ty=node.ty,
             )
 
         changed = kernel.with_body(structural_map(kernel.body, replace_descriptor))

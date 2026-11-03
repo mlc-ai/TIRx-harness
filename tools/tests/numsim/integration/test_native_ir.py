@@ -14,6 +14,7 @@ from tirx_harness.numsim.transpiler.semantic_ir import semantic_ir_json
 from tvm.script import tirx as T
 from tvm_tirx import ir, tirx
 from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.ir.location import CallSiteLoc, SourceLoc
 
 
 def _substitute_vars(value, replacements):
@@ -40,14 +41,12 @@ def native_calls(monkeypatch):
 
 
 def test_native_post_order_preserves_dag_order_handles_and_spans(native_calls):
-    span = tvm.ir.SequentialSpan(
-        [
-            tvm.ir.Span(ir.SourceName("first.py"), 3, 3, 1, 8),
-            tvm.ir.Span(ir.SourceName("second.py"), 7, 7, 2, 9),
-        ]
+    span = CallSiteLoc(
+        SourceLoc(ir.SourceName("second.py"), 7, 2, 7, 9),
+        SourceLoc(ir.SourceName("first.py"), 3, 1, 3, 8),
     )
     variable = tirx.Var("value", "int32", span)
-    repeated = ir.Evaluate(variable + 1, span=span)
+    repeated = ir.Evaluate(variable + 1, loc=span)
     body = ir.SeqStmt([repeated, repeated, ir.Evaluate(variable + 2)])
     before = ir.save_json(body)
     last = body.seq[2]
@@ -65,7 +64,7 @@ def test_native_post_order_preserves_dag_order_handles_and_spans(native_calls):
     assert len(actual) == len(expected)
     assert all(left.same_as(right) for left, right in zip(actual, expected, strict=True))
     assert sum(node.same_as(repeated) for node in actual) == 1
-    assert next(node for node in actual if node.same_as(repeated)).span.same_as(span)
+    assert next(node for node in actual if node.same_as(repeated)).loc.same_as(span)
     assert ir.save_json(body) == before
     assert [name for name, _ in native_calls] == ["numsim_post_order_nodes"]
 
@@ -73,17 +72,12 @@ def test_native_post_order_preserves_dag_order_handles_and_spans(native_calls):
 @pytest.mark.parametrize("root_span", [False, True])
 @pytest.mark.parametrize("sequential_span", [False, True])
 def test_semantic_serialization_removes_spans_without_changing_the_ir(root_span, sequential_span):
-    span = tvm.ir.Span(ir.SourceName("kernel.py"), 3, 3, 1, 8)
+    span = SourceLoc(ir.SourceName("kernel.py"), 3, 1, 3, 8)
     if sequential_span:
-        span = tvm.ir.SequentialSpan(
-            [
-                span,
-                tvm.ir.Span(ir.SourceName("inlined.py"), 7, 7, 2, 9),
-            ]
-        )
+        span = CallSiteLoc(SourceLoc(ir.SourceName("inlined.py"), 7, 2, 7, 9), span)
     variable = tirx.Var("value", "int32", span)
-    shared = ir.Evaluate(variable + 1, span=span)
-    body = ir.SeqStmt([shared, shared, ir.Evaluate(variable + 2)], span=span if root_span else None)
+    shared = ir.Evaluate(variable + 1, loc=span)
+    body = ir.SeqStmt([shared, shared, ir.Evaluate(variable + 2)], loc=span if root_span else None)
     before = ir.save_json(body)
 
     expected_variable = tirx.Var("value", "int32")
@@ -181,7 +175,7 @@ def test_ptx_decoder_consumes_native_parts_without_copying_operands(native_calls
     assert decoded.operand("d")[0] is PTX_SINK
     assert decoded.operand("d")[1].same_as(ptx_call.args[0])
     assert decoded.scalar_operand("a").same_as(ptx_call.args[1])
-    assert decoded.span.same_as(ptx_call.span) and decoded.result_type.same_as(ptx_call.ty)
+    assert decoded.span.same_as(ptx_call.loc) and decoded.result_type.same_as(ptx_call.ty)
     assert ir.save_json(ptx_call) == before
     assert [name for name, _ in native_calls] == ["numsim_ptx_call_parts"]
 
@@ -190,7 +184,7 @@ def test_ptx_decoder_consumes_native_parts_without_copying_operands(native_calls
 def test_native_ptx_metadata_keeps_typed_errors_and_source_span(native_calls, ptx_call, position):
     args = list(ptx_call.args)
     args[position] = ir.IntImm("int32", 0)
-    invalid = ir.Call(ptx_call.op, args, span=ptx_call.span, ret_ty=ptx_call.ty)
+    invalid = ir.Call(ptx_call.op, args, loc=ptx_call.loc, ty=ptx_call.ty)
     with pytest.raises(PtxCallDecodeError, match="must be a StringImm, got IntImm") as caught:
         decode_ptx_call(invalid)
     assert caught.value.source_span.same_as(ptx_call.loc)

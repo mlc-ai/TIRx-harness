@@ -614,8 +614,8 @@ def mapped_st_async_case(offset_form):
                 [expressions[offset_form], *call.args[1:]],
                 attrs=call.attrs,
                 ty_args=call.ty_args,
-                span=call.span,
-                ret_ty=call.ty,
+                loc=call.loc,
+                ty=call.ty,
             )
         return call
 

@@ -99,7 +99,7 @@ def test_setp_bit_size_relational_comparison_remains_rejected():
             else arg
             for arg in call.args
         ]
-        invalid = ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
+        invalid = ir.Call(call.op, args, attrs=call.attrs, loc=call.loc, ty=call.ty)
         with pytest.raises(PtxCallDecodeError, match="bit-size.*compares only with eq/ne"):
             decode_ptx_call(invalid)
     for ptx_type in ("u32", "s32", "f64"):
@@ -108,7 +108,7 @@ def test_setp_bit_size_relational_comparison_remains_rejected():
             ir.StringImm(ptx_type) if isinstance(arg, ir.StringImm) and arg.value == "f32" else arg
             for arg in call.args
         ]
-        invalid = ir.Call(call.op, args, attrs=call.attrs, span=call.span, ret_ty=call.ty)
+        invalid = ir.Call(call.op, args, attrs=call.attrs, loc=call.loc, ty=call.ty)
         with pytest.raises(PtxCallDecodeError, match="ftz"):
             decode_ptx_call(invalid)
 

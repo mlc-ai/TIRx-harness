@@ -40,7 +40,7 @@ def _call(func, op_name: str):
 
 
 def _with_args(call, args):
-    return ir.Call(call.op, list(args), attrs=call.attrs, span=call.span, ret_ty=call.ty)
+    return ir.Call(call.op, list(args), attrs=call.attrs, loc=call.loc, ty=call.ty)
 
 
 def test_decode_mbarrier_and_wait_from_public_dsl():

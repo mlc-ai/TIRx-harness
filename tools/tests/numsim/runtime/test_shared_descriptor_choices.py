@@ -38,8 +38,8 @@ def descriptor_choice_case(form):
             [call.args[0], value, *call.args[2:]],
             attrs=call.attrs,
             ty_args=call.ty_args,
-            span=call.span,
-            ret_ty=call.ty,
+            loc=call.loc,
+            ty=call.ty,
         )
 
     def publish(stmt):

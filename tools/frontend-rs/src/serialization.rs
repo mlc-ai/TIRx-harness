@@ -29,20 +29,20 @@ pub fn semantic_ir_json(value: ObjectRef, tvm_version: FfiString) -> Result<FfiS
         .try_into()?;
     let nodes =
         Array::<Any>::try_from(graph.get(&FfiString::from("nodes"))?.expect("graph nodes"))?;
-    // Node indices follow traversal order; zero need not be null, and a graph
-    // need not contain null at all. Append our own without shifting any edges.
-    let null_index = nodes.len() as i64;
+    // Node indices follow traversal order, and a graph need not contain
+    // UnknownLoc at all. Append our own without shifting any edges.
+    let unknown_index = nodes.len() as i64;
     let mut stripped_nodes = Vec::with_capacity(nodes.len() + 1);
     for node in nodes.iter() {
         let mut stripped = node.clone();
         if let Ok(fields) = Map::<FfiString, Any>::try_from(node) {
             if let Some(data) = fields.get(&FfiString::from("data"))? {
                 if let Ok(data) = Map::<FfiString, Any>::try_from(data) {
-                    if data.get(&FfiString::from("span"))?.is_some() {
+                    if data.get(&FfiString::from("loc"))?.is_some() {
                         stripped = replace(
                             fields,
                             "data",
-                            replace(data, "span", null_index.into()).into(),
+                            replace(data, "loc", unknown_index.into()).into(),
                         )
                         .into();
                     }
@@ -51,15 +51,17 @@ pub fn semantic_ir_json(value: ObjectRef, tvm_version: FfiString) -> Result<FfiS
         }
         stripped_nodes.push(stripped);
     }
-    let null_node: Map<FfiString, Any> =
-        [(FfiString::from("type"), FfiString::from("None").into())]
-            .into_iter()
-            .collect();
-    stripped_nodes.push(null_node.into());
+    let unknown_node: Map<FfiString, Any> = [
+        (FfiString::from("type"), FfiString::from("ir.UnknownLoc").into()),
+        (FfiString::from("data"), Any::default()),
+    ]
+    .into_iter()
+    .collect();
+    stripped_nodes.push(unknown_node.into());
     let graph = replace(graph, "nodes", Array::new(stripped_nodes).into());
     let stripped: Any =
         tvm_tirx::tvm_ffi::cached_global_func!("ffi.FromJSONGraph").call_tuple((graph,))?;
-    // Loading and saving removes Span/SourceName nodes disconnected above.
+    // Loading and saving removes SourceLoc/SourceName nodes disconnected above.
     tvm_tirx::tvm_ffi::cached_global_func!("ffi.ToJSONGraphString")
         .call_tuple((stripped, metadata))?
         .try_into()

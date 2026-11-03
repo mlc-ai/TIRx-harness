@@ -56,8 +56,8 @@ def inactive_boundary_case(case):
                     args,
                     attrs=call.attrs,
                     ty_args=call.ty_args,
-                    span=call.span,
-                    ret_ty=call.ty,
+                    loc=call.loc,
+                    ty=call.ty,
                 )
             )
 
