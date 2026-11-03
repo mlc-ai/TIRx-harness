@@ -1,7 +1,7 @@
 //! Identity and lexical traversal contracts, without public test-only services.
 
 use crate::analyze::buffers::BufferBindings;
-use crate::analyze::util::{oref, same};
+use crate::analyze::util::{int_const, oref, same};
 use tvm_tirx::ir::{Expr, IntImm, Location, SourceName, Var};
 use tvm_tirx::ir::prim::{Add, AddObj};
 use tvm_tirx::ir::{Evaluate, For, If, SeqStmt, Stmt, While};
@@ -27,7 +27,7 @@ fn buffer_bindings_preserve_identities_and_last_declaration() {
     let ty = TensorType::new(
         "global",
         "int32",
-        vec![Expr::from(IntImm::new("int64", 4).unwrap())],
+        vec![Expr::from(int_const("int64", 4).unwrap())],
     )
     .unwrap();
     let first = ty.new_var("same");
@@ -70,7 +70,7 @@ fn cyclic_buffer_bindings_keep_each_starting_identity() {
     let ty = TensorType::new(
         "global",
         "int32",
-        vec![Expr::from(IntImm::new("int64", 4).unwrap())],
+        vec![Expr::from(int_const("int64", 4).unwrap())],
     )
     .unwrap();
     let first = ty.new_var("first");
@@ -117,13 +117,13 @@ fn substitution_keeps_same_named_variables_distinct() {
 fn statement_walk_preserves_occurrences_order_identity_and_spans() {
     initialize();
     let span = Location::new(&SourceName::get("statement-order.py").unwrap(), 7, 7, 1, 9).unwrap();
-    let shared: Stmt = Evaluate::with_span(IntImm::new("int32", 1).unwrap(), Some(&span))
+    let shared: Stmt = Evaluate::with_span(int_const("int32", 1).unwrap(), Some(&span))
         .unwrap()
         .into();
     let sequence: Stmt = SeqStmt::new(vec![shared.clone(), shared.clone()], Location::unknown())
         .unwrap()
         .into();
-    let condition = IntImm::new("bool", 1).unwrap();
+    let condition = int_const("bool", 1).unwrap();
     let while_loop: Stmt = While::new(&condition, shared.clone()).unwrap().into();
     let branch: Stmt =
         If::with_span(&condition, sequence.clone(), Some(while_loop.clone()), None)
@@ -131,8 +131,8 @@ fn statement_walk_preserves_occurrences_order_identity_and_spans() {
             .into();
     let counted: Stmt = For::new(
         Var::new("i", "int32", Location::unknown()).unwrap(),
-        IntImm::new("int32", 0).unwrap(),
-        IntImm::new("int32", 2).unwrap(),
+        int_const("int32", 0).unwrap(),
+        int_const("int32", 2).unwrap(),
         branch.clone(),
     )
     .unwrap()
@@ -141,7 +141,7 @@ fn statement_walk_preserves_occurrences_order_identity_and_spans() {
     let attribute: Stmt = AttrStmt::new(
         annotation_only,
         "annotation",
-        IntImm::new("int32", 0).unwrap(),
+        int_const("int32", 0).unwrap(),
         counted.clone(),
     )
     .unwrap()

@@ -10,6 +10,7 @@ use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
 use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast, ObjectRefCore};
+use crate::analyze::util::{int_const, prim_type};
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{
@@ -113,7 +114,7 @@ fn is_integer_like_dtype(dtype: &str) -> bool {
 
 /// `_static_int`: the analyzer-simplified literal, or `None`.
 fn static_int(analyzer: &Analyzer, value: &Expr) -> AResult<Option<i64>> {
-    Ok(int_imm_expr(&analyzer.simplify(value)?))
+    Ok(int_imm_expr(&analyzer.simplify(value, 2)?))
 }
 
 fn same_expression(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr) -> AResult<bool> {
@@ -244,11 +245,11 @@ fn canonical_tile_layout(layout: &TileLayout) -> AResult<Option<TileLayout>> {
 /// A Python `int` handed to `tirx.Cast(dtype, value)`: TVM converts it to an
 /// `int32` literal.
 fn python_int_expr(value: i64) -> AResult<Expr> {
-    Ok(IntImm::new("int32", value).into())
+    Ok(int_const("int32", value)?.into())
 }
 
 fn cast_to(dtype: &str, value: Expr) -> AResult<Expr> {
-    Ok(Cast::new(PrimType::new(dtype), value, Location::unknown())?.into())
+    Ok(Cast::new(prim_type(dtype)?, value, Location::unknown())?.into())
 }
 
 fn add_expr(lhs: &Expr, rhs: &Expr) -> AResult<Expr> {

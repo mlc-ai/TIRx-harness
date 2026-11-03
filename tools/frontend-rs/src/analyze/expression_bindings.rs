@@ -80,6 +80,6 @@ impl ExpressionBindings {
                 );
             }
         }
-        Ok(Analyzer::new().simplify(&current)?)
+        Ok(Analyzer::new().simplify(&current, 2)?)
     }
 }

@@ -13,8 +13,8 @@ use super::raw_memory::{decoded_load_parts, decoded_load_semantics};
 use super::{abi, Emitter, RustValue, Uniformity};
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
-    as_buffer, buffer_name, buffer_scope, dtype_of, dtype_text, expr_type, kind_or_bail, oref,
-    prim_dtype, same, static_int, static_string, unsupported, AResult, TensorVarExt,
+    as_buffer, buffer_name, buffer_scope, dtype_of, dtype_text, expr_type, int_const, kind_or_bail,
+    oref, prim_dtype, same, static_int, static_string, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::ptx::{decode_call, DecodedPtx};
 use crate::decode::Decoded;
@@ -236,7 +236,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
             }
             let indices: Vec<Expr> = coordinates
                 .iter()
-                .map(|coordinate| IntImm::new("int32", *coordinate).map(Into::into))
+                .map(|coordinate| int_const("int32", *coordinate).map(Into::into))
                 .collect::<tvm_ffi::Result<_>>()?;
             let value = self.emitter.emit_buffer_load(
                 source,

@@ -6,6 +6,7 @@ use tvm_tirx::ir::{Expr, PrimType, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tirx::TileLayout;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
+use crate::analyze::util::prim_type;
 use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::TensorVarExt;
 
@@ -350,7 +351,7 @@ impl<'e, 'a> TcgenTransferEmitter<'e, 'a> {
                 .kernel
                 .physical_element_offset(&register.buffer, &register_indices)?;
             let cast_to = |target: &Expr, value: &Expr| -> AResult<Expr> {
-                Ok(Cast::new(PrimType::new(&dtype_text(target.dtype())), value.clone(), Location::unknown())?.into())
+                Ok(Cast::new(prim_type(&dtype_text(target.dtype()))?, value.clone(), Location::unknown())?.into())
             };
             if !analyzer.can_prove_equal(thread, &cast_to(thread, &row)?)?
                 || !analyzer

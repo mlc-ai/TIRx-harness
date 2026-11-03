@@ -8,8 +8,8 @@ use crate::analyze::buffers::call_op_name;
 use crate::analyze::frontend::KernelPlan;
 use crate::analyze::util::json_object;
 use crate::analyze::util::{
-    as_var, dtype_of, ffi_error, ffi_text, int_imm, is_tensor_var, not_covered, oref, repr_text,
-    same, sorted_unique, unsupported, upper_first, AResult, Failure, Json,
+    as_var, dtype_of, ffi_error, ffi_text, int_imm, is_tensor_var, not_covered, oref, prim_type,
+    repr_text, same, sorted_unique, unsupported, upper_first, AResult, Failure, Json,
 };
 use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
@@ -1508,7 +1508,7 @@ pub(super) fn reinterpret(dtype: &str, value: &ObjectRef) -> AResult<ObjectRef> 
         return Ok(value.clone());
     }
     let call = Call::new(
-        PrimType::new(dtype),
+        prim_type(dtype)?,
         Op::get("tirx.reinterpret")?,
         vec![Expr::try_from(Any::from(value.clone()))?],
     );

@@ -8,9 +8,9 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
-    CallObj, Expr, ExprObj, FloatImmObj, GlobalVarObj, IntImmObj, LocationObj, OpaqueExprObj,
-    PrimTypeObj, PtrTypeObj, SequentialSpanObj, TensorLoadObj, TupleGetItemObj, TupleObj, Type, Var,
-    VarObj,
+    CallObj, Expr, ExprObj, FloatImm, FloatImmObj, GlobalVarObj, IntImm, IntImmObj, Location,
+    LocationObj, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, SequentialSpanObj, TensorLoadObj,
+    TupleGetItemObj, TupleObj, Type, Var, VarObj,
 };
 use tvm_tirx::ir::prim::{
     AddObj, AndObj, BitwiseAndObj, BitwiseNotObj, BitwiseOrObj, BitwiseXorObj, BroadcastObj,
@@ -439,6 +439,21 @@ pub fn prim(node: &ObjectRef) -> AResult<Expr> {
     prim_expr(Any::from(node.clone()))
 }
 
+/// An integer constant, checked as the old `IntImm::new(dtype, value)` was.
+pub fn int_const(dtype: &str, value: i64) -> tvm_ffi::Result<IntImm> {
+    IntImm::from_dtype(DLDataType::try_from_str(dtype)?, value, Location::unknown())
+}
+
+/// A floating-point constant, checked as the old `FloatImm::new(dtype, value)` was.
+pub fn float_const(dtype: &str, value: f64) -> tvm_ffi::Result<FloatImm> {
+    FloatImm::from_dtype(DLDataType::try_from_str(dtype)?, value, Location::unknown())
+}
+
+/// The primitive type of `dtype`, checked as the old `PrimType::new(dtype)` was.
+pub fn prim_type(dtype: &str) -> tvm_ffi::Result<PrimType> {
+    PrimType::from_dtype(DLDataType::try_from_str(dtype)?)
+}
+
 /// `value` as a primitive expression: an `Expr` whose type is a `PrimType`.
 pub fn prim_expr(value: impl Into<Any>) -> AResult<Expr> {
     let expr = Expr::try_from(value.into())?;
@@ -474,7 +489,7 @@ pub fn int_imm_expr(expr: &Expr) -> Option<i64> {
 }
 
 pub fn simplify(analyzer: &Analyzer, expr: &Expr) -> AResult<Expr> {
-    Ok(analyzer.simplify(expr)?)
+    Ok(analyzer.simplify(expr, 2)?)
 }
 
 pub fn static_int(

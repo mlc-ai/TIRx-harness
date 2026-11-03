@@ -9,7 +9,7 @@ use tvm_tirx::ir::{Expr, FloatImm, FloatImmObj, IntImm, IntImmObj, Range, Var};
 use tvm_tirx::tirx::TilePrimitiveCallObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString, TypeIndex};
-use crate::analyze::util::{oref, prim_expr, tensor_var};
+use crate::analyze::util::{float_const, int_const, oref, prim_expr, tensor_var};
 
 use super::super::layout::expr_any;
 use super::super::util::{
@@ -114,7 +114,7 @@ pub(super) fn static_int_any(analyzer: &Analyzer, value: &Any, field: &str) -> A
         _ => None,
     };
     if let Some(expr) = expr {
-        let simplified = analyzer.simplify(&expr)?;
+        let simplified = analyzer.simplify(&expr, 2)?;
         if let Some(value) = int_imm_expr(&simplified) {
             return Ok(value);
         }
@@ -195,7 +195,7 @@ pub(super) fn literal_float(value: &Any, field: &str) -> AResult<f64> {
         AnyValue::Float(value) => return Ok(*value),
         AnyValue::Object(node) => {
             if let Ok(expr) = prim_expr(Any::from(node.clone())) {
-                let simplified = Analyzer::new().simplify(&expr)?;
+                let simplified = Analyzer::new().simplify(&expr, 2)?;
                 if let Some(imm) = simplified.as_node::<FloatImmObj>() {
                     return Ok(imm.value);
                 }
@@ -258,7 +258,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
             // typed-scalar path below.
         }
         AnyValue::Bool(value) => {
-            let expr: Expr = IntImm::new(BOOL, i64::from(*value)).into();
+            let expr: Expr = int_const(BOOL, i64::from(*value))?.into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: BOOL.to_owned(),
@@ -272,14 +272,14 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                 // Every i64 fits int64, so no uint64 literal arises here.
                 "int64"
             };
-            let expr: Expr = IntImm::new(dtype, *value).into();
+            let expr: Expr = int_const(dtype, *value)?.into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: dtype.to_owned(),
             }));
         }
         AnyValue::Float(value) => {
-            let expr: Expr = FloatImm::new("float64", *value).into();
+            let expr: Expr = float_const("float64", *value)?.into();
             return Ok(TileOperand::Scalar(TileScalar {
                 expr: expr_any(&expr),
                 dtype: "float64".to_owned(),

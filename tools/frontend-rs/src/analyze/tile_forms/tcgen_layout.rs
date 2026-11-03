@@ -1,7 +1,7 @@
 //! TCGEN layout proofs.
 
 use tvm_tirx::ir::Location;
-use tvm_tirx::sym::Analyzer;
+use tvm_tirx::sym::{Analyzer, ProofStrength};
 use tvm_tirx::ir::{Expr, IntImm, PrimType, Range, Var};
 use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -9,6 +9,7 @@ use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
     String as FfiString,
 };
+use crate::analyze::util::int_const;
 use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::TensorVarExt;
 
@@ -61,8 +62,8 @@ pub(super) fn validate_block_scale_layout(
                 "TilePrimitiveCall(gemm_async): block-scale TMEM layout must map exactly to TLane/TCol for {role}, got {:?}",
                 &physical_axes(&physical_base)));
         }
-        let base_lane = analyzer.simplify(physical_get(&physical_base, "TLane").expect("TLane"))?;
-        let base_tcol = analyzer.simplify(physical_get(&physical_base, "TCol").expect("TCol"))?;
+        let base_lane = analyzer.simplify(physical_get(&physical_base, "TLane").expect("TLane"), 2)?;
+        let base_tcol = analyzer.simplify(physical_get(&physical_base, "TCol").expect("TCol"), 2)?;
         if !prove_equal(&analyzer, &vexpr(&base_lane), &vint(0))? {
             return unsupported(format!(
                 "TilePrimitiveCall(gemm_async): block-scale instruction bases must start at TLane 0 for {role}, got {} at ki={ki}",
@@ -74,7 +75,7 @@ pub(super) fn validate_block_scale_layout(
             &vfloormod(&vexpr(&base_tcol), &vint(elements_per_tmem_cell))?,
         )?;
         let non_negative =
-            analyzer.can_prove(&op_binary("_OpGE", expr_any(&scale_id), int_any(0))?)?;
+            analyzer.can_prove(&op_binary("_OpGE", expr_any(&scale_id), int_any(0))?, ProofStrength::Default)?;
         let in_cell = analyzer.can_prove(&op_binary(
             "_OpLE",
             expr_any(&op_binary(
@@ -83,7 +84,7 @@ pub(super) fn validate_block_scale_layout(
                 int_any(sf_per_mma),
             )?),
             int_any(elements_per_tmem_cell),
-        )?)?;
+        )?, ProofStrength::Default)?;
         if !non_negative || !in_cell {
             return unsupported(format!(
                 "TilePrimitiveCall(gemm_async): block-scale instruction bytes cross a 32-bit TMEM cell for {role} at ki={ki}: sf_id={}, width={sf_per_mma}",
@@ -198,7 +199,7 @@ pub(super) fn validate_tcgen_smem_layout(
     let mut variables: Vec<Expr> = Vec::new();
     for (axis, extent) in shape_exprs.iter().enumerate() {
         if shape[axis] == 1 {
-            variables.push(IntImm::new("int32", 0).into());
+            variables.push(int_const("int32", 0)?.into());
         } else {
             variables.push(prim(&oref(Var::with_type(
                 &format!("numsim_{}_{axis}", role.to_lowercase()),
@@ -389,7 +390,7 @@ pub(super) fn validate_tcgen_smem_layout(
         }
     }
     let alignment_elements = 128 / bits;
-    let contiguous_min = Analyzer::new().simplify(region.mins.last().expect("contiguous axis"))?;
+    let contiguous_min = Analyzer::new().simplify(region.mins.last().expect("contiguous axis"), 2)?;
     if !prove_equal(
         &Analyzer::new(),
         &vfloormod(&vexpr(&contiguous_min), &vint(alignment_elements))?,
@@ -1155,7 +1156,7 @@ fn relative_physical_mapping_structure(region: &TileRegion, prefix: &str) -> ARe
             "_OpSub",
             expr_any(physical_get(&mapped, &axis).expect("axis")),
             expr_any(physical_get(&origin, &axis).expect("axis")),
-        )?)?;
+        )?, 2)?;
         items.push(any_list(vec![
             Any::from(FfiString::from(axis.as_str())),
             expr_any(&delta),

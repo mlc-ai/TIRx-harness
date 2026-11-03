@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use crate::analyze::buffers::{call_op_name, BufferBindings};
 use crate::analyze::util::{
-    as_buffer, dtype_of, dtype_text, ffi_text, int_imm, kind, oref, same, unsupported, AResult,
-    Json,
+    as_buffer, dtype_of, dtype_text, ffi_text, int_const, int_imm, kind, oref, prim, same,
+    unsupported, AResult, Json,
 };
 use crate::decode::projected_buffer;
 use tvm_tirx::sym::Analyzer;
@@ -42,7 +42,7 @@ struct Context<'a> {
 
 impl Context<'_> {
     fn simplify(&self, value: &ObjectRef) -> AResult<Expr> {
-        Ok(self.analyzer.simplify(&value.clone().try_cast()?)?)
+        Ok(self.analyzer.simplify(&prim(value)?, 2)?)
     }
 
     fn serialize_integer(&self, value: &ObjectRef, field: &str) -> AResult<Json> {
@@ -159,7 +159,7 @@ impl Context<'_> {
                 }
                 oref(value)
             }
-            None => oref(IntImm::new("int64", 0)),
+            None => oref(int_const("int64", 0)?),
         };
         let serialized = self.serialize_integer(&byte_offset, "global address byte offset")?;
         if self
@@ -316,7 +316,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
             StringImm::new("runtime.cuTensorMapEncodeTiled", Location::unknown()).into(),
             call.args.get(0).expect("descriptor"),
             StringImm::new(&dtype_text(attrs.descriptor_dtype), Location::unknown()).into(),
-            IntImm::new("int32", attrs.rank).into(),
+            int_const("int32", attrs.rank)?.into(),
         ];
         args.extend(call.args.iter().skip(1));
         for mode in [
@@ -326,7 +326,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
             attrs.oob_fill,
             attrs.force_cu_dtype,
         ] {
-            args.push(IntImm::new("int32", mode).into());
+            args.push(int_const("int32", mode)?.into());
         }
         return Ok(Some(Call::with_metadata(
             call.ty.clone(),

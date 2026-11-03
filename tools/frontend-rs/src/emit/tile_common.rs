@@ -4,6 +4,7 @@ use tvm_tirx::ir::Location;
 use tvm_tirx::ir::{Expr, IntImm, PrimType, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
+use crate::analyze::util::{int_const, prim_type};
 use crate::analyze::util::PrimExprExt;
 
 use super::super::analyze::layout::{expr_any, op_binary};
@@ -43,7 +44,7 @@ pub(super) type Capture = (Vec<String>, Vec<SplitArgument>);
 
 /// `tirx.IntImm("int64", value)`.
 pub(super) fn int64_imm(value: i64) -> AResult<Expr> {
-    Ok(IntImm::new("int64", value).into())
+    Ok(int_const("int64", value)?.into())
 }
 
 /// `tirx.Var(name, dtype)` as a primitive expression together with its identity.
@@ -56,7 +57,7 @@ pub(super) fn tir_var(name: &str, dtype: &str) -> AResult<(ObjectRef, Expr)> {
 /// `minimum + tirx.Cast(minimum.ty, coordinate)`.
 pub(super) fn offset_index(minimum: &Expr, coordinate: &Expr) -> AResult<Expr> {
     let dtype = dtype_text(minimum.dtype());
-    let cast: Expr = Cast::new(PrimType::new(&dtype), coordinate.clone(), Location::unknown())?.into();
+    let cast: Expr = Cast::new(prim_type(&dtype)?, coordinate.clone(), Location::unknown())?.into();
     op_binary("_OpAdd", expr_any(minimum), expr_any(&cast))
 }
 

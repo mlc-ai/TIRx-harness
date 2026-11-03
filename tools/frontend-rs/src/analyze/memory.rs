@@ -6,13 +6,14 @@ use tvm_tirx::ir::{BindObj, Stmt, TensorStoreObj};
 use tvm_tirx::tirx::{AllocBufferObj, AttrStmtObj, DeclBufferObj, Function};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore};
+use tvm_tirx::sym::ProofStrength;
 
 use super::buffers::BufferBindings;
 use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
 use super::util::{
-    AResult, IdSet, TensorVarExt, buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref,
-    prim_expr, same, unsupported,
+    buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, prim_expr, same, unsupported,
+    AResult, IdSet, TensorVarExt,
 };
 use super::Ctx;
 use crate::decode::projected_buffer;
@@ -563,7 +564,7 @@ pub(in crate::analyze) fn build_memory_plan(
                         view_end_expression.any(),
                         owner_end_expression.any(),
                     )?;
-                    proven = analyzer.can_prove(&condition)?;
+                    proven = analyzer.can_prove(&condition, ProofStrength::Default)?;
                 }
                 if !proven && !(runtime_sized_global_alias || launch_bounded_global_alias) {
                     return unsupported(format!(

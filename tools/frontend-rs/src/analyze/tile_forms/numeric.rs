@@ -8,6 +8,7 @@ use tvm_tirx::tirx::{Layout, TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
 };
+use crate::analyze::util::prim_type;
 use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
 
@@ -174,7 +175,7 @@ pub(super) fn resolve_unary_elementwise(
         }
         if value.dtype != destination.dtype {
             let expr = prim_expr(value.expr.clone())?;
-            let cast: Expr = Cast::new(PrimType::new(&destination.dtype), expr, Location::unknown())?.into();
+            let cast: Expr = Cast::new(prim_type(&destination.dtype)?, expr, Location::unknown())?.into();
             value = TileScalar {
                 expr: expr_any(&cast),
                 dtype: destination.dtype.clone(),

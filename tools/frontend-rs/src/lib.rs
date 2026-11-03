@@ -13,7 +13,7 @@ mod serialization;
 mod tables;
 mod tvm_compat;
 
-use crate::analyze::util::{json_object, json_strings, AResult, Failure, Json};
+use crate::analyze::util::{int_const, json_object, json_strings, AResult, Failure, Json};
 use std::collections::HashSet;
 
 use tvm_tirx::sym::Analyzer;
@@ -41,11 +41,11 @@ pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<
     let analyzer = Analyzer::new();
     let mut offsets = Vec::new();
     for index in 0..count {
-        let mapped = layout.apply_linear(&IntImm::new("int64", index).into())?;
+        let mapped = layout.apply_linear(&int_const("int64", index)?.into())?;
         let offset = mapped
             .get(&"m".into())?
-            .unwrap_or(IntImm::new("int64", 0).into());
-        offsets.push(analyzer.simplify(&offset)?);
+            .unwrap_or(int_const("int64", 0)?.into());
+        offsets.push(analyzer.simplify(&offset, 2)?);
     }
     Ok(Array::new(offsets))
 }

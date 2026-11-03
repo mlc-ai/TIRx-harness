@@ -1,6 +1,6 @@
 //! gemm (mma.sync.m16n8k*) and gemm_async.
 
-use tvm_tirx::sym::Analyzer;
+use tvm_tirx::sym::{Analyzer, ProofStrength};
 
 use tvm_tirx::tirx::{TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::ObjectRefCast;
@@ -136,7 +136,7 @@ fn validate_m16n8_fragment_layout(
                     int_any(slots_per_tile),
                 )?),
                 expr_any(other_base),
-            )?)? || analyzer.can_prove(&op_binary(
+            )?, ProofStrength::Default)? || analyzer.can_prove(&op_binary(
                 "_OpLE",
                 expr_any(&op_binary(
                     "_OpAdd",
@@ -144,7 +144,7 @@ fn validate_m16n8_fragment_layout(
                     int_any(slots_per_tile),
                 )?),
                 expr_any(base),
-            )?)?;
+            )?, ProofStrength::Default)?;
             if !disjoint {
                 return unsupported(format!(
                     "TilePrimitiveCall(gemm): {role} instruction tiles ({}, {}) and ({}, {}) may alias the same physical registers for mma.sync.m16n8k{mma_k}",

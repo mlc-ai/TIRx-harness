@@ -8,9 +8,9 @@ use tvm_tirx::tvm_ffi::{
 };
 
 use super::util::{
-    AResult, Failure, PrimExprExt, TensorVarExt, buffer_dtype, buffer_name, buffer_scope, ffi_text,
-    int_imm_expr, not_covered, oref, prim, prim_expr, repr_of, simplify,
-    static_int as shared_static_int, unsupported,
+    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_const, int_imm_expr, not_covered, oref,
+    prim, prim_expr, repr_of, simplify, static_int as shared_static_int, unsupported, AResult,
+    Failure, PrimExprExt, TensorVarExt,
 };
 use crate::schema::Schema;
 
@@ -40,7 +40,7 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
     if let Some(layout) = &ty.layout {
         return Ok(layout.clone());
     }
-    let one: Expr = IntImm::new("int64", 1).into();
+    let one: Expr = int_const("int64", 1)?.into();
     let mut size = one.clone();
     for extent in ty.shape.iter() {
         size = op_binary("_OpMul", expr_any(&size), expr_any(&extent))?;
@@ -472,7 +472,7 @@ pub fn inspect_buffer_layout(
     let expected_elements_expr = prim_expr(expected_elements_expr)?;
     let zero_indices: Vec<Expr> = shape
         .iter()
-        .map(|_| IntImm::new("int32", 0).map(Into::into))
+        .map(|_| int_const("int32", 0).map(Into::into))
         .collect::<tvm_ffi::Result<_>>()?;
     let zero_indices = Array::new(zero_indices);
     let zero_extent_shared_placeholder = static_shape
@@ -525,7 +525,7 @@ pub fn inspect_buffer_layout(
                 set_axis(
                     &mut mapped,
                     "m",
-                    IntImm::new("int64", static_m_zero).into(),
+                    int_const("int64", static_m_zero)?.into(),
                 );
             } else {
                 dynamic_layout_elem_offset = Some(base_m_zero);

@@ -2,12 +2,13 @@
 //! `tmem_access_mode`, the TMEM branches of `emit_buffer_load` /
 //! `emit_store` / `logical_buffer_name`, and `physical_tmem_coordinates`.
 
-use tvm_tirx::sym::Analyzer;
+use tvm_tirx::sym::{Analyzer, ProofStrength};
 use tvm_tirx::ir::{Expr, IntImm, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::expression_bindings::ExpressionBindings;
@@ -125,7 +126,7 @@ impl<'a> TmemNaming<'a> {
             expr_any(&inner_interval.1),
             expr_any(&outer_interval.1),
         )?;
-        Ok(analyzer.can_prove(&starts)? && analyzer.can_prove(&ends)?)
+        Ok(analyzer.can_prove(&starts, ProofStrength::Default)? && analyzer.can_prove(&ends, ProofStrength::Default)?)
     }
 }
 
@@ -248,7 +249,7 @@ impl<'a> Emitter<'a> {
                 layout_signature(&layout)?
             ));
         }
-        let zero: Expr = IntImm::new("int32", 0).into();
+        let zero: Expr = int_const("int32", 0)?.into();
         let axis = |wanted: &str| -> Expr {
             axes.iter()
                 .find(|(axis, _)| axis == wanted)

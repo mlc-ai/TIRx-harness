@@ -119,7 +119,7 @@ pub(super) fn prove_equal(analyzer: &Analyzer, lhs: &Val, rhs: &Val) -> AResult<
 
 /// `analyzer.simplify(value)` with Python's int conversion.
 pub(super) fn simplify_val(analyzer: &Analyzer, value: &Val) -> AResult<Expr> {
-    Ok(analyzer.simplify(&value.expr()?)?)
+    Ok(analyzer.simplify(&value.expr()?, 2)?)
 }
 
 // ----------------------------------------------------------------------

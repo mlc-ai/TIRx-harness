@@ -3,8 +3,8 @@
 use crate::analyze::layout::{expr_any, int_any, op_binary};
 use crate::analyze::shapes::structural_equal;
 use crate::analyze::util::{
-    AResult, Failure, as_buffer, dtype_of, ffi_error, not_covered, oref, prim_expr, same, simplify,
-    unsupported,
+    as_buffer, dtype_of, ffi_error, not_covered, oref, prim_expr, same, simplify, unsupported,
+    AResult, Failure,
 };
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
@@ -14,6 +14,7 @@ use tvm_tirx::ir::TensorLoadObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 use tvm_tirx::ir::Expr;
+use tvm_tirx::sym::ProofStrength;
 
 /// `resolve_ptx_spdecompress` result: the register groups and the variant.
 pub struct SpDecompressForm {
@@ -241,7 +242,7 @@ impl<'a> Emitter<'a> {
         }
         let analyzer = &self.ctx.analyzer;
         let prove = |name: &str, lhs: &Expr, rhs: &Expr| -> AResult<bool> {
-            Ok(analyzer.can_prove(&op_binary(name, expr_any(lhs), expr_any(rhs))?)?)
+            Ok(analyzer.can_prove(&op_binary(name, expr_any(lhs), expr_any(rhs))?, ProofStrength::Default)?)
         };
         if prove("_OpLE", &left.end, &right.start)? || prove("_OpLE", &right.end, &left.start)? {
             return Ok("disjoint");

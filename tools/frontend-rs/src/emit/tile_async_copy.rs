@@ -5,12 +5,13 @@
 use std::mem;
 
 use tvm_tirx::ir::Location;
-use tvm_tirx::sym::Analyzer;
+use tvm_tirx::sym::{Analyzer, ProofStrength};
 use tvm_tirx::ir::{CallObj, Expr, IntImm, PrimType, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{And, Cast, CastObj, LetObj, NotObj, Select, SelectObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::{int_const, prim_type};
 use crate::analyze::util::PrimExprExt;
 use crate::analyze::util::prim_expr;
 use crate::analyze::util::TensorVarExt;
@@ -559,7 +560,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
             }
             let row_dtype = dtype_text(region.mins[0].dtype());
             return Ok(vec![
-                Cast::new(PrimType::new(&row_dtype), selected, Location::unknown())?.into(),
+                Cast::new(prim_type(&row_dtype)?, selected, Location::unknown())?.into(),
                 offset_index(&region.mins[1], &coordinates[1])?,
             ]);
         }
@@ -584,16 +585,16 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
             let minimum = proofs.resolve_expression(minimum)?;
             let buffer_extent = proofs.resolve_expression(buffer_extent)?;
             let dtype = dtype_text(minimum.dtype());
-            let zero: Expr = IntImm::new(&dtype, 0).into();
-            let extent: Expr = IntImm::new(&dtype, region_extent).into();
+            let zero: Expr = int_const(&dtype, 0)?.into();
+            let extent: Expr = int_const(&dtype, region_extent)?.into();
             let lower = op_binary("_OpGE", expr_any(&minimum), expr_any(&zero))?;
-            if !analyzer.can_prove(&lower)? {
+            if !analyzer.can_prove(&lower, ProofStrength::Default)? {
                 return Ok(false);
             }
             let end = op_binary("_OpAdd", expr_any(&minimum), expr_any(&extent))?;
-            let bound: Expr = Cast::new(PrimType::new(&dtype), buffer_extent, Location::unknown())?.into();
+            let bound: Expr = Cast::new(prim_type(&dtype)?, buffer_extent, Location::unknown())?.into();
             let upper = op_binary("_OpLE", expr_any(&end), expr_any(&bound))?;
-            analyzer.can_prove(&upper).map_err(Into::into)
+            analyzer.can_prove(&upper, ProofStrength::Default).map_err(Into::into)
         };
         proved().unwrap_or(false)
     }
@@ -618,10 +619,10 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
                 continue;
             }
             let index_dtype = dtype_text(index.dtype());
-            let zero: Expr = IntImm::new(&index_dtype, 0).into();
+            let zero: Expr = int_const(&index_dtype, 0)?.into();
             let lower = op_binary("_OpGE", expr_any(index), expr_any(&zero))?;
             let bound: Expr =
-                Cast::new(PrimType::new(&index_dtype), buffer_extent.clone(), Location::unknown())?.into();
+                Cast::new(prim_type(&index_dtype)?, buffer_extent.clone(), Location::unknown())?.into();
             let upper = op_binary("_OpLT", expr_any(index), expr_any(&bound))?;
             let condition = prim(&oref(And::new(lower, upper, Location::unknown())?))?;
             predicate = Some(match predicate {
@@ -631,7 +632,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         }
         match predicate {
             Some(predicate) => Ok(predicate),
-            None => Ok(IntImm::new("bool", 1).into()),
+            None => Ok(int_const("bool", 1)?.into()),
         }
     }
 

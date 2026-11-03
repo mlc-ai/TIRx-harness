@@ -5,7 +5,7 @@ use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::ptx::DecodedPtx;
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::util::{oref, AResult};
+use crate::analyze::util::{int_const, oref, prim_type, AResult};
 
 pub enum PointerCall {
     Address(ObjectRef),
@@ -93,7 +93,7 @@ mod tests {
 
     fn call(name: &str, args: Vec<Expr>) -> Call {
         Call::new(
-            PrimType::new("uint64").unwrap(),
+            prim_type("uint64").unwrap(),
             Op::get(name).unwrap(),
             args,
         )
@@ -102,8 +102,8 @@ mod tests {
     #[test]
     fn pointer_calls_preserve_sources_arity_and_address_escapes() {
         initialize();
-        let a: Expr = IntImm::new("int32", 1).unwrap().into();
-        let b: Expr = IntImm::new("int32", 2).unwrap().into();
+        let a: Expr = int_const("int32", 1).unwrap().into();
+        let b: Expr = int_const("int32", 2).unwrap().into();
         let address = call("tirx.address_of", vec![a.clone()]);
         assert!(
             matches!(pointer_call(&address).unwrap(), PointerCall::Address(v) if same(&v, &oref(a.clone())))
@@ -160,8 +160,8 @@ mod tests {
     #[test]
     fn register_sources_preserve_width_destination_and_sink_guards() {
         initialize();
-        let a = oref(IntImm::new("int32", 1).unwrap());
-        let b = oref(IntImm::new("int32", 2).unwrap());
+        let a = oref(int_const("int32", 1).unwrap());
+        let b = oref(int_const("int32", 2).unwrap());
         let mut decoded = DecodedPtx {
             op_name: "tirx.ptx.mov".into(),
             operands: vec![operand("d", "w", b.clone()), operand("a", "r", a.clone())],

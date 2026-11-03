@@ -4,6 +4,7 @@
 use tvm_tirx::ir::{Expr, IntImm, Var};
 
 use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
+use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{buffer_layout, expr_any, int_any, layout_signature, op_binary};
@@ -52,7 +53,7 @@ impl<'a> Emitter<'a> {
         self.check_index_count(buffer, indices)?;
         let mut offset: Expr;
         if let Some(strides) = &info.explicit_strides {
-            offset = IntImm::new("int64", 0).into();
+            offset = int_const("int64", 0)?.into();
             for (index, stride) in indices.iter().zip(strides.iter()) {
                 let product = op_binary("_OpMul", expr_any(index), int_any(*stride))?;
                 offset = op_binary("_OpAdd", expr_any(&offset), expr_any(&product))?;
@@ -74,7 +75,7 @@ impl<'a> Emitter<'a> {
             }
             offset = match mapped.iter().find(|(axis, _)| axis == "m") {
                 Some((_, value)) => value.clone(),
-                None => IntImm::new("int32", 0).into(),
+                None => int_const("int32", 0)?.into(),
             };
             if info.packed_nibble_offset != 0 {
                 offset = op_binary(

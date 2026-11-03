@@ -1,8 +1,8 @@
 //! Validation and emission of the matrix instruction family.
 
 use crate::analyze::util::{
-    as_buffer, capitalize, dtype_of, ffi_error, int_imm_expr, not_covered, oref, prim, repr_text,
-    same, simplify, static_int, static_string, unmodeled, unsupported, AResult, Failure,
+    as_buffer, capitalize, dtype_of, ffi_error, int_const, int_imm_expr, not_covered, oref, prim,
+    repr_text, same, simplify, static_int, static_string, unmodeled, unsupported, AResult, Failure,
     TensorVarExt,
 };
 use crate::analyze::Ctx;
@@ -899,7 +899,7 @@ impl<'a> Emitter<'a> {
     fn matrix_buffer_base_address(&mut self, buffer: &Var) -> AResult<String> {
         let mut zeros: Vec<Expr> = Vec::new();
         for _ in buffer.tensor_type().shape.iter() {
-            zeros.push(IntImm::new("int32", 0).into());
+            zeros.push(int_const("int32", 0)?.into());
         }
         Ok(self.emit_buffer_address(buffer, &zeros)?.code)
     }

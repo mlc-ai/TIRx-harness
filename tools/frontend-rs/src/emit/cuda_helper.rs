@@ -3,7 +3,7 @@
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
     as_buffer, buffer_dtype, buffer_scope, dtype_of, dtype_text, expr_type, ffi_text, int_imm,
-    not_covered, oref, prim, prim_dtype, unsupported, AResult, TensorVarExt,
+    not_covered, oref, prim, prim_dtype, prim_type, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::Decoded;
 use crate::emit::async_copy::ST_ASYNC;
@@ -1020,11 +1020,11 @@ impl<'a> Emitter<'a> {
                 // These known C++ helpers take unsigned 32-/64-bit parameters before
                 // passing their register bits to PTX.
                 let operand = Cast::new(
-                    PrimType::new(if field == "global_dim" {
+                    prim_type(if field == "global_dim" {
                         "uint32"
                     } else {
                         "uint64"
-                    }),
+                    })?,
                     prim(&parsed.arguments[1])?,
                 )?;
                 let value =
