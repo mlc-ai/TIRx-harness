@@ -26,7 +26,7 @@ use tvm_tirx::ir::{
 };
 use tvm_tirx::ir::prim::Add;
 use tvm_tirx::backend::cuda::TensorMapEncodeTiledAttrObj;
-use tvm_tirx::ir::{AssertStmtObj, BindObj, EvaluateObj, SeqStmtObj, Stmt};
+use tvm_tirx::ir::{AssertStmtObj, BindObj, EvaluateObj, SeqStmt, SeqStmtObj, Stmt, Type};
 use tvm_tirx::tirx::{AttrStmtObj, DeclBufferObj, Function};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCast, ObjectRefCore, String as FfiString};
@@ -328,14 +328,14 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         ] {
             args.push(int_const("int32", mode)?.into());
         }
-        return Ok(Some(Call::with_metadata(
-            call.ty.clone(),
+        return Ok(Some(Call::new(
+            Some(&call.ty),
             Op::get("tirx.tvm_call_packed")?,
             args,
             None,
-            Vec::new(),
-            call.span.as_ref(),
-        )));
+            Vec::<Type>::new(),
+            call.loc.clone(),
+        )?));
     }
     if call_op_name(&call)?.as_deref() == Some("tirx.tvm_call_packed")
         && call
@@ -555,11 +555,12 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         FfiString::from(IMPLICIT_TENSOR_MAP_ATTR),
         FfiString::from(Json::Array(metadata).to_string()).into(),
     ));
-    Ok(Function::with_metadata(
+    let body = SeqStmt::new([entry.try_cast::<Stmt>()?], Location::unknown());
+    Ok(Function::new(
         params,
-        entry.try_cast::<Stmt>()?,
+        Some(&body),
         func.ret_type.clone(),
-        DictAttrs::from_dictionary(attrs.into_iter().collect()),
-        func.span.as_ref(),
-    )?)
+        DictAttrs::new(attrs.into_iter().collect::<Map<FfiString, Any>>()),
+        func.loc.clone(),
+    ))
 }

@@ -8,8 +8,8 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{
-    CallObj, Expr, ExprObj, FloatImm, FloatImmObj, GlobalVarObj, IntImm, IntImmObj, Location,
-    LocationObj, OpaqueExprObj, PrimType, PrimTypeObj, Range, PtrTypeObj, SequentialSpanObj, TensorLoadObj,
+    CallObj, CallSiteLocObj, Expr, ExprObj, FloatImm, FloatImmObj, GlobalVarObj, IntImm, IntImmObj,
+    Location, OpaqueExprObj, PrimType, PrimTypeObj, PtrTypeObj, Range, SourceLocObj, TensorLoadObj,
     TupleGetItemObj, TupleObj, Type, Var, VarObj,
 };
 use tvm_tirx::ir::prim::{
@@ -509,7 +509,7 @@ pub fn bind_ranges(analyzer: &Analyzer, ranges: impl IntoIterator<Item = (Var, R
         let constraint: ObjectRef =
             tvm_ffi::cached_global_func!("sym.RangeConstraint").call_tuple((var, range))?.try_into()?;
         tvm_ffi::cached_global_func!("sym.ConstraintContextAppend")
-            .call_tuple((context.clone(), constraint))?;
+            .call_packed(&[AnyView::from(&context), AnyView::from(&constraint)])?;
     }
     analyzer.sync_constraint_context(&context)?;
     Ok(())
@@ -543,50 +543,58 @@ pub fn static_string(value: &ObjectRef, field: &str) -> AResult<String> {
 }
 
 /// Source span JSON as `source_map.source_span_from_tvm` serializes it.
-pub fn span_json(span: Option<&tvm_tirx::ir::Location>) -> Option<Json> {
+pub fn span_json(span: Option<&Location>) -> Option<Json> {
     let span = span?;
-    if let Some(sequential) = span.as_node::<SequentialSpanObj>() {
-        let mut children = Vec::new();
-        for child in sequential.spans.iter() {
-            if let Some(child_json) = span_json(Some(&child)) {
-                children.push(child_json);
-            }
-        }
-        if children.is_empty() {
+    if span.as_node::<CallSiteLocObj>().is_some() {
+        // A CallSiteLoc chain flattens to its source locations, outermost call site first.
+        let mut leaves = Vec::new();
+        call_site_leaves(span, &mut leaves);
+        if leaves.is_empty() {
             return None;
         }
         return Some(json_object(vec![
             ("kind", Json::from("sequential")),
-            ("spans", Json::Array(children)),
+            ("spans", Json::Array(leaves)),
         ]));
     }
-    let leaf = span.as_node::<LocationObj>()?;
-    let source_name = ffi_text(&leaf.source_name.as_ref()?.name);
+    let leaf = span.as_node::<SourceLocObj>()?;
+    let source_name = ffi_text(&leaf.source_name.name);
     if source_name.is_empty() {
         return None;
     }
-    let coordinates = [leaf.line, leaf.column, leaf.end_line, leaf.end_column];
+    let coordinates = [leaf.start_line, leaf.start_column, leaf.end_line, leaf.end_column];
     if coordinates.iter().any(|value| *value < 1) {
         return None;
     }
-    if leaf.end_line < leaf.line || (leaf.end_line == leaf.line && leaf.end_column < leaf.column) {
+    if leaf.end_line < leaf.start_line
+        || (leaf.end_line == leaf.start_line && leaf.end_column < leaf.start_column)
+    {
         return None;
     }
     Some(json_object(vec![
         ("kind", Json::from("span")),
         ("source_name", Json::String(source_name)),
-        ("line", Json::from(leaf.line as i64)),
-        ("column", Json::from(leaf.column as i64)),
+        ("line", Json::from(leaf.start_line as i64)),
+        ("column", Json::from(leaf.start_column as i64)),
         ("end_line", Json::from(leaf.end_line as i64)),
         ("end_column", Json::from(leaf.end_column as i64)),
     ]))
 }
 
-pub fn node_span(node: &ObjectRef) -> Option<tvm_tirx::ir::Location> {
-    if let Some(expr) = node.as_node::<ExprObj>() {
-        return expr.span.clone();
+fn call_site_leaves(location: &Location, leaves: &mut Vec<Json>) {
+    if let Some(call_site) = location.as_node::<CallSiteLocObj>() {
+        call_site_leaves(&call_site.caller, leaves);
+        call_site_leaves(&call_site.callee, leaves);
+    } else if let Some(leaf) = span_json(Some(location)) {
+        leaves.push(leaf);
     }
-    node.as_node::<StmtObj>().and_then(|stmt| stmt.span.clone())
+}
+
+pub fn node_span(node: &ObjectRef) -> Option<Location> {
+    if let Some(expr) = node.as_node::<ExprObj>() {
+        return Some(expr.loc.clone());
+    }
+    node.as_node::<StmtObj>().map(|stmt| stmt.loc.clone())
 }
 
 /// Python `str.capitalize()`.

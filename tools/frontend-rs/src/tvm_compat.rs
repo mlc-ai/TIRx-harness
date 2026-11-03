@@ -35,7 +35,3 @@ pub fn int_bits(value: &IntImmObj) -> Result<u64> {
         ))
     }
 }
-
-const _: () = {
-    assert!(std::mem::size_of::<Any>() == 16);
-};

@@ -41,7 +41,7 @@ pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<
     let analyzer = Analyzer::new();
     let mut offsets = Vec::new();
     for index in 0..count {
-        let mapped = layout.apply_linear(&int_const("int64", index)?.into())?;
+        let mapped = layout.apply_linear(Expr::from(int_const("int64", index)?))?;
         let offset = mapped
             .get(&"m".into())?
             .unwrap_or(int_const("int64", 0)?.into());
@@ -156,7 +156,7 @@ fn ptx_call_parts(call: Call, modifier_count: i64) -> Result<Array<Any>> {
         call.op.clone().try_cast::<Op>()?.name.clone().into(),
         call.args.clone().into(),
         Array::new(tokens).into(),
-        call.span.clone().into(),
+        call.loc.clone().into(),
         call.ty.clone().into(),
     ]))
 }
