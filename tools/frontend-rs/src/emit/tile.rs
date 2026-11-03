@@ -4,12 +4,13 @@
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{IntImm, IntImmObj, PrimExpr, PrimType, TensorLoadObj};
+use tvm_tirx::ir::{IntImm, IntImmObj, PrimExpr, PrimType, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
-use tvm_tirx::tirx::{ComposeLayout, Layout, TensorVar, TileLayout, TilePrimitiveCallObj};
+use tvm_tirx::tirx::{ComposeLayout, Layout, TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast, ObjectRefCore};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{
     axis_name, expr_any, int_any, op_binary, tile_layout_is_trivial, Extent,
@@ -120,7 +121,7 @@ fn same_expression(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr) -> AResu
 }
 
 fn same_region(analyzer: &Analyzer, lhs: &TileRegion, rhs: &TileRegion) -> AResult<bool> {
-    if !(same(lhs.buffer.as_var(), rhs.buffer.as_var())
+    if !(same(lhs.buffer, rhs.buffer)
         && lhs.dtype == rhs.dtype
         && lhs.extents == rhs.extents
         && lhs.mins.len() == rhs.mins.len())
@@ -225,9 +226,9 @@ fn iter_axis_name(item: &tvm_tirx::tirx::Iter) -> AResult<String> {
     axis_name(&item.axis)
 }
 
-fn tile_layout_of(buffer: &TensorVar) -> Option<TileLayout> {
+fn tile_layout_of(buffer: &Var) -> Option<TileLayout> {
     buffer
-        .buffer_type()
+        .tensor_type()
         .layout
         .clone()
         .and_then(|layout| layout.try_cast::<TileLayout>().ok())
@@ -470,8 +471,8 @@ fn layout_is_swizzle(layout: &Layout) -> AResult<bool> {
 }
 
 /// `region.buffer.shape` as primitive expressions.
-fn buffer_shape(buffer: &TensorVar) -> Vec<PrimExpr> {
-    buffer.buffer_type().shape.iter().collect()
+fn buffer_shape(buffer: &Var) -> Vec<PrimExpr> {
+    buffer.tensor_type().shape.iter().collect()
 }
 
 /// `len(layout.replica) == 0 and len(layout.offset) == 0`.
@@ -490,7 +491,7 @@ fn space_marker(space: MemorySpace) -> Option<&'static str> {
 
 impl<'a> Emitter<'a> {
     /// The `buffers.<field>` spelling of a buffer.
-    fn tile_buffer_field(&self, buffer: &TensorVar) -> AResult<String> {
+    fn tile_buffer_field(&self, buffer: &Var) -> AResult<String> {
         let code = self.buffer_code(buffer)?;
         match code.storage_index {
             Some(index) => Ok(format!("buffers.buffers[{index}]")),
@@ -924,7 +925,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `set(inspect_buffer_layout(buffer).physical_axes) - {"m"}` is non-empty.
-    fn tile_has_owner_axes(&self, buffer: &TensorVar) -> AResult<bool> {
+    fn tile_has_owner_axes(&self, buffer: &Var) -> AResult<bool> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         Ok(info.physical_axes.iter().any(|axis| axis != "m"))
     }
@@ -997,7 +998,7 @@ impl<'a> Emitter<'a> {
             }
         }
         let canonical = |region: &TileRegion| -> AResult<Any> {
-            let Some(layout) = region.buffer.buffer_type().layout.clone() else {
+            let Some(layout) = region.buffer.tensor_type().layout.clone() else {
                 return Err(Failure::Ffi(ffi_error(
                     "'NoneType' object has no attribute 'canonicalize'",
                 )));
@@ -1328,7 +1329,7 @@ impl<'a> Emitter<'a> {
         let destination_info = self
             .ctx
             .inspect_layout(&op.destination.buffer, &self.bindings)?;
-        let Some(destination_layout) = op.destination.buffer.buffer_type().layout.clone() else {
+        let Some(destination_layout) = op.destination.buffer.tensor_type().layout.clone() else {
             return Err(Failure::Ffi(ffi_error(
                 "'NoneType' object has no attribute 'is_swizzle'",
             )));

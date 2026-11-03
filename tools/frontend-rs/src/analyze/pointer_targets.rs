@@ -6,15 +6,15 @@ use tvm_tirx::tirx::TensorMapTypeObj;
 
 use std::collections::BTreeSet;
 use tvm_tirx::ir::TensorRegionObj;
-use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
 use tvm_tirx::ir::{BindObj, TensorStoreObj};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::{object::ObjectRef, ObjectRefCore};
 
 use super::frontend::KernelPlan;
 use super::util::{
-    as_buffer, as_var, dtype_of, ffi_text, int_imm, oref, same, AResult, IdMap, IdSet,
+    as_buffer, as_var, dtype_of, ffi_text, int_imm, oref, same, tensor_var, AResult, IdMap, IdSet,
 };
 use super::Ctx;
 use crate::decode::pointers::{
@@ -120,7 +120,7 @@ impl<'a> PointerTargets<'a> {
             if let Some(region) = node.as_node::<TensorRegionObj>() {
                 escaped.add(
                     plan.buffer_bindings
-                        .storage_key(&TensorVar::try_from(region.source.clone())?)?,
+                        .storage_key(&tensor_var(&oref(region.source.clone()))?)?,
                 );
             }
             if let Some(call) = node.as_node::<CallObj>() {
@@ -188,7 +188,7 @@ impl<'a> PointerTargets<'a> {
         Ok(result)
     }
 
-    fn buffer(&self, buffer: &TensorVar, seen: &mut IdSet) -> AResult<Fact> {
+    fn buffer(&self, buffer: &Var, seen: &mut IdSet) -> AResult<Fact> {
         let plan = self
             .plan
             .memory_plan

@@ -5,9 +5,10 @@
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{Expr, IntImm, PrimExpr, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::expression_bindings::ExpressionBindings;
 use super::super::analyze::frontend::KernelPlan;
@@ -53,7 +54,7 @@ impl<'a> TmemNaming<'a> {
         for statement in &emitter.plan.statements {
             if let Some(loop_stmt) = statement.as_node::<ForObj>() {
                 loop_ranges.push((
-                    loop_stmt.loop_var.as_var().clone(),
+                    loop_stmt.loop_var.clone(),
                     bindings.resolve_expression_with(&loop_stmt.min, &substitutions)?,
                     bindings.resolve_expression_with(&loop_stmt.extent, &substitutions)?,
                 ));
@@ -131,7 +132,7 @@ impl<'a> TmemNaming<'a> {
 impl<'a> Emitter<'a> {
     /// The TMEM branch of `logical_buffer_name` (the cache miss is already
     /// established by the caller).
-    pub fn tmem_logical_buffer_name(&mut self, buffer: &TensorVar) -> AResult<String> {
+    pub fn tmem_logical_buffer_name(&mut self, buffer: &Var) -> AResult<String> {
         // Whole-function facts,
         // computed once per kernel.
         if self.tmem.naming.is_none() {
@@ -142,7 +143,7 @@ impl<'a> Emitter<'a> {
             let buffers = &self.memory_plan.buffers;
             let Some(plan_index) = buffers
                 .iter()
-                .position(|candidate| same(candidate.buffer.as_var(), buffer.as_var()))
+                .position(|candidate| same(candidate.buffer, buffer))
             else {
                 return Err(Failure::Ffi(ffi_error("TMEM view has no memory plan")));
             };
@@ -209,7 +210,7 @@ impl<'a> Emitter<'a> {
     /// Layout-derived `(TLane, TCol)` coordinates in element units.
     pub fn physical_tmem_coordinates(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
     ) -> AResult<(PrimExpr, PrimExpr)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -224,13 +225,13 @@ impl<'a> Emitter<'a> {
                 indices.len()
             ));
         }
-        let Some(layout) = buffer.buffer_type().layout.clone() else {
+        let Some(layout) = buffer.tensor_type().layout.clone() else {
             return not_covered("buffer without a layout");
         };
         let coordinates = Array::new(indices.to_vec());
         let mapped: Map<FfiString, PrimExpr> = layout
             .canonicalize()?
-            .apply_with_shape(&coordinates, &buffer.buffer_type().shape)?;
+            .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
         let mut axes: Vec<(String, PrimExpr)> = mapped
             .iter()
             .map(|(axis, value)| (ffi_text(&axis), value))
@@ -274,7 +275,7 @@ impl<'a> Emitter<'a> {
     /// `tmem_coordinates`: `(lane, tcol, allocated_addr)` as warp `i64` values.
     pub fn tmem_coordinates(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         source_op_id: Option<i64>,
     ) -> AResult<(RustValue, RustValue, RustValue)> {
@@ -299,7 +300,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `tmem_access_mode`.
-    pub fn tmem_access_mode(&self, buffer: &TensorVar) -> AResult<String> {
+    pub fn tmem_access_mode(&self, buffer: &Var) -> AResult<String> {
         let plan = self.memory_plan.resolve(buffer)?;
         if plan.space != MemorySpace::Tmem {
             return unsupported(format!(
@@ -315,7 +316,7 @@ impl<'a> Emitter<'a> {
         Ok(format!("TmemAccessMode::{mode}"))
     }
 
-    pub(super) fn tmem_access_marker(&self, buffer: &TensorVar) -> AResult<&'static str> {
+    pub(super) fn tmem_access_marker(&self, buffer: &Var) -> AResult<&'static str> {
         Ok(if self.tmem_access_mode(buffer)?.ends_with("::Static") {
             "v2::tcgen05::variant::StaticTmem"
         } else {
@@ -327,7 +328,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_tmem_buffer_load(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         name: &str,
         buffer_ref: &str,

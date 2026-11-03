@@ -2,14 +2,14 @@
 
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{IntImm, PrimExpr, Var};
-use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TensorVar, TileLayout};
+use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TileLayout};
 use tvm_tirx::tvm_ffi::{
     self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
 };
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_imm_expr, not_covered, oref, repr_of,
-    simplify, static_int as shared_static_int, unsupported, AResult, Failure,
+    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_imm_expr, not_covered, oref, prim,
+    repr_of, simplify, static_int as shared_static_int, unsupported, AResult, Failure, TensorVarExt,
 };
 use crate::schema::Schema;
 
@@ -34,8 +34,8 @@ pub fn int_any(value: i64) -> Any {
 
 /// Physical buffers have compact memory coordinates, with no thread mapping.
 /// Explicit strides and element offsets are handled by the ordinary buffer rules.
-pub fn buffer_layout(buffer: &TensorVar) -> AResult<Layout> {
-    let ty = buffer.buffer_type();
+pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
+    let ty = buffer.tensor_type();
     if let Some(layout) = &ty.layout {
         return Ok(layout.clone());
     }
@@ -359,11 +359,12 @@ fn map_get(map: &Map<FfiString, PrimExpr>, key: &str) -> AResult<Option<PrimExpr
 pub fn inspect_buffer_layout(
     schema: &Schema,
     analyzer: &Analyzer,
-    buffer: &TensorVar,
+    buffer: &Var,
     shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
+    tmem_address: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     let name = buffer_name(buffer);
-    let buffer_type = buffer.buffer_type();
+    let buffer_type = buffer.tensor_type();
     let mut shape = Vec::new();
     for (axis, extent) in buffer_type.shape.iter().enumerate() {
         shape.push(shape_extent(
@@ -408,46 +409,11 @@ pub fn inspect_buffer_layout(
         i64::from(data_type.bits) / 8
     };
     let scope = buffer_scope(buffer);
-    let simplified_elem_offset = simplify(analyzer, &buffer_type.elem_offset)?;
-    let (logical_elem_offset, dynamic_elem_offset) = match int_imm_expr(&simplified_elem_offset) {
-        Some(value) => (value, None),
-        None => {
-            if packed_nibble {
-                return unsupported(format!(
-                    "buffer:{name}:runtime elem_offset for packed float4 storage is unsupported"
-                ));
-            }
-            (0, Some(simplified_elem_offset.clone()))
-        }
-    };
-    if logical_elem_offset < 0 {
-        return unsupported(format!(
-            "buffer:{name}:negative elem_offset {logical_elem_offset} is not implemented"
-        ));
-    }
-    let packed_nibble_offset = if packed_nibble {
-        logical_elem_offset % 2
-    } else {
-        0
-    };
-    let elem_offset = if packed_nibble {
-        logical_elem_offset / 2
-    } else {
-        logical_elem_offset
-    };
-    let explicit_strides: Option<Vec<i64>> = if buffer_type.strides.is_empty() {
-        None
-    } else {
-        let mut strides = Vec::new();
-        for (axis, stride) in buffer_type.strides.iter().enumerate() {
-            strides.push(static_int(
-                analyzer,
-                &stride,
-                &format!("{name}:strides[{axis}]"),
-            )?);
-        }
-        Some(strides)
-    };
+    // A TensorType has neither an element offset nor strides: a view's offset and
+    // strides are part of its layout.
+    let (elem_offset, dynamic_elem_offset, packed_nibble_offset): (i64, Option<PrimExpr>, i64) =
+        (0, None, 0);
+    let explicit_strides: Option<Vec<i64>> = None;
     let static_shape = shape
         .iter()
         .all(|extent| matches!(extent, Extent::Static(_)));
@@ -573,7 +539,6 @@ pub fn inspect_buffer_layout(
     if scope == "tmem" || scope.starts_with("tmem.") {
         return inspect_tmem(
             analyzer,
-            buffer,
             &name,
             shape,
             dtype,
@@ -588,13 +553,8 @@ pub fn inspect_buffer_layout(
             &zero_axes,
             dynamic_layout_elem_offset,
             packed_nibble,
+            tmem_address,
         );
-    }
-    if !buffer_type.allocated_addr.is_empty() {
-        return unsupported(format!(
-            "buffer:{name}:allocated_addr {} is unsupported",
-            repr_of(&buffer_type.allocated_addr)?
-        ));
     }
     let zero_m = get_axis(&mapped, "m");
     let owner_axes: Vec<String> = zero_axes
@@ -853,7 +813,6 @@ fn set_axis(mapped: &mut Vec<(String, PrimExpr)>, axis: &str, value: PrimExpr) {
 #[allow(clippy::too_many_arguments)]
 fn inspect_tmem(
     analyzer: &Analyzer,
-    buffer: &TensorVar,
     name: &str,
     shape: Vec<Extent>,
     dtype: String,
@@ -868,6 +827,7 @@ fn inspect_tmem(
     zero_axes: &[String],
     dynamic_layout_elem_offset: Option<PrimExpr>,
     packed_nibble: bool,
+    tmem_address: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     if dynamic_elem_offset.is_some() {
         return unsupported(format!(
@@ -879,14 +839,14 @@ fn inspect_tmem(
             "buffer:{name}:float4 TMEM views are not implemented"
         ));
     }
-    let buffer_type = buffer.buffer_type();
-    let allocated_addr: Vec<PrimExpr> = buffer_type.allocated_addr.iter().collect();
-    if allocated_addr.len() != 1 {
+    // The column address is an operand of the producing tirx.alloc_tensor or
+    // tirx.cuda.decl_tmem, not part of the tensor type.
+    let Some(tmem_address) = tmem_address else {
         return unsupported(format!(
-            "buffer:{name}:TMEM requires exactly one allocated_addr, got {}",
-            repr_of(&buffer_type.allocated_addr)?
+            "buffer:{name}:TMEM requires the column address of its allocation"
         ));
-    }
+    };
+    let allocated_addr = prim(&oref(tmem_address))?;
     let Ok(_) = layout.clone().try_cast::<TileLayout>() else {
         return unsupported(format!(
             "buffer:{name}:TMEM requires a TileLayout, got {signature}"
@@ -943,7 +903,7 @@ fn inspect_tmem(
     }
     let addr_static: Option<i64> = match static_int(
         analyzer,
-        &allocated_addr[0],
+        &allocated_addr,
         &format!("{name}:allocated_addr"),
     ) {
         Ok(value) => Some(value),
@@ -1013,7 +973,7 @@ fn inspect_tmem(
         explicit_strides: None,
         dynamic_layout_elem_offset,
         packed_nibble_offset: 0,
-        allocated_addr: Some(allocated_addr[0].clone()),
+        allocated_addr: Some(allocated_addr),
         allocated_addr_static: addr_static,
         tmem_lane_span: Some(lane_span),
         tmem_tcol_span_elements: Some(tcol_capacity),

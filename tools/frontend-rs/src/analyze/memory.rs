@@ -3,7 +3,7 @@
 use tvm_tirx::ir::TensorRegionObj;
 use tvm_tirx::ir::{CallObj, Expr, PrimExpr, TensorLoadObj, Var};
 use tvm_tirx::ir::{BindObj, Stmt, TensorStoreObj};
-use tvm_tirx::tirx::{AllocBufferObj, AttrStmtObj, DeclBufferObj, Function, TensorVar};
+use tvm_tirx::tirx::{AllocBufferObj, AttrStmtObj, DeclBufferObj, Function};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, Map, ObjectRefCore};
 
@@ -12,7 +12,7 @@ use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
 use super::util::{
     buffer_name, buffer_ref, buffer_scope, ffi_text, int_imm, oref, same, unsupported, AResult,
-    IdSet,
+    IdSet, TensorVarExt,
 };
 use super::Ctx;
 use crate::decode::projected_buffer;
@@ -50,7 +50,7 @@ pub struct BackingPlan {
 }
 
 pub struct BufferPlan {
-    pub buffer: TensorVar,
+    pub buffer: Var,
     pub name: String,
     pub backing_index: Option<usize>,
     pub space: MemorySpace,
@@ -65,8 +65,8 @@ impl BufferPlan {
     pub fn view_geometry_changed(&self, rhs: &Self) -> AResult<bool> {
         let left = &self.layout;
         let right = &rhs.layout;
-        let left_layout = self.buffer.buffer_type().layout.clone();
-        let right_layout = rhs.buffer.buffer_type().layout.clone();
+        let left_layout = self.buffer.tensor_type().layout.clone();
+        let right_layout = rhs.buffer.tensor_type().layout.clone();
         let same_layout = match (left_layout, right_layout) {
             (Some(left), Some(right)) => structural_equal(&Any::from(left), &Any::from(right))?,
             (None, None) => true,
@@ -96,9 +96,9 @@ pub struct MemoryPlan {
 }
 
 impl MemoryPlan {
-    pub fn resolve(&self, buffer: &TensorVar) -> AResult<&BufferPlan> {
+    pub fn resolve(&self, buffer: &Var) -> AResult<&BufferPlan> {
         for candidate in &self.buffers {
-            if same(candidate.buffer.as_var(), buffer.as_var()) {
+            if same(candidate.buffer, buffer) {
                 return Ok(candidate);
             }
         }
@@ -127,10 +127,10 @@ pub fn space_of(scope: &str, name: &str) -> AResult<MemorySpace> {
 pub fn referenced_buffers(
     nodes: &[ObjectRef],
     include_tensor_load_sources: bool,
-) -> AResult<Vec<TensorVar>> {
-    let mut referenced: Vec<TensorVar> = Vec::new();
+) -> AResult<Vec<Var>> {
+    let mut referenced: Vec<Var> = Vec::new();
     let mut seen = IdSet::default();
-    let append = |buffer: Option<TensorVar>, seen: &mut IdSet, out: &mut Vec<TensorVar>| {
+    let append = |buffer: Option<Var>, seen: &mut IdSet, out: &mut Vec<Var>| {
         if let Some(buffer) = buffer {
             if seen.add(buffer_ref(&buffer)) {
                 out.push(buffer);
@@ -174,15 +174,15 @@ pub fn bind_map(statements: &[Stmt]) -> Map<Var, Expr> {
 }
 
 /// `math.prod(buffer.shape)`: Python multiplies from the integer 1 upward.
-pub fn shape_product(buffer: &TensorVar) -> AResult<Scalar> {
+pub fn shape_product(buffer: &Var) -> AResult<Scalar> {
     let mut product: Any = int_any(1);
-    for extent in buffer.buffer_type().shape.iter() {
+    for extent in buffer.tensor_type().shape.iter() {
         product = expr_any(&op_binary("_OpMul", product, expr_any(&extent))?);
     }
     Ok(Scalar::Expr(PrimExpr::try_from(product)?))
 }
 
-fn buffer_byte_end_expression(buffer: &TensorVar, info: &LayoutInfo) -> AResult<Scalar> {
+fn buffer_byte_end_expression(buffer: &Var, info: &LayoutInfo) -> AResult<Scalar> {
     if info.element_count.is_some() && info.dynamic_elem_offset.is_none() {
         return Ok(Scalar::Int(info.byte_end()?));
     }
@@ -200,16 +200,16 @@ fn buffer_byte_end_expression(buffer: &TensorVar, info: &LayoutInfo) -> AResult<
 
 struct BackingBuilder {
     key: ObjectRef,
-    parameter: Option<TensorVar>,
-    allocation: Option<TensorVar>,
-    buffers: Vec<(TensorVar, bool)>,
+    parameter: Option<Var>,
+    allocation: Option<Var>,
+    buffers: Vec<(Var, bool)>,
 }
 
-fn append_buffer(builder: &mut BackingBuilder, buffer: &TensorVar, is_parameter: bool) {
+fn append_buffer(builder: &mut BackingBuilder, buffer: &Var, is_parameter: bool) {
     if builder
         .buffers
         .iter()
-        .any(|(candidate, _)| same(candidate.as_var(), buffer.as_var()))
+        .any(|(candidate, _)| same(candidate, buffer))
     {
         return;
     }
@@ -232,8 +232,8 @@ pub(in crate::analyze) fn build_memory_plan(
 ) -> AResult<MemoryPlan> {
     let analyzer = &ctx.analyzer;
     let mut builders: Vec<BackingBuilder> = Vec::new();
-    let mut tmem_buffers: Vec<TensorVar> = Vec::new();
-    let mut dynamic_views: Vec<(TensorVar, Expr, MemorySpace)> = Vec::new();
+    let mut tmem_buffers: Vec<Var> = Vec::new();
+    let mut dynamic_views: Vec<(Var, Expr, MemorySpace)> = Vec::new();
     let referenced = referenced_buffers(nodes, false)?;
     let dynamic_referenced = referenced_buffers(nodes, true)?;
     let mut pool_sizes: Vec<(ObjectRef, i64)> = Vec::new();
@@ -291,7 +291,7 @@ pub(in crate::analyze) fn build_memory_plan(
     let bindings = bind_map(statements);
     let shape_expressions = ShapeExpressionContext::build(analyzer, statements, buffer_bindings)?;
     for parameter in crate::buffer_parameters(func.clone())?.iter() {
-        let buffer = TensorVar::try_from(&parameter)?;
+        let buffer = parameter;
         let key = buffer_bindings.storage_key(&buffer)?;
         match builders.iter_mut().find(|item| same(&item.key, &key)) {
             None => builders.push(BackingBuilder {
@@ -330,7 +330,7 @@ pub(in crate::analyze) fn build_memory_plan(
             }
             if !tmem_buffers
                 .iter()
-                .any(|candidate| same(candidate.as_var(), buffer.as_var()))
+                .any(|candidate| same(candidate, buffer))
             {
                 tmem_buffers.push(buffer.clone());
             }
@@ -373,7 +373,7 @@ pub(in crate::analyze) fn build_memory_plan(
         append_buffer(builder, &buffer, false);
         if is_alloc {
             if let Some(allocation) = &builder.allocation {
-                if !same(allocation.as_var(), buffer.as_var()) {
+                if !same(allocation, buffer) {
                     return unsupported(format!(
                         "buffer:{}:multiple AllocBuffer nodes share one data variable",
                         buffer_name(&buffer)
@@ -404,7 +404,7 @@ pub(in crate::analyze) fn build_memory_plan(
                 buffer_name(builder.allocation.as_ref().unwrap())
             ));
         }
-        let mut infos: Vec<(TensorVar, bool, LayoutInfo, MemorySpace)> = Vec::new();
+        let mut infos: Vec<(Var, bool, LayoutInfo, MemorySpace)> = Vec::new();
         for (buffer, is_parameter) in &builder.buffers {
             let info = ctx.inspect_layout(buffer, &bindings)?;
             let space = space_of(&buffer_scope(buffer), &buffer_name(buffer))?;
@@ -451,13 +451,13 @@ pub(in crate::analyze) fn build_memory_plan(
                 buffer_name(builder.allocation.as_ref().unwrap())
             ));
         }
-        let owner: TensorVar = match parameter {
+        let owner: Var = match parameter {
             Some(parameter) => parameter.clone(),
             None => builder.allocation.clone().unwrap(),
         };
         let owner_info = infos
             .iter()
-            .find(|(buffer, _, _, _)| same(buffer.as_var(), owner.as_var()))
+            .find(|(buffer, _, _, _)| same(buffer, owner))
             .map(|(_, _, info, _)| info.clone())
             .expect("owner layout");
         if owner_info.dynamic_elem_offset.is_some() {
@@ -502,7 +502,7 @@ pub(in crate::analyze) fn build_memory_plan(
             if zero_extent_pool_owner {
                 let mut evidenced: Vec<i64> = Vec::new();
                 for (buffer, _, info, _) in &infos {
-                    if same(buffer.as_var(), owner.as_var()) {
+                    if same(buffer, owner) {
                         continue;
                     }
                     if info.dynamic_elem_offset.is_none() && info.element_count.is_some() {
@@ -531,7 +531,7 @@ pub(in crate::analyze) fn build_memory_plan(
             )?,
         };
         for (buffer, is_parameter, info, _) in &infos {
-            if same(buffer.as_var(), owner.as_var()) {
+            if same(buffer, owner) {
                 continue;
             }
             if info.dynamic_elem_offset.is_some() {
@@ -580,7 +580,7 @@ pub(in crate::analyze) fn build_memory_plan(
             if view_start < owner_start || view_end > end {
                 if !referenced
                     .iter()
-                    .any(|candidate| same(candidate.as_var(), buffer.as_var()))
+                    .any(|candidate| same(candidate, buffer))
                 {
                     continue;
                 }
@@ -591,7 +591,7 @@ pub(in crate::analyze) fn build_memory_plan(
                 ));
             }
         }
-        let owner_alignment = i64::from(owner.buffer_type().data_alignment);
+        let owner_alignment = i64::from(owner.tensor_type().data_alignment);
         backing_plans.push(BackingPlan {
             index,
             field: format!("backing_{index}"),
@@ -629,7 +629,7 @@ pub(in crate::analyze) fn build_memory_plan(
     }
 
     if !tmem_buffers.is_empty() {
-        let mut infos: Vec<(TensorVar, LayoutInfo)> = Vec::new();
+        let mut infos: Vec<(Var, LayoutInfo)> = Vec::new();
         for buffer in &tmem_buffers {
             infos.push((buffer.clone(), ctx.inspect_layout(buffer, &bindings)?));
         }
@@ -683,7 +683,7 @@ pub(in crate::analyze) fn build_memory_plan(
         let info = ctx.inspect_layout(&buffer, &bindings)?;
         let referenced_view = dynamic_referenced
             .iter()
-            .any(|candidate| same(candidate.as_var(), buffer.as_var()));
+            .any(|candidate| same(candidate, buffer));
         buffer_plans.push(BufferPlan {
             buffer: buffer.clone(),
             name: buffer_name(&buffer),

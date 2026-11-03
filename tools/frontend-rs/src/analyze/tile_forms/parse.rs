@@ -5,10 +5,11 @@ use crate::tvm_compat::int_value;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::TensorRegionObj;
-use tvm_tirx::ir::{FloatImm, FloatImmObj, IntImm, IntImmObj, PrimExpr, Range};
-use tvm_tirx::tirx::{TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::ir::{FloatImm, FloatImmObj, IntImm, IntImmObj, PrimExpr, Range, Var};
+use tvm_tirx::tirx::TilePrimitiveCallObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString, TypeIndex};
+use crate::analyze::util::{oref, tensor_var};
 
 use super::super::layout::expr_any;
 use super::super::util::{
@@ -215,7 +216,7 @@ pub(super) fn literal_float(value: &Any, field: &str) -> AResult<f64> {
 // Operands and common checks.
 // ----------------------------------------------------------------------
 
-fn memory_scope(buffer: &TensorVar) -> String {
+fn memory_scope(buffer: &Var) -> String {
     let scope = buffer_scope(buffer);
     if scope.starts_with("shared") {
         "shared".to_owned()
@@ -244,7 +245,7 @@ pub(super) fn operand(analyzer: &Analyzer, value: &Any, role: &str) -> AResult<T
                         &extents
                     ));
                 }
-                let buffer = TensorVar::try_from(region.source.clone())?;
+                let buffer = tensor_var(&oref(region.source.clone()))?;
                 return Ok(TileOperand::Region(TileRegion {
                     dtype: buffer_dtype(&buffer),
                     memory_scope: memory_scope(&buffer),

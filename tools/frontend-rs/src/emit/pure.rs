@@ -744,7 +744,7 @@ impl<'a> Emitter<'a> {
     /// `emit_buffer_address`.
     pub fn emit_buffer_address(
         &mut self,
-        buffer: &tvm_tirx::tirx::TensorVar,
+        buffer: &tvm_tirx::ir::Var,
         indices: &[PrimExpr],
     ) -> AResult<RustValue> {
         if self.memory_plan.resolve(buffer)?.space == MemorySpace::Tmem {

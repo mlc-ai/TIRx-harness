@@ -8,8 +8,8 @@ mod numeric;
 mod parse;
 mod tcgen_layout;
 
-use tvm_tirx::ir::PrimExpr;
-use tvm_tirx::tirx::{TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::ir::{PrimExpr, Var};
+use tvm_tirx::tirx::TilePrimitiveCallObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
 
@@ -127,7 +127,7 @@ impl TileOpKind {
 /// `TileRegion`.
 #[derive(Clone)]
 pub struct TileRegion {
-    pub buffer: TensorVar,
+    pub buffer: Var,
     pub mins: Vec<PrimExpr>,
     pub extents: Vec<i64>,
     pub dtype: String,

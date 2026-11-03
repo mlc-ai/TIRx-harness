@@ -1,13 +1,16 @@
 //! Statement and buffer-access emission.
 
-use tvm_tirx::ir::{IntImmObj, PrimExpr, PtrTypeObj};
+use tvm_tirx::ir::{IntImmObj, PrimExpr, PtrTypeObj, Var};
 use tvm_tirx::ir::prim::RampObj;
 use tvm_tirx::ir::{
     AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, ReturnObj,
     SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
 };
 use tvm_tirx::tirx::{
-    AttrStmtObj, DeclBufferObj, ScopeIdDefStmtObj, TensorVar, TilePrimitiveCallObj,
+    AttrStmtObj,
+    DeclBufferObj,
+    ScopeIdDefStmtObj,
+    TilePrimitiveCallObj,
 };
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
@@ -89,9 +92,9 @@ impl<'a> Emitter<'a> {
     // Buffer references.
     // ------------------------------------------------------------------
 
-    pub fn buffer_ref(&mut self, buffer: &TensorVar) -> AResult<String> {
+    pub fn buffer_ref(&mut self, buffer: &Var) -> AResult<String> {
         for (candidate, reference) in self.dynamic_buffers.clone().iter().rev() {
-            if same(candidate.as_var(), buffer.as_var()) {
+            if same(candidate, buffer) {
                 self.record_dynamic_buffer_use(reference);
                 return Ok(reference.clone());
             }
@@ -128,12 +131,12 @@ impl<'a> Emitter<'a> {
         )
     }
 
-    fn ordinary_logical_view_root(&self, buffer: &TensorVar) -> AResult<TensorVar> {
+    fn ordinary_logical_view_root(&self, buffer: &Var) -> AResult<Var> {
         let mut current = buffer.clone();
-        let mut seen: Vec<TensorVar> = Vec::new();
+        let mut seen: Vec<Var> = Vec::new();
         while !seen
             .iter()
-            .any(|candidate| same(candidate.as_var(), current.as_var()))
+            .any(|candidate| same(candidate, current))
         {
             seen.push(current.clone());
             let data = self.buffer_bindings.declared_data(&current);
@@ -168,9 +171,9 @@ impl<'a> Emitter<'a> {
     }
 
     /// `logical_buffer_name`: one checker identity for a physical view.
-    pub fn logical_buffer_name(&mut self, buffer: &TensorVar) -> AResult<String> {
+    pub fn logical_buffer_name(&mut self, buffer: &Var) -> AResult<String> {
         for (candidate, name) in &self.logical_buffer_name_cache {
-            if same(candidate.as_var(), buffer.as_var()) {
+            if same(candidate, buffer) {
                 return Ok(name.clone());
             }
         }
@@ -458,7 +461,7 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_index(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
     ) -> AResult<RustValue> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -476,7 +479,7 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_access_mask(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         base_mask: &str,
     ) -> AResult<String> {
@@ -517,7 +520,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         access_mask: Option<String>,
         register_access_mask: Option<String>,
@@ -717,7 +720,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_contiguous_vector_load(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         result_dtype: &str,
         access_mask: Option<String>,
@@ -1138,7 +1141,7 @@ impl<'a> Emitter<'a> {
         let variables: Vec<tvm_tirx::ir::Var> = definition
             .def_ids
             .iter()
-            .map(|variable| variable.as_var().clone())
+            .map(|variable| variable.clone())
             .collect();
         let mut extents: Vec<Option<i64>> = Vec::new();
         if variables.len() == 1 {
@@ -1250,7 +1253,7 @@ impl<'a> Emitter<'a> {
             return not_covered("thread_extent without an IterVar node");
         };
         let thread_tag = ffi_text(&iteration.thread_tag()?);
-        let variable = iteration.var()?.as_var().clone();
+        let variable = iteration.var()?.clone();
         let dtype = prim_dtype(&variable.ty).map(dtype_text).unwrap_or_default();
         if dtype != "int32" {
             return unsupported(format!(
@@ -1557,7 +1560,7 @@ impl<'a> Emitter<'a> {
             let value = self.emit_expr(&oref(step_expr.clone()))?;
             step = self.as_i64(value)?;
         }
-        let loop_var = loop_stmt.loop_var.as_var().clone();
+        let loop_var = loop_stmt.loop_var.clone();
         let loop_var_ref = oref(loop_var.clone());
         let loop_dtype = prim_dtype(&loop_var.ty).map(dtype_text).unwrap_or_default();
         let loop_rust_type = stmt_rust_scalar_by_dtype(&loop_dtype);

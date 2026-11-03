@@ -77,7 +77,7 @@ pub struct PredicatedRegion {
 
 impl<'a> Emitter<'a> {
     /// Reuse the resolved physical view at the point its store is lowered.
-    pub fn record_global_write(&mut self, buffer: &tvm_tirx::tirx::TensorVar) -> AResult<()> {
+    pub fn record_global_write(&mut self, buffer: &tvm_tirx::ir::Var) -> AResult<()> {
         if self.written_global_buffers.is_none() {
             return Ok(());
         }

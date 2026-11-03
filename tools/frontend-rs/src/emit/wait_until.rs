@@ -14,7 +14,7 @@ use super::{abi, Emitter, RustValue, Uniformity};
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
     as_buffer, buffer_name, buffer_scope, dtype_of, dtype_text, expr_type, kind_or_bail, oref,
-    prim_dtype, same, static_int, static_string, unsupported, AResult,
+    prim_dtype, same, static_int, static_string, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::ptx::{decode_call, DecodedPtx};
 use crate::decode::Decoded;
@@ -84,7 +84,7 @@ fn raw_load(spelling: &str, operands: &[ObjectRef]) -> AResult<DecodedPtx> {
 }
 
 struct FrozenBuffer {
-    source: tvm_tirx::tirx::TensorVar,
+    source: tvm_tirx::ir::Var,
     shape: Vec<i64>,
     values: Vec<Option<String>>,
 }
@@ -158,12 +158,12 @@ impl<'a, 'b> Predicate<'a, 'b> {
         Ok(false)
     }
 
-    fn destination_coordinates(&self, source: &tvm_tirx::tirx::TensorVar) -> AResult<Option<Vec<i64>>> {
+    fn destination_coordinates(&self, source: &tvm_tirx::ir::Var) -> AResult<Option<Vec<i64>>> {
         let destination = self
             .destination
             .as_node::<TensorLoadObj>()
             .expect("wait destination was validated as TensorLoad");
-        if !same(source.as_var(), &destination.source) {
+        if !same(source, &destination.source) {
             return Ok(None);
         }
         let mut coordinates = Vec::new();
@@ -181,19 +181,19 @@ impl<'a, 'b> Predicate<'a, 'b> {
 
     fn capture_buffer(
         &mut self,
-        source: &tvm_tirx::tirx::TensorVar,
+        source: &tvm_tirx::ir::Var,
     ) -> AResult<(Vec<i64>, Vec<Option<String>>)> {
         if let Some(captured) = self
             .frozen_buffers
             .iter()
-            .find(|captured| same(captured.source.as_var(), source.as_var()))
+            .find(|captured| same(captured.source, source))
         {
             return Ok((captured.shape.clone(), captured.values.clone()));
         }
 
         let mut shape = Vec::new();
         let mut element_count = 1_i64;
-        for dimension in source.buffer_type().shape.iter() {
+        for dimension in source.tensor_type().shape.iter() {
             let extent = static_int(
                 &self.emitter.ctx.analyzer,
                 &dimension,

@@ -20,7 +20,7 @@ use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::StringImmObj;
 use tvm_tirx::ir::{Call, Expr, IntImm, Op, PrimExpr, Var};
 use tvm_tirx::ir::Stmt;
-use tvm_tirx::tirx::{AttrStmtObj, Function, Layout, TensorVar};
+use tvm_tirx::tirx::{AttrStmtObj, Function, Layout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     structural_map, structural_visit, tvm_ffi_dll_export_typed_func, Any, Array, Error, Map,
@@ -79,8 +79,7 @@ pub(crate) fn buffer_parameters(func: Function) -> Result<Array<Var>> {
     Ok(Array::new(
         func.params
             .iter()
-            .filter_map(|parameter| TensorVar::try_from(parameter).ok())
-            .map(|buffer| buffer.as_var().clone())
+            .filter(|parameter| analyze::util::is_tensor_var(parameter))
             .collect::<Vec<_>>(),
     ))
 }

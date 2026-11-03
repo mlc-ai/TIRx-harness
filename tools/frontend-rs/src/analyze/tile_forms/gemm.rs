@@ -4,6 +4,7 @@ use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::PrimExpr;
 use tvm_tirx::tirx::{TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::ObjectRefCast;
+use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary};
 use super::super::util::{ffi_error, oref, repr_text, unsupported, AResult, Failure};
@@ -58,7 +59,7 @@ fn validate_m16n8_fragment_layout(
     transpose_storage: bool,
 ) -> AResult<()> {
     let analyzer = Analyzer::new();
-    let Some(layout) = region.buffer.buffer_type().layout.clone() else {
+    let Some(layout) = region.buffer.tensor_type().layout.clone() else {
         return Err(Failure::Ffi(ffi_error(
             "'NoneType' object has no attribute 'canonicalize'",
         )));

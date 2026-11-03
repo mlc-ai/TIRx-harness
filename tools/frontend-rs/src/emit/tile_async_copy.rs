@@ -6,11 +6,12 @@ use std::mem;
 
 use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
-use tvm_tirx::ir::{CallObj, IntImm, PrimExpr, PrimType, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, IntImm, PrimExpr, PrimType, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{And, Cast, CastObj, LetObj, NotObj, Select, SelectObj};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{expr_any, op_binary};
 use super::super::analyze::memory::MemorySpace;
@@ -72,7 +73,7 @@ fn v2_reduction(name: &str) -> Option<&'static str> {
 impl<'a> Emitter<'a> {
     pub fn implicit_source_op_id(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         source_op_id: i64,
     ) -> AResult<Option<i64>> {
         let space = self.memory_plan.resolve(buffer)?.space;
@@ -302,7 +303,7 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load_at_lane(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         execution_lane: &str,
         access_mask: Option<String>,
@@ -345,7 +346,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn physical_index_at_lane(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -369,7 +370,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn physical_access_predicate_at_lane(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         lane: &str,
         buffer_load: Option<NestedLoadSite>,
@@ -399,7 +400,7 @@ impl<'a> Emitter<'a> {
 
     pub(super) fn tmem_coordinates_at_lane(
         &mut self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
         execution_lane: &str,
         source_op_id: Option<i64>,
@@ -602,7 +603,7 @@ impl<'e, 'a> AsyncCopyEmitter<'e, 'a> {
         force_all_axes: bool,
     ) -> AResult<PrimExpr> {
         let analyzer = Analyzer::new();
-        let buffer_shape: Vec<PrimExpr> = region.buffer.buffer_type().shape.iter().collect();
+        let buffer_shape: Vec<PrimExpr> = region.buffer.tensor_type().shape.iter().collect();
         let mut predicate: Option<PrimExpr> = None;
         for axis in 0..region.mins.len() {
             let minimum = &region.mins[axis];

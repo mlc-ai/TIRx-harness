@@ -3,7 +3,7 @@
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{Expr, PrimExpr, TensorLoad, TensorLoadObj, Var};
 use tvm_tirx::ir::{BindObj, ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
 
@@ -11,6 +11,7 @@ use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
 use super::util::{
     as_buffer, buffer_scope, ident, int_imm_expr, oref, simplify, unsupported, AResult, IdSet,
+    TensorVarExt,
 };
 
 pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
@@ -57,7 +58,7 @@ impl Scalar {
 
 pub struct ShapeExpressionContext {
     pub bindings: Vec<(Var, Expr)>,
-    pub scalar_initializers: Vec<(TensorVar, Expr)>,
+    pub scalar_initializers: Vec<(Var, Expr)>,
 }
 
 impl ShapeExpressionContext {
@@ -85,7 +86,7 @@ impl ShapeExpressionContext {
                 }
             }
         }
-        let stores: Vec<(ObjectRef, TensorVar, Vec<PrimExpr>, PrimExpr)> = statements
+        let stores: Vec<(ObjectRef, Var, Vec<PrimExpr>, PrimExpr)> = statements
             .iter()
             .filter_map(|statement| {
                 statement.as_node::<TensorStoreObj>().map(|store| {
@@ -107,7 +108,7 @@ impl ShapeExpressionContext {
             if !["local", "local_scalar", "register", "reg"].contains(&scope.as_str()) {
                 continue;
             }
-            let shape: Vec<PrimExpr> = buffer.buffer_type().shape.iter().collect();
+            let shape: Vec<PrimExpr> = buffer.tensor_type().shape.iter().collect();
             if shape.len() != 1 {
                 continue;
             }

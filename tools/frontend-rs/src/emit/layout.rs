@@ -1,9 +1,10 @@
 //! Generation-side layout helpers: physical element offsets and owner
 //! coordinates.
 
-use tvm_tirx::ir::{IntImm, PrimExpr};
-use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::ir::{IntImm, PrimExpr, Var};
+
 use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{buffer_layout, expr_any, int_any, layout_signature, op_binary};
 use super::super::analyze::util::{buffer_name, ffi_text, unsupported, AResult};
@@ -12,14 +13,14 @@ use super::Emitter;
 impl<'a> Emitter<'a> {
     fn mapped_axes(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
     ) -> AResult<Vec<(String, PrimExpr)>> {
         let layout = buffer_layout(buffer)?;
         let coordinates = Array::new(indices.to_vec());
         let mapped: Map<FfiString, PrimExpr> = layout
             .canonicalize()?
-            .apply_with_shape(&coordinates, &buffer.buffer_type().shape)?;
+            .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
         let mut axes: Vec<(String, PrimExpr)> = mapped
             .iter()
             .map(|(axis, value)| (ffi_text(&axis), value))
@@ -28,7 +29,7 @@ impl<'a> Emitter<'a> {
         Ok(axes)
     }
 
-    fn check_index_count(&self, buffer: &TensorVar, indices: &[PrimExpr]) -> AResult<()> {
+    fn check_index_count(&self, buffer: &Var, indices: &[PrimExpr]) -> AResult<()> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         if indices.len() != info.shape.len() {
             return unsupported(format!(
@@ -44,7 +45,7 @@ impl<'a> Emitter<'a> {
     /// `physical_element_offset`.
     pub fn physical_element_offset(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
     ) -> AResult<PrimExpr> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -63,7 +64,7 @@ impl<'a> Emitter<'a> {
                 .iter()
                 .any(|axis| axis != "m" && !self.ctx.schema.register_owner_axes.contains(axis))
             {
-                let layout = buffer.buffer_type().layout.clone().expect("layout");
+                let layout = buffer.tensor_type().layout.clone().expect("layout");
                 return unsupported(format!(
                     "buffer:{}:layout maps to unsupported axes {:?}: {}",
                     buffer_name(buffer),
@@ -92,7 +93,7 @@ impl<'a> Emitter<'a> {
     /// `physical_owner_coordinates`: `(axis, expression)` sorted by axis.
     pub fn physical_owner_coordinates(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         indices: &[PrimExpr],
     ) -> AResult<Vec<(String, PrimExpr)>> {
         self.check_index_count(buffer, indices)?;
@@ -103,7 +104,7 @@ impl<'a> Emitter<'a> {
             .filter(|axis| axis != "m" && !self.ctx.schema.register_owner_axes.contains(axis))
             .collect();
         if !unsupported_axes.is_empty() {
-            let layout = buffer.buffer_type().layout.clone().expect("layout");
+            let layout = buffer.tensor_type().layout.clone().expect("layout");
             return unsupported(format!(
                 "buffer:{}:layout maps to unsupported owner axes {:?}: {}",
                 buffer_name(buffer),

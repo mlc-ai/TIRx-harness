@@ -8,8 +8,8 @@ use crate::analyze::buffers::call_op_name;
 use crate::analyze::frontend::KernelPlan;
 use crate::analyze::util::json_object;
 use crate::analyze::util::{
-    as_var, dtype_of, ffi_error, ffi_text, int_imm, not_covered, oref, repr_text, same,
-    sorted_unique, unsupported, upper_first, AResult, Failure, Json,
+    as_var, dtype_of, ffi_error, ffi_text, int_imm, is_tensor_var, not_covered, oref, repr_text,
+    same, sorted_unique, unsupported, upper_first, AResult, Failure, Json,
 };
 use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
@@ -22,7 +22,7 @@ use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, phase_binding_name};
 use tvm_tirx::ir::{Call, CallObj, Expr, Op, PrimType, PtrTypeObj, Var};
 use tvm_tirx::ir::prim::SelectObj;
-use tvm_tirx::tirx::{Function, TensorVar};
+use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCore, String as FfiString};
 
@@ -1342,7 +1342,7 @@ pub fn scalar_parameters(func: &Function) -> Vec<Var> {
     func.params
         .iter()
         .filter(|parameter| {
-            TensorVar::try_from(parameter).is_err()
+            !is_tensor_var(parameter)
                 && parameter.ty.as_node::<PtrTypeObj>().is_none()
         })
         .collect()

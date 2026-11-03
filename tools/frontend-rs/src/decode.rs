@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use tvm_tirx::ir::{CallObj, Var};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -160,7 +160,7 @@ impl Cache {
 }
 
 /// The typed buffer behind `tirx.buffer_data`.
-pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<TensorVar>> {
+pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<Var>> {
     let Some(call) = node.as_node::<CallObj>() else {
         return Ok(None);
     };

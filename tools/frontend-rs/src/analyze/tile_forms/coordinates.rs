@@ -4,6 +4,7 @@ use tvm_tirx::ir::Location;
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{PrimExpr, Var};
 use tvm_tirx::tvm_ffi::{self as tvm_ffi, Any, Array, Map, String as FfiString};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary};
 use super::super::util::{ffi_error, ffi_text, oref, prim, repr_text, unsupported, AResult};
@@ -190,7 +191,7 @@ pub(super) fn physical_layout_coordinates_at(
         .collect::<AResult<Vec<_>>>()?
         .join(", ");
     let indices = logical_region_indices_at(region, coordinates)?;
-    let buffer_type = region.buffer.buffer_type();
+    let buffer_type = region.buffer.tensor_type();
     let mapped = (|| -> tvm_ffi::Result<Map<FfiString, PrimExpr>> {
         let Some(layout) = buffer_type.layout.clone() else {
             return Err(ffi_error(

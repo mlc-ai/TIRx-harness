@@ -3,6 +3,7 @@
 use crate::analyze::util::{
     as_buffer, capitalize, dtype_of, ffi_error, int_imm_expr, not_covered, oref, prim, repr_text,
     same, simplify, static_int, static_string, unmodeled, unsupported, AResult, Failure,
+    TensorVarExt,
 };
 use crate::analyze::Ctx;
 use crate::decode::projected_buffer;
@@ -14,8 +15,8 @@ use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, v2_memory_type_rust, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm_tirx::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, VarObj};
-use tvm_tirx::tirx::TensorVar;
+use tvm_tirx::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, Var, VarObj};
+
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
@@ -895,9 +896,9 @@ impl<'a> Emitter<'a> {
     }
 
     /// `kernel.emit_buffer_address(buffer, zeros)`.
-    fn matrix_buffer_base_address(&mut self, buffer: &TensorVar) -> AResult<String> {
+    fn matrix_buffer_base_address(&mut self, buffer: &Var) -> AResult<String> {
         let mut zeros: Vec<PrimExpr> = Vec::new();
-        for _ in buffer.buffer_type().shape.iter() {
+        for _ in buffer.tensor_type().shape.iter() {
             zeros.push(IntImm::new("int32", 0).into());
         }
         Ok(self.emit_buffer_address(buffer, &zeros)?.code)

@@ -8,6 +8,7 @@ use tvm_tirx::tirx::{Layout, TileLayout, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
 };
+use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{axis_name, expr_any};
 use super::super::util::{unsupported, AResult};
@@ -490,7 +491,7 @@ pub(super) fn resolve_elementwise(
 }
 
 fn thread_owner_axes(region: &TileRegion) -> AResult<Vec<String>> {
-    let Some(layout) = region.buffer.buffer_type().layout.clone() else {
+    let Some(layout) = region.buffer.tensor_type().layout.clone() else {
         return Ok(Vec::new());
     };
     if layout.clone().try_cast::<TileLayout>().is_err() {
@@ -655,13 +656,13 @@ pub(super) fn resolve_reduction(
     if implicit_collective {
         let source_layout = source
             .buffer
-            .buffer_type()
+            .tensor_type()
             .layout
             .clone()
             .and_then(|layout| layout.try_cast::<TileLayout>().ok());
         let destination_layout = destination
             .buffer
-            .buffer_type()
+            .tensor_type()
             .layout
             .clone()
             .and_then(|layout| layout.try_cast::<TileLayout>().ok());

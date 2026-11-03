@@ -41,24 +41,24 @@ fn buffer_bindings_preserve_identities_and_last_declaration() {
         Stmt::from(DeclBuffer::new(&alias, second_data.clone()).unwrap()),
     ];
     let func = tvm_tirx::tirx::Function::new(
-        vec![first.as_var().clone(), scalar, second.as_var().clone()],
+        vec![first.clone(), scalar, second.clone()],
         SeqStmt::new(declarations.clone(), Location::unknown()).unwrap(),
     )
     .unwrap();
     let before = save(func.clone().into());
     let parameters = crate::buffer_parameters(func.clone()).unwrap();
     assert_eq!(parameters.len(), 2);
-    assert!(same(&parameters.get(0).unwrap(), first.as_var()));
-    assert!(same(&parameters.get(1).unwrap(), second.as_var()));
+    assert!(same(&parameters.get(0).unwrap(), first));
+    assert!(same(&parameters.get(1).unwrap(), second));
     let bindings = BufferBindings::build(&declarations).unwrap();
     assert_eq!(bindings.declarations.len(), 2);
     for ((buffer, data), expected) in bindings.declarations.iter().zip([first_data, second_data]) {
-        assert!(same(buffer.as_var(), alias.as_var()));
+        assert!(same(buffer, alias));
         assert!(same(data, &expected));
     }
     assert!(same(
         &bindings.storage_key(&alias).unwrap(),
-        second.as_var()
+        second
     ));
     assert!(!bindings.same_storage(&first, &alias).unwrap());
     assert_eq!(save(func.into()), before);
@@ -87,7 +87,7 @@ fn cyclic_buffer_bindings_keep_each_starting_identity() {
     for buffer in [&first, &second, &first] {
         assert!(same(
             &bindings.storage_key(buffer).unwrap(),
-            buffer.as_var()
+            buffer
         ));
     }
 }

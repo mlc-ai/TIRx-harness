@@ -4,9 +4,10 @@
 //! attempts and restore points keep their order.
 
 use tvm_tirx::ir::{Expr, Var};
-use tvm_tirx::tirx::{Function, TensorVar};
+use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use crate::analyze::util::TensorVarExt;
 
 pub mod abi;
 pub mod async_copy;
@@ -271,7 +272,7 @@ pub struct Emitter<'a> {
     pub threads_per_warpgroup: i64,
     pub scalars: Vec<ScalarCode>,
     pub pointers: Vec<PointerCode>,
-    pub buffers: Vec<(TensorVar, BufferCode)>,
+    pub buffers: Vec<(Var, BufferCode)>,
     pub shape_vars: Vec<ShapeVarCode>,
     pub lines: Vec<String>,
     pub indent: usize,
@@ -300,8 +301,8 @@ pub struct Emitter<'a> {
     pub outer_loop_live_split_permissions: Vec<bool>,
     pub nested_for_statement_split_permissions: Vec<bool>,
     pub capturing_for_statements: IdSet,
-    pub dynamic_buffers: Vec<(TensorVar, String)>,
-    pub logical_buffer_name_cache: Vec<(TensorVar, String)>,
+    pub dynamic_buffers: Vec<(Var, String)>,
+    pub logical_buffer_name_cache: Vec<(Var, String)>,
     pub loop_transfer_cache: IdMap<bool>,
     pub subtree_may_suspend_cache: IdMap<bool>,
     pub failed_inner_uniform_if_splits: IdSet,
@@ -405,7 +406,7 @@ impl<'a> Emitter<'a> {
                 dtype: entry.dtype.clone(),
             });
         }
-        let mut buffers: Vec<(TensorVar, BufferCode)> = Vec::new();
+        let mut buffers: Vec<(Var, BufferCode)> = Vec::new();
         let mut next_buffer_storage_index = 0;
         for (index, plan) in memory_plan.buffers.iter().enumerate() {
             let mut shape = Vec::new();
@@ -455,7 +456,7 @@ impl<'a> Emitter<'a> {
                 let Some(variable) = super::analyze::util::as_var(&extent_ref) else {
                     continue;
                 };
-                let axis_extent = buffer.buffer_type().shape.get(axis)?;
+                let axis_extent = buffer.tensor_type().shape.get(axis)?;
                 let dtype = prim_dtype(&axis_extent.ty)
                     .map(dtype_text)
                     .unwrap_or_default();
@@ -697,9 +698,9 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    pub fn buffer_code(&self, buffer: &TensorVar) -> AResult<&BufferCode> {
+    pub fn buffer_code(&self, buffer: &Var) -> AResult<&BufferCode> {
         for (candidate, code) in &self.buffers {
-            if super::analyze::util::same(candidate.as_var(), buffer.as_var()) {
+            if super::analyze::util::same(candidate, buffer) {
                 return Ok(code);
             }
         }
@@ -726,11 +727,11 @@ impl<'a> Emitter<'a> {
     }
 
     /// The variable scope state restored on exit.
-    pub fn scope_snapshot(&self) -> (Variables, Vec<(TensorVar, String)>) {
+    pub fn scope_snapshot(&self) -> (Variables, Vec<(Var, String)>) {
         (self.variables.clone(), self.dynamic_buffers.clone())
     }
 
-    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(TensorVar, String)>)) {
+    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(Var, String)>)) {
         self.variables = snapshot.0;
         self.dynamic_buffers = snapshot.1;
     }

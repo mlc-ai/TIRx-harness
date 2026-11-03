@@ -1,12 +1,12 @@
 //! `analyze_primfunc` producing the kernel manifest and its source nodes.
 
-use crate::analyze::util::{json_object, json_strings};
+use crate::analyze::util::{is_tensor_var, json_object, json_strings, TensorVarExt};
 use tvm_tirx::ir::Location;
 use tvm_tirx::ir::StringImm;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{CastObj, RampObj, ShuffleObj};
 use tvm_tirx::ir::{Evaluate, ForObj, IfObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj};
-use tvm_tirx::tirx::{AttrStmtObj, Function, TensorVar, TilePrimitiveCallObj};
+use tvm_tirx::tirx::{AttrStmtObj, Function, TilePrimitiveCallObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiString, WalkOrder};
 
@@ -28,7 +28,7 @@ use crate::emit::raw_tma::TensorMapParameter;
 const RAW_TENSOR_MAP_REGISTRY_REQUIREMENT: &str = "raw_tensor_map_registry";
 pub use crate::emit::sync::EXTERNAL_GRID_DEPENDENCY_REQUIREMENT;
 
-fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &TensorVar) -> bool {
+fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &Var) -> bool {
     let dtype = buffer_dtype(buffer);
     if ctx.schema.is_supported_buffer_dtype_name(&dtype) {
         return true;
@@ -37,7 +37,7 @@ fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &TensorVar) -> bool {
         return false;
     }
     let scope = buffer_scope(buffer);
-    let shape: Vec<_> = buffer.buffer_type().shape.iter().collect();
+    let shape: Vec<_> = buffer.tensor_type().shape.iter().collect();
     ["local", "local_scalar", "register", "reg"].contains(&scope.as_str())
         && shape.len() == 1
         && super::util::int_imm_expr(&shape[0]) == Some(1)
@@ -166,6 +166,7 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
         .iter()
         .collect();
     let buffer_bindings = BufferBindings::build(&statements)?;
+    ctx.record_tmem_addresses(&buffer_bindings);
     let params: Vec<Var> = func.params.iter().collect();
 
     let mut facts = KernelFacts::default();
@@ -505,8 +506,8 @@ fn buffer_entries(
     let mut buffers: Vec<Json> = Vec::new();
     let mut buffer_names: Vec<String> = Vec::new();
     for parameter in crate::buffer_parameters(func.clone())?.iter() {
-        let buffer = TensorVar::try_from(&parameter)?;
-        let buffer_type = buffer.buffer_type();
+        let buffer = parameter;
+        let buffer_type = buffer.tensor_type();
         let name = buffer_name(&buffer);
         buffer_names.push(name.clone());
         let mut shape_texts = Vec::new();
@@ -524,10 +525,8 @@ fn buffer_entries(
             ("shape", json_strings(shape_texts.iter().cloned())),
             ("dtype", Json::String(dtype.clone())),
             ("scope", Json::String(buffer_scope(&buffer))),
-            (
-                "elem_offset",
-                Json::String(repr_of(&buffer_type.elem_offset)?),
-            ),
+            // A TensorType has no element offset; its layout carries any offset.
+            ("elem_offset", Json::String("0".to_owned())),
             ("layout", Json::String(layout)),
         ]));
         if !ctx.schema.is_supported_buffer_dtype_name(&dtype) || shape_texts.is_empty() {
@@ -554,7 +553,7 @@ fn scalar_and_pointer_entries(
     let mut scalar_specs: Vec<ParameterSpec> = Vec::new();
     let mut pointer_specs: Vec<ParameterSpec> = Vec::new();
     for (index, parameter) in params.iter().enumerate() {
-        if TensorVar::try_from(parameter).is_ok() {
+        if is_tensor_var(parameter) {
             continue;
         }
         if let Some(pointer) = parameter.ty.as_node::<PtrTypeObj>() {

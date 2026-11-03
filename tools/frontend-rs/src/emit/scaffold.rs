@@ -117,7 +117,7 @@ pub struct Checkpoint {
     raw_tcgen: super::raw_tcgen::State,
     variables: Variables,
     dynamic_buffers_len: usize,
-    dynamic_buffers: Vec<(tvm_tirx::tirx::TensorVar, String)>,
+    dynamic_buffers: Vec<(tvm_tirx::ir::Var, String)>,
     split_effects: Vec<SplitEffects>,
     recorded_store_count: usize,
 }

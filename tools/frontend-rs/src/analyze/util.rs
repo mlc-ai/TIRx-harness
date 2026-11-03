@@ -23,13 +23,18 @@ use tvm_tirx::ir::{
     SeqStmtObj, StmtObj, TensorStoreObj, WhileObj,
 };
 use tvm_tirx::tirx::{
-    AllocBufferObj, AttrStmtObj, DeclBufferObj, ScopeIdDefStmtObj, TensorTypeObj, TensorVar,
+    AllocBufferObj,
+    AttrStmtObj,
+    DeclBufferObj,
+    ScopeIdDefStmtObj,
+    TensorTypeObj,
     TilePrimitiveCallObj,
 };
+use tvm_tirx::runtime::{MemoryScope, MemoryScopeObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
-    self, Any, AnyView, DLDataType, DLDataTypeExt, Error, ObjectIdentity, ObjectRefCast,
-    ObjectRefCore, String as FfiString,
+    self, Any, AnyView, DLDataType, DLDataTypeExt, Error, FieldGetter, ObjectCore, ObjectIdentity,
+    ObjectRefCast, ObjectRefCore, String as FfiString,
 };
 
 /// Failure of one native analysis.
@@ -372,25 +377,62 @@ pub fn as_var(node: &ObjectRef) -> Option<Var> {
     node.clone().try_cast::<Var>().ok()
 }
 
-pub fn as_buffer(node: &ObjectRef) -> Option<TensorVar> {
-    let var = as_var(node)?;
-    TensorVar::try_from(&var).ok()
+/// Tensor accessors of a `Var` whose type is a `TensorType` (C++ `tirx::TensorVar`).
+pub trait TensorVarExt {
+    /// The tensor type; panics on a variable of another type.
+    fn tensor_type(&self) -> &TensorTypeObj;
 }
 
-pub fn buffer_name(buffer: &TensorVar) -> String {
-    ffi_text(&buffer.as_var().name)
+impl TensorVarExt for Var {
+    fn tensor_type(&self) -> &TensorTypeObj {
+        self.ty
+            .as_node::<TensorTypeObj>()
+            .expect("tensor variable type invariant was violated")
+    }
 }
 
-pub fn buffer_dtype(buffer: &TensorVar) -> String {
-    dtype_text(buffer.buffer_type().dtype.dtype)
+/// Whether `var` is a tensor variable: a `Var` whose type is a `TensorType`.
+pub fn is_tensor_var(var: &Var) -> bool {
+    var.ty.as_node::<TensorTypeObj>().is_some()
 }
 
-pub fn buffer_scope(buffer: &TensorVar) -> String {
-    ffi_text(&buffer.buffer_type().storage_scope)
+pub fn as_buffer(node: &ObjectRef) -> Option<Var> {
+    as_var(node).filter(is_tensor_var)
 }
 
-pub fn buffer_ref(buffer: &TensorVar) -> ObjectRef {
-    oref(buffer.as_var().clone())
+/// `node` as a tensor variable, or a type error.
+pub fn tensor_var(node: &ObjectRef) -> AResult<Var> {
+    as_buffer(node).ok_or_else(|| {
+        Failure::Ffi(Error::new(
+            tvm_ffi::TYPE_ERROR,
+            "expected a Var whose type is a TensorType",
+            "",
+        ))
+    })
+}
+
+pub fn buffer_name(buffer: &Var) -> String {
+    ffi_text(&buffer.name)
+}
+
+pub fn buffer_dtype(buffer: &Var) -> String {
+    dtype_text(buffer.tensor_type().dtype.dtype)
+}
+
+pub fn buffer_scope(buffer: &Var) -> String {
+    scope_name(&buffer.tensor_type().scope)
+}
+
+/// The name of a memory scope, such as `shared` or `tmem` (Python `MemoryScope.name`).
+pub fn scope_name(scope: &MemoryScope) -> String {
+    let name: FfiString = FieldGetter::new(MemoryScopeObj::type_index(), "_str_index")
+        .and_then(|getter| getter.get(&**scope))
+        .expect("memory scopes are named");
+    ffi_text(&name)
+}
+
+pub fn buffer_ref(buffer: &Var) -> ObjectRef {
+    oref(buffer.clone())
 }
 
 pub fn prim(node: &ObjectRef) -> AResult<PrimExpr> {

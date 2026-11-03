@@ -1,8 +1,6 @@
 //! `artifact_template.emit_rust_module`: the generated module around the
 //! kernel bodies (host bindings, physical allocation, launch phases).
 
-use tvm_tirx::tirx::TensorVar;
-
 use super::super::analyze::cuda_arch::cuda_arch;
 use super::super::analyze::frontend::KernelPlan;
 use super::super::analyze::memory::MemorySpace;
@@ -13,6 +11,7 @@ use super::module_template::MODULE_TEMPLATE;
 use super::{BufferCode, EmitOptions, Emitter, RustValue, SplitHelper, Uniformity, Variables};
 use crate::decode::projected_buffer;
 use crate::tables::{json_string, phase_binding_name};
+use tvm_tirx::ir::Var;
 
 pub struct ModuleRequest {
     pub analysis_capable: bool,
@@ -214,7 +213,7 @@ struct KernelItem {
 }
 
 impl<'a> Emitter<'a> {
-    fn dynamic_layout_view_byte_len(&self, buffer: &TensorVar) -> AResult<i64> {
+    fn dynamic_layout_view_byte_len(&self, buffer: &Var) -> AResult<i64> {
         let plan = self.memory_plan.resolve(buffer)?;
         let name = plan.name.clone();
         if plan.layout.dynamic_layout_elem_offset.is_none() {
@@ -969,7 +968,7 @@ fn global_buffer_view(
 fn shared_buffer_view(
     emitter: &Emitter<'_>,
     backings: &BackingLayout,
-    buffer: &TensorVar,
+    buffer: &Var,
     code: &BufferCode,
 ) -> AResult<String> {
     let plan = emitter.plan_of(code);

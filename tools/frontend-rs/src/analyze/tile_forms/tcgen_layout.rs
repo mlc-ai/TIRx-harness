@@ -9,6 +9,7 @@ use tvm_tirx::tvm_ffi::{
     self as tvm_ffi, Any, Array, DLDataType, DLDataTypeExt, ObjectRefCast, ObjectRefCore,
     String as FfiString,
 };
+use crate::analyze::util::TensorVarExt;
 
 use super::super::layout::{expr_any, int_any, op_binary, tile_layout_is_trivial};
 use super::super::util::{
@@ -168,7 +169,7 @@ pub(super) fn validate_tcgen_smem_layout(
     role: &str,
 ) -> AResult<()> {
     let buffer = &region.buffer;
-    let buffer_type = buffer.buffer_type();
+    let buffer_type = buffer.tensor_type();
     let shape_exprs: Vec<PrimExpr> = buffer_type.shape.iter().collect();
     let mut shape = Vec::new();
     for (axis, extent) in shape_exprs.iter().enumerate() {
@@ -868,7 +869,7 @@ fn validate_tcgen_ldst_layout_uncached(
     }
     let tmem_buffer_rows = static_int_expr(
         &ctx.analyzer,
-        &tmem.buffer.buffer_type().shape.get(0)?,
+        &tmem.buffer.tensor_type().shape.get(0)?,
         "copy_async.tcgen05_ldst.rows",
     )?;
     let mut candidates: Vec<LdstCandidate> = Vec::new();
@@ -1097,7 +1098,7 @@ fn region_validation_metadata(region: &TileRegion) -> RegionValidationMetadata {
         memory_scope: region.memory_scope.clone(),
         extents: region.extents.clone(),
         mins: region.mins.len(),
-        rank: region.buffer.buffer_type().shape.len(),
+        rank: region.buffer.tensor_type().shape.len(),
     }
 }
 
@@ -1119,12 +1120,12 @@ fn tcgen_ldst_validation_structure(tmem: &TileRegion, local: &TileRegion) -> Any
         items.extend(
             region
                 .buffer
-                .buffer_type()
+                .tensor_type()
                 .shape
                 .iter()
                 .map(|extent| expr_any(&extent)),
         );
-        items.push(match region.buffer.buffer_type().layout.clone() {
+        items.push(match region.buffer.tensor_type().layout.clone() {
             Some(layout) => Any::from(layout),
             None => Any::new(),
         });
@@ -1166,7 +1167,7 @@ fn relative_tcgen_ldst_validation_structure(tmem: &TileRegion, local: &TileRegio
     Ok(any_list(vec![
         relative_physical_mapping_structure(tmem, "tmem")?,
         relative_physical_mapping_structure(local, "local")?,
-        expr_any(&tmem.buffer.buffer_type().shape.get(0)?),
+        expr_any(&tmem.buffer.tensor_type().shape.get(0)?),
     ]))
 }
 

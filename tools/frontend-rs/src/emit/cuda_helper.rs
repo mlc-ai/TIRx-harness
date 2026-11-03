@@ -3,7 +3,7 @@
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
     as_buffer, buffer_dtype, buffer_scope, dtype_of, dtype_text, expr_type, ffi_text, int_imm,
-    not_covered, oref, prim, prim_dtype, unsupported, AResult,
+    not_covered, oref, prim, prim_dtype, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::Decoded;
 use crate::emit::async_copy::ST_ASYNC;
@@ -475,7 +475,7 @@ fn require_local_f32_array_address(
     let Some(base) = last.as_node::<IntImmObj>().and_then(|imm| int_value(imm).ok()) else {
         return unsupported(format!("{field} final array index must be a static zero"));
     };
-    let shape: Vec<ObjectRef> = source.buffer_type().shape.iter().map(oref).collect();
+    let shape: Vec<ObjectRef> = source.tensor_type().shape.iter().map(oref).collect();
     let extent = match shape.last() {
         Some(extent) if base == 0 => int_imm(extent),
         _ => None,

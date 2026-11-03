@@ -7,7 +7,8 @@ use std::collections::HashSet;
 
 use crate::analyze::buffers::{call_op_name, BufferBindings};
 use crate::analyze::util::{
-    as_buffer, dtype_of, dtype_text, ffi_text, int_imm, kind, oref, same, unsupported, AResult, Json,
+    as_buffer, dtype_of, dtype_text, ffi_text, int_imm, kind, oref, same, unsupported, AResult,
+    Json,
 };
 use crate::decode::projected_buffer;
 use tvm_tirx::sym::Analyzer;
@@ -157,7 +158,7 @@ impl Context<'_> {
             .func
             .params
             .iter()
-            .any(|parameter| same(&parameter, buffer.as_var()))
+            .any(|parameter| same(&parameter, buffer))
         {
             Ok((ffi_text(&buffer.name), serialized))
         } else {

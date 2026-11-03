@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 use tvm_tirx::sym::Analyzer;
 use tvm_tirx::ir::{Expr, Var};
-use tvm_tirx::tirx::TensorVar;
+
 use tvm_tirx::tvm_ffi::Map;
 
 pub mod buffers;
@@ -31,6 +31,8 @@ pub struct Ctx<'a> {
     pub schema: &'a Schema,
     pub analyzer: Analyzer,
     layouts: RefCell<IdMap<LayoutInfo>>,
+    /// TMEM column addresses, from the bindings that produce each tensor.
+    tmem_addresses: RefCell<IdMap<Expr>>,
     pub decoding: crate::decode::Cache,
     /// Successful tcgen05.ld/st structural proofs.
     pub tcgen_ldst_validations: RefCell<Vec<tile_forms::TcgenLdstCacheEntry>>,
@@ -42,6 +44,7 @@ impl<'a> Ctx<'a> {
             schema,
             analyzer: Analyzer::new(),
             layouts: RefCell::new(IdMap::default()),
+            tmem_addresses: RefCell::new(IdMap::default()),
             decoding: crate::decode::Cache::default(),
             tcgen_ldst_validations: RefCell::new(Vec::new()),
         })
@@ -49,16 +52,31 @@ impl<'a> Ctx<'a> {
 
     pub fn inspect_layout(
         &self,
-        buffer: &TensorVar,
+        buffer: &Var,
         bindings: &Map<Var, Expr>,
     ) -> AResult<LayoutInfo> {
         let key = buffer_ref(buffer);
         if let Some(cached) = self.layouts.borrow().get(&key) {
             return Ok(cached.clone());
         }
-        let info = layout::inspect_buffer_layout(self.schema, &self.analyzer, buffer, bindings)?;
+        let tmem_address = self.tmem_addresses.borrow().get(&key).cloned();
+        let info = layout::inspect_buffer_layout(
+            self.schema,
+            &self.analyzer,
+            buffer,
+            bindings,
+            tmem_address,
+        )?;
         self.layouts.borrow_mut().insert(key, info.clone());
         Ok(info)
+    }
+
+    /// Record the TMEM column addresses `bindings` found, for layout inspection.
+    pub fn record_tmem_addresses(&self, bindings: &buffers::BufferBindings) {
+        let mut addresses = self.tmem_addresses.borrow_mut();
+        for (tensor, address) in &bindings.tmem_addresses {
+            addresses.insert(buffer_ref(tensor), address.clone());
+        }
     }
 }
 

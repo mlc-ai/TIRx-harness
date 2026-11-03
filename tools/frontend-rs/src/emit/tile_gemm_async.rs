@@ -7,6 +7,7 @@ use tvm_tirx::ir::PrimExpr;
 use tvm_tirx::tirx::ComposeLayout;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{Any, ObjectRefCast};
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::layout::{expr_any, int_any, op_binary, tile_layout_is_trivial};
 use super::super::analyze::shapes::structural_equal;
@@ -159,7 +160,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
         {
             return Ok(None);
         }
-        let shape: Vec<PrimExpr> = region.buffer.buffer_type().shape.iter().collect();
+        let shape: Vec<PrimExpr> = region.buffer.tensor_type().shape.iter().collect();
         if shape.len() != 2 || shape.iter().any(|value| int_imm_expr(value).is_none()) {
             return Ok(None);
         }
@@ -177,7 +178,7 @@ impl<'e, 'a> GemmAsyncEmitter<'e, 'a> {
         if info.element_count != Some(rows * columns) {
             return Ok(None);
         }
-        let Some(layout) = region.buffer.buffer_type().layout.clone() else {
+        let Some(layout) = region.buffer.tensor_type().layout.clone() else {
             return Ok(None);
         };
         let Ok(compose) = layout.try_cast::<ComposeLayout>() else {
