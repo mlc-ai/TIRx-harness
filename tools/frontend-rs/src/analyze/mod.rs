@@ -20,7 +20,7 @@ pub mod util;
 pub mod vector;
 
 use self::layout::LayoutInfo;
-use self::util::{buffer_ref, AResult, IdMap};
+use self::util::{as_buffer, buffer_ref, AResult, IdMap};
 use crate::schema::Schema;
 
 /// Per-analysis services: the exported tables, one TVM analyzer, the
@@ -86,6 +86,11 @@ impl<'a> Ctx<'a> {
         }
         let mut offsets = self.view_byte_offsets.borrow_mut();
         for (view, _) in &bindings.declarations {
+            // A view rooted at a pointer is addressed by evaluating its data
+            // expression, which already carries every offset to that pointer.
+            if as_buffer(&bindings.storage_key(view)?).is_none() {
+                continue;
+            }
             if let Some(offset) = bindings.root_byte_offset(view)? {
                 offsets.insert(buffer_ref(view), offset);
             }

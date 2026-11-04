@@ -13,7 +13,7 @@ use super::buffers::{BufferBindings};
 use super::topology::{is_launch_entry, launch_values};
 use super::layout::{expr_any, int_any, op_binary, Extent, LayoutInfo};
 use super::shapes::{map_from_pairs, structural_equal, Scalar, ShapeExpressionContext};
-use super::util::{buffer_name, buffer_ref, buffer_scope, int_imm, oref, prim_expr, same, scalar_bind, tensor_var, unsupported, AResult, IdSet, TensorVarExt};
+use super::util::{as_buffer, buffer_name, buffer_ref, buffer_scope, int_imm, oref, prim_expr, same, scalar_bind, tensor_var, unsupported, AResult, IdSet, TensorVarExt};
 use super::Ctx;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -319,7 +319,12 @@ pub(in crate::analyze) fn build_memory_plan(
             continue;
         }
         if let Some(data) = &data {
-            if data_source(data)?.is_none() {
+            // A view is pointer-derived when its storage root is a pointer
+            // rather than a tensor, including a view of such a view through
+            // `tensor_data_ptr(parent)`.
+            let pointer_rooted = data_source(data)?.is_none()
+                || as_buffer(&buffer_bindings.storage_key(&buffer)?).is_none();
+            if pointer_rooted {
                 let info = ctx.inspect_layout(&buffer, &bindings)?;
                 if info.element_count.is_none() {
                     return unsupported(format!(
@@ -512,6 +517,18 @@ pub(in crate::analyze) fn build_memory_plan(
                 continue;
             }
             if info.explicit_strides.is_some() {
+                // A strided view is bounded at its executed addresses, as it
+                // may span past its owner, but it starts inside the owner.
+                let view_start = info.elem_offset * info.itemsize;
+                let outside =
+                    view_start < owner_start || owner_end.is_some_and(|end| view_start > end);
+                if outside && referenced.iter().any(|candidate| same(candidate, buffer)) {
+                    return unsupported(format!(
+                        "buffer:{}:strided view starts at byte {view_start}, outside owner {}",
+                        buffer_name(buffer),
+                        buffer_name(&owner)
+                    ));
+                }
                 continue;
             }
             let runtime_sized_global_alias = !is_parameter

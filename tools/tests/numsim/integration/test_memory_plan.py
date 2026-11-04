@@ -169,6 +169,138 @@ def pointer_origin_through_pure_if_then_else(
     output[0] = alias[0]
 
 
+@T.function
+def view_of_pointer_derived_view(
+    source: T.Tensor((8,), "float32"),
+    start: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "uint32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    # Integer address bits leave the window an opaque pointer, not a view of `source`.
+    address: T.let = T.reinterpret(source.ptr_to([start[0]]), ty="uint64")
+    pointer: T.let[T.Var(name="window_pointer", ty=PtrType(PrimType("float32"), "global"))] = (
+        T.reinterpret(address, ty=PtrType(PrimType("float32"), "global"))
+    )
+    window = T.decl_tensor(pointer, ty_args=[T.Tensor((4,), "float32", scope="global")])
+    bits = T.decl_tensor(window.data, ty_args=[T.Tensor((4,), "uint32")])
+    if lane == 0:
+        output[0] = bits[0]
+        output[1] = bits[3]
+
+
+@T.function
+def view_of_pointer_derived_view_past_its_extent(
+    source: T.Tensor((8,), "float32"),
+    start: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "uint32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address: T.let = T.reinterpret(source.ptr_to([start[0]]), ty="uint64")
+    pointer: T.let[T.Var(name="window_pointer", ty=PtrType(PrimType("float32"), "global"))] = (
+        T.reinterpret(address, ty=PtrType(PrimType("float32"), "global"))
+    )
+    window = T.decl_tensor(pointer, ty_args=[T.Tensor((4,), "float32", scope="global")])
+    bits = T.decl_tensor(window.data, ty_args=[T.Tensor((4,), "uint32")])
+    if lane == 0:
+        output[0] = bits[start[0] + 2]
+
+
+@T.function
+def offset_views_of_pointer_derived_view(
+    source: T.Tensor((8,), "float32"),
+    start: T.Tensor((1,), "int32"),
+    step: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "uint32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address: T.let = T.reinterpret(source.ptr_to([start[0]]), ty="uint64")
+    pointer: T.let[T.Var(name="window_pointer", ty=PtrType(PrimType("float32"), "global"))] = (
+        T.reinterpret(address, ty=PtrType(PrimType("float32"), "global"))
+    )
+    window = T.decl_tensor(pointer, ty_args=[T.Tensor((6,), "float32", scope="global")])
+    fixed = T.decl_tensor(
+        T.ptr_byte_offset(window.data, 8, ty=T.Ptr("float32", "global")),
+        ty_args=[T.Tensor((2,), "uint32", scope="global")],
+    )
+    moved = T.decl_tensor(
+        T.address_of(window[step[0]]), ty_args=[T.Tensor((2,), "uint32", scope="global")]
+    )
+    if lane == 0:
+        output[0] = fixed[0]
+        output[1] = moved[1]
+
+
+@T.function
+def wide_view_of_pointer_derived_view(
+    source: T.Tensor((16,), "uint16"),
+    shift: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "uint64"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address: T.let = T.reinterpret(source.ptr_to([0]), ty="uint64")
+    pointer: T.let[T.Var(name="halves", ty=PtrType(PrimType("uint16"), "global"))] = T.reinterpret(
+        address, ty=PtrType(PrimType("uint16"), "global")
+    )
+    halves = T.decl_tensor(pointer, ty_args=[T.Tensor((16,), "uint16", scope="global")])
+    words = T.decl_tensor(
+        T.ptr_byte_offset(halves.data, shift[0] * 2, ty=T.Ptr("uint64", "global")),
+        ty_args=[T.Tensor((2,), "uint64", scope="global")],
+    )
+    if lane == 0:
+        output[0] = words[0]
+
+
+@T.function
+def runtime_offset_window(
+    source: T.Tensor((8,), "float32"),
+    start: T.Tensor((1,), "int32"),
+    index: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "float32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    # The declared extent is an upper bound past the end of `source`.
+    window = T.decl_tensor(T.address_of(source[start[0]]), ty_args=[T.Tensor((64,), "float32")])
+    if lane == 0:
+        output[0] = window[index[0]]
+
+
+@T.function
+def runtime_offset_register_window(
+    source: T.Tensor((8,), "float32"),
+    start: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "float32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    registers = T.alloc_local((8,), "float32")
+    for i in T.serial(8):
+        registers[i] = source[i]
+    window = T.decl_tensor(
+        T.address_of(registers[start[0]]), ty_args=[T.Tensor((2,), "float32", scope="local")]
+    )
+    if lane == 0:
+        output[0] = window[1]
+
+
+@T.function
+def runtime_offset_wide_view(
+    source: T.Tensor((16,), "uint16"),
+    start: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "uint64"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    window = T.decl_tensor(T.address_of(source[start[0]]), ty_args=[T.Tensor((8,), "uint16")])
+    words = T.decl_tensor(window.data, ty_args=[T.Tensor((2,), "uint64")])
+    if lane == 0:
+        output[0] = words[0]
+
+
 def _shared_backing_sizes(kernel):
     source = emitted_module(kernel)
     return [
@@ -254,6 +386,141 @@ def test_odd_float4_spans_round_up_to_complete_physical_bytes():
 def test_integer_addresses_selected_at_runtime_keep_dynamic_views():
     source = _runtime_pointer_view(pointer_origin_through_pure_if_then_else, 16, 4)
     assert "Ld<v2::reg::variant::U32, v2::Generic>" in source
+
+
+def _pointer_view_inputs(output_len):
+    return {
+        "source": np.arange(8, dtype=np.float32) + np.float32(0.5),
+        "start": np.array([2], dtype=np.int32),
+        "output": np.zeros(output_len, dtype=np.uint32),
+    }
+
+
+def test_view_of_a_pointer_derived_view_reads_through_its_parent_pointer(tmp_path):
+    """`decl_tensor(parent.data)` of a pointer-derived parent is pointer-derived too."""
+
+    module = numsim.transpile(view_of_pointer_derived_view, cache_dir=tmp_path)
+    inputs = _pointer_view_inputs(2)
+    result = numsim.Engine().run(module, inputs)
+
+    expected = inputs["source"][[2, 5]].view(np.uint32)
+    np.testing.assert_array_equal(result.outputs["output"], expected)
+
+
+def test_view_of_a_pointer_derived_view_keeps_its_own_extent(tmp_path):
+    module = numsim.transpile(view_of_pointer_derived_view_past_its_extent, cache_dir=tmp_path)
+
+    with pytest.raises(numsim.NumSimExecutionError, match="out of bounds|outside|exceeds"):
+        numsim.Engine().run(module, _pointer_view_inputs(1))
+
+
+def test_offset_views_of_a_pointer_derived_view_apply_each_offset_once(tmp_path):
+    """The data expression of a pointer-rooted view already carries its offset."""
+
+    module = numsim.transpile(offset_views_of_pointer_derived_view, cache_dir=tmp_path)
+    inputs = {
+        "source": np.arange(8, dtype=np.float32) + np.float32(0.5),
+        "start": np.array([1], dtype=np.int32),
+        "step": np.array([3], dtype=np.int32),
+        "output": np.zeros(2, dtype=np.uint32),
+    }
+    result = numsim.Engine().run(module, inputs)
+
+    # window starts at source[1]: fixed[0] is window[2], moved[1] is window[3 + 1].
+    expected = inputs["source"][[3, 5]].view(np.uint32)
+    np.testing.assert_array_equal(result.outputs["output"], expected)
+
+
+def _halves_inputs(shift):
+    return {
+        "source": np.arange(16, dtype=np.uint16) + np.uint16(0x100),
+        "shift": np.array([shift], dtype=np.int32),
+        "output": np.zeros(1, dtype=np.uint64),
+    }
+
+
+def test_wide_view_of_a_pointer_derived_view_at_an_aligned_offset(tmp_path):
+    module = numsim.transpile(wide_view_of_pointer_derived_view, cache_dir=tmp_path)
+    inputs = _halves_inputs(shift=4)
+    result = numsim.Engine().run(module, inputs)
+
+    np.testing.assert_array_equal(result.outputs["output"], inputs["source"][4:8].view(np.uint64))
+
+
+def test_wide_view_of_a_pointer_derived_view_requires_its_element_alignment(tmp_path):
+    """A pointer-rooted view is checked at its address, as a tensor-rooted one is."""
+
+    module = numsim.transpile(wide_view_of_pointer_derived_view, cache_dir=tmp_path)
+
+    with pytest.raises(numsim.NumSimExecutionError, match="DeclBuffer requires 8-byte alignment"):
+        numsim.Engine().run(module, _halves_inputs(shift=1))
+
+
+def _window_inputs(start, index):
+    return {
+        "source": np.arange(8, dtype=np.float32) + np.float32(0.5),
+        "start": np.array([start], dtype=np.int32),
+        "index": np.array([index], dtype=np.int32),
+        "output": np.zeros(1, dtype=np.float32),
+    }
+
+
+def test_runtime_offset_view_is_bounded_by_its_parent_not_its_declared_extent(tmp_path):
+    """`decl_tensor(data=source.ptr_to([start]))` views `source` from `start`.
+
+    It is the parent's storage that bounds it, as a TIR buffer with a runtime
+    `elem_offset` was, so an upper-bound extent past the parent is legal.
+    """
+
+    module = numsim.transpile(runtime_offset_window, cache_dir=tmp_path)
+    inputs = _window_inputs(start=2, index=3)
+    result = numsim.Engine().run(module, inputs)
+
+    np.testing.assert_array_equal(result.outputs["output"], inputs["source"][[5]])
+
+
+def test_runtime_offset_view_still_rejects_an_access_past_its_parent(tmp_path):
+    module = numsim.transpile(runtime_offset_window, cache_dir=tmp_path)
+
+    with pytest.raises(numsim.NumSimExecutionError, match="out of bounds|outside|exceeds"):
+        numsim.Engine().run(module, _window_inputs(start=2, index=6))
+
+
+def test_register_view_at_a_runtime_offset_reads_its_element(tmp_path):
+    """Register storage keeps `address_of(registers[start])` a plain pointer view."""
+
+    module = numsim.transpile(runtime_offset_register_window, cache_dir=tmp_path)
+    inputs = {
+        "source": np.arange(8, dtype=np.float32) + np.float32(0.5),
+        "start": np.array([2], dtype=np.int32),
+        "output": np.zeros(1, dtype=np.float32),
+    }
+    result = numsim.Engine().run(module, inputs)
+
+    np.testing.assert_array_equal(result.outputs["output"], inputs["source"][[3]])
+
+
+def _wide_view_inputs(start):
+    return {
+        "source": np.arange(16, dtype=np.uint16) + np.uint16(0x100),
+        "start": np.array([start], dtype=np.int32),
+        "output": np.zeros(1, dtype=np.uint64),
+    }
+
+
+def test_wider_view_at_an_aligned_runtime_offset_reads_its_words(tmp_path):
+    module = numsim.transpile(runtime_offset_wide_view, cache_dir=tmp_path)
+    inputs = _wide_view_inputs(start=4)
+    result = numsim.Engine().run(module, inputs)
+
+    np.testing.assert_array_equal(result.outputs["output"], inputs["source"][4:8].view(np.uint64))
+
+
+def test_wider_view_at_a_misaligned_runtime_offset_fails_at_its_declaration(tmp_path):
+    module = numsim.transpile(runtime_offset_wide_view, cache_dir=tmp_path)
+
+    with pytest.raises(numsim.NumSimExecutionError, match="not a multiple of the 8-byte element"):
+        numsim.Engine().run(module, _wide_view_inputs(start=1))
 
 
 def test_all_declared_tmem_views_share_one_physical_backing():

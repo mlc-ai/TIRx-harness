@@ -984,11 +984,19 @@ fn shared_buffer_view(
         )
     } else {
         let len = if plan.layout.explicit_strides.is_some() {
-            optional(
-                backing
-                    .byte_len
-                    .map(|len| len - plan.layout.elem_offset * plan.layout.itemsize),
-            )
+            // A strided view may span past its owner, so the owner bounds it
+            // there; within the owner it keeps its own span.
+            let span = plan
+                .layout
+                .element_count
+                .map(|count| count * plan.layout.itemsize);
+            let remainder = backing
+                .byte_len
+                .map(|len| (len - plan.layout.elem_offset * plan.layout.itemsize).max(0));
+            optional(match (span, remainder) {
+                (Some(span), Some(remainder)) => Some(span.min(remainder)),
+                (span, remainder) => remainder.or(span),
+            })
         } else {
             optional(
                 plan.layout

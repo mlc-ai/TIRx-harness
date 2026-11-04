@@ -1063,7 +1063,7 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_decl_tensor(&mut self, tensor: &Var, data: &Expr) -> AResult<()> {
-        let (name, dynamic_data_var, referenced, elem_offset, itemsize, element_count) = {
+        let (name, dynamic_data_var, referenced, elem_offset, itemsize, element_count, alignment) = {
             let plan = self.memory_plan.resolve(tensor)?;
             (
                 plan.name.clone(),
@@ -1072,8 +1072,18 @@ impl<'a> Emitter<'a> {
                 plan.layout.elem_offset,
                 plan.layout.itemsize,
                 plan.layout.element_count,
+                plan.layout.dynamic_elem_offset_alignment.clone(),
             )
         };
+        if let Some(aligned) = alignment {
+            self.emit_runtime_check(
+                &oref(aligned),
+                &format!(
+                    "buffer:{name}:runtime byte offset is not a multiple of the {itemsize}-byte element"
+                ),
+                "view alignment check",
+            )?;
+        }
         let Some(dynamic_data_var) = dynamic_data_var else {
             return Ok(());
         };
@@ -1109,10 +1119,12 @@ impl<'a> Emitter<'a> {
         let byte_len = element_count * itemsize;
         let mut pointer_code = pointer.code.clone();
         let pointer_dtype = pointer_pointee_dtype(&oref(data.clone()));
-        let byte_typed = matches!(
-            pointer_dtype.as_deref(),
-            Some("") | Some("int8") | Some("uint8")
-        );
+        // The data pointer of a parent view lowers to a byte pointer.
+        let byte_typed = crate::decode::is_tensor_data_pointer(data)?
+            || matches!(
+                pointer_dtype.as_deref(),
+                Some("") | Some("int8") | Some("uint8")
+            );
         if numeric_address || (byte_typed && itemsize != 1) {
             pointer_code = format!("{}.with_pointee_itemsize({itemsize}_usize)", pointer.code);
         }
@@ -1128,11 +1140,26 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_assert(&mut self, node: &ObjectRef, stmt: &AssertStmtObj) -> AResult<()> {
-        let condition = self.emit_expr(&oref(stmt.condition.clone()))?;
+        self.emit_runtime_check(
+            &oref(stmt.condition.clone()),
+            &repr_text(node)?,
+            "AssertStmt",
+        )
+    }
+
+    /// Fail the execution with `message` when `condition` is false on any
+    /// active lane.
+    fn emit_runtime_check(
+        &mut self,
+        condition: &ObjectRef,
+        message: &str,
+        what: &str,
+    ) -> AResult<()> {
+        let condition = self.emit_expr(condition)?;
         if condition.rust_type != "bool" {
-            return unsupported("AssertStmt condition must be boolean");
+            return unsupported(format!("{what} condition must be boolean"));
         }
-        let message = json_string(&repr_text(node)?);
+        let message = json_string(message);
         if condition.uniformity == Uniformity::Uniform {
             self.emit_line(&format!("if !({}) {{", condition.code));
             self.emit_line(&format!("    return Err(EngineError::message({message}));"));

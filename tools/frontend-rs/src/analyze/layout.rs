@@ -54,6 +54,52 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
     .into())
 }
 
+/// The element strides of a strided shared tensor, if `buffer` is one.
+///
+/// A tvm-tirx tensor has no strides field: a strided tensor carries a
+/// TileLayout with one memory shard per logical dimension. Like an explicitly
+/// strided buffer, it is addressed through its strides and bounds-checked at
+/// its executed addresses, so it may span past its allocation. A contiguous
+/// layout is not strided and keeps the element-span check.
+fn strided_view_strides(
+    analyzer: &Analyzer,
+    buffer: &Var,
+    shape: &[Extent],
+    scope: &str,
+    packed_nibble: bool,
+) -> AResult<Option<Vec<i64>>> {
+    if packed_nibble || (scope != "shared" && scope != "shared.dyn") {
+        return Ok(None);
+    }
+    let Some(layout) = buffer.tensor_type().layout.clone() else {
+        return Ok(None);
+    };
+    let Ok(tile) = layout.try_cast::<TileLayout>() else {
+        return Ok(None);
+    };
+    let shard: Vec<Iter> = tile.shard()?.iter().collect();
+    if shard.len() != shape.len() || !tile.replica()?.is_empty() || !tile.offset()?.is_empty() {
+        return Ok(None);
+    }
+    let mut strides = Vec::with_capacity(shard.len());
+    for (iter, extent) in shard.iter().zip(shape) {
+        let Extent::Static(extent) = extent else {
+            return Ok(None);
+        };
+        if axis_name(&iter.axis)? != "m" || int_imm_expr(&iter.extent) != Some(*extent) {
+            return Ok(None);
+        }
+        match int_imm_expr(&iter.stride) {
+            Some(stride) if stride >= 0 => strides.push(stride),
+            _ => return Ok(None),
+        }
+    }
+    if tile.is_contiguous(Some(analyzer))? {
+        return Ok(None);
+    }
+    Ok(Some(strides))
+}
+
 #[derive(Clone)]
 pub enum Extent {
     Static(i64),
@@ -67,6 +113,9 @@ pub struct LayoutInfo {
     pub itemsize: i64,
     pub elem_offset: i64,
     pub dynamic_elem_offset: Option<Expr>,
+    /// `floormod(byte_offset, itemsize) == 0` for a runtime byte offset the
+    /// analyzer could not prove element-aligned, checked at the declaration.
+    pub dynamic_elem_offset_alignment: Option<Expr>,
     pub element_count: Option<i64>,
     pub signature: String,
     pub physical_axes: Vec<String>,
@@ -408,6 +457,9 @@ pub fn inspect_buffer_layout(
     // A declared view starts `byte_offset` bytes into its storage root, a whole
     // number of storage elements (bytes for packed float4); a TensorType has no
     // strides, which belong to its layout.
+    // A runtime byte offset the analyzer cannot prove element-aligned is
+    // checked at runtime, when the view is declared, instead of rejected.
+    let mut dynamic_elem_offset_alignment: Option<Expr> = None;
     let (elem_offset, dynamic_elem_offset): (i64, Option<Expr>) = match byte_offset {
         None => (0, None),
         Some(bytes) => {
@@ -437,10 +489,7 @@ pub fn inspect_buffer_layout(
                         Expr::from(int_const(&dtype, 0)?),
                     )?;
                     if !analyzer.can_prove(&aligned, ProofStrength::Default)? {
-                        return unsupported(format!(
-                            "buffer:{name}:runtime byte offset {} is not provably a multiple of the {itemsize}-byte element",
-                            repr_of(&bytes)?
-                        ));
+                        dynamic_elem_offset_alignment = Some(aligned);
                     }
                     (0, Some(simplify(analyzer, &floordiv(bytes, element)?)?))
                 }
@@ -448,7 +497,7 @@ pub fn inspect_buffer_layout(
         }
     };
     let packed_nibble_offset: i64 = 0;
-    let explicit_strides: Option<Vec<i64>> = None;
+    let explicit_strides = strided_view_strides(analyzer, buffer, &shape, &scope, packed_nibble)?;
     let static_shape = shape
         .iter()
         .all(|extent| matches!(extent, Extent::Static(_)));
@@ -572,6 +621,12 @@ pub fn inspect_buffer_layout(
             &scope));
     }
     if scope == "tmem" || scope.starts_with("tmem.") {
+        if let Some(aligned) = &dynamic_elem_offset_alignment {
+            return unsupported(format!(
+                "buffer:{name}:runtime TMEM offset is not provably element-aligned: {}",
+                repr_of(aligned)?
+            ));
+        }
         return inspect_tmem(
             analyzer,
             &name,
@@ -697,42 +752,35 @@ pub fn inspect_buffer_layout(
                 && replica.is_empty()
                 && axis_name(&shard[0].axis)? == "m"
                 && static_int(analyzer, &shard[0].stride, &format!("{name}:layout stride"))? == 1;
-            if is_default {
+            if let Some(strides) = &explicit_strides {
+                let extents: Vec<i64> = shape
+                    .iter()
+                    .map(|extent| match extent {
+                        Extent::Static(value) => *value,
+                        Extent::Dynamic(_) => 0,
+                    })
+                    .collect();
+                physical_elements =
+                    if extents.is_empty() || extents.iter().any(|extent| *extent == 0) {
+                        Some(0)
+                    } else {
+                        Some(
+                            1 + extents
+                                .iter()
+                                .zip(strides.iter())
+                                .map(|(extent, stride)| (extent - 1) * stride)
+                                .sum::<i64>(),
+                        )
+                    };
+            } else if is_default {
                 prove_equal(
                     analyzer,
                     &shard[0].extent,
                     &expected_elements_expr,
                     &format!("{name}:layout extent"),
                 )?;
-                physical_elements = match &explicit_strides {
-                    None => expected_elements,
-                    Some(strides) => {
-                        let extents: Vec<i64> = shape
-                            .iter()
-                            .map(|extent| match extent {
-                                Extent::Static(value) => *value,
-                                Extent::Dynamic(_) => 0,
-                            })
-                            .collect();
-                        if extents.is_empty() || extents.iter().any(|extent| *extent == 0) {
-                            Some(0)
-                        } else {
-                            Some(
-                                1 + extents
-                                    .iter()
-                                    .zip(strides.iter())
-                                    .map(|(extent, stride)| (extent - 1) * stride)
-                                    .sum::<i64>(),
-                            )
-                        }
-                    }
-                };
+                physical_elements = expected_elements;
             } else {
-                if explicit_strides.is_some() {
-                    return unsupported(format!(
-                        "buffer:{name}:explicit strides require the default logical layout, got {signature}"
-                    ));
-                }
                 let Some(expected) = expected_elements else {
                     return unsupported(format!(
                         "buffer:{name}:non-default layout requires a static logical shape"
@@ -815,6 +863,7 @@ pub fn inspect_buffer_layout(
         itemsize,
         elem_offset,
         dynamic_elem_offset,
+        dynamic_elem_offset_alignment,
         element_count: physical_elements,
         signature,
         physical_axes,
@@ -1002,6 +1051,7 @@ fn inspect_tmem(
         itemsize,
         elem_offset,
         dynamic_elem_offset,
+        dynamic_elem_offset_alignment: None,
         element_count: expected_elements,
         signature,
         physical_axes: vec!["TCol".to_owned(), "TLane".to_owned()],

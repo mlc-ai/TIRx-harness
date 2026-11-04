@@ -231,9 +231,9 @@ pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
     Ok(Some((bind.var.clone(), decl)))
 }
 
-/// The tensor whose data pointer `data` offsets, with the byte offsets that
-/// `tirx.ptr_byte_offset` layers add to it, outermost first.
-pub fn data_source(data: &Expr) -> AResult<Option<(Var, Vec<Expr>)>> {
+/// The pointer under `tirx.ptr_byte_offset` layers, and their byte offsets,
+/// outermost first.
+fn strip_byte_offsets(data: &Expr) -> AResult<(Expr, Vec<Expr>)> {
     let mut current = data.clone();
     let mut offsets = Vec::new();
     while let Some(call) = current.as_node::<CallObj>() {
@@ -244,7 +244,87 @@ pub fn data_source(data: &Expr) -> AResult<Option<(Var, Vec<Expr>)>> {
         offsets.push(call.args.get(1)?);
         current = base;
     }
-    Ok(projected_buffer(&oref(current))?.map(|tensor| (tensor, offsets)))
+    Ok((current, offsets))
+}
+
+/// Whether `data` is a tensor's `tirx.tensor_data_ptr`, under any byte offsets.
+pub fn is_tensor_data_pointer(data: &Expr) -> AResult<bool> {
+    let (base, _) = strip_byte_offsets(data)?;
+    Ok(projected_buffer(&oref(base))?.is_some())
+}
+
+/// The tensor whose data `data` points into, with the byte offsets that
+/// `tirx.ptr_byte_offset` layers add to it, outermost first, then the offset of
+/// an addressed element.
+pub fn data_source(data: &Expr) -> AResult<Option<(Var, Vec<Expr>)>> {
+    let (base, mut offsets) = strip_byte_offsets(data)?;
+    if let Some(tensor) = projected_buffer(&oref(base.clone()))? {
+        return Ok(Some((tensor, offsets)));
+    }
+    if let Some((tensor, byte_offset)) = element_address(&base)? {
+        offsets.push(byte_offset);
+        return Ok(Some((tensor, offsets)));
+    }
+    Ok(None)
+}
+
+/// `address_of(tensor[indices])` of a default-layout tensor: the tensor and the
+/// element's byte offset into its data.
+///
+/// This is how tvm-tirx spells a view at a runtime element offset
+/// (`decl_tensor(data=tensor.ptr_to([offset]))`), where a TIR buffer carried
+/// `elem_offset` over its parent's data. A tensor with an explicit layout, or in
+/// register storage, keeps its address a plain pointer.
+fn element_address(expr: &Expr) -> AResult<Option<(Var, Expr)>> {
+    use crate::analyze::util::TensorVarExt;
+    use tvm_tirx::ir::TensorLoadObj;
+    use tvm_tirx::tvm_ffi::{Any, DLDataType, DLDataTypeExt};
+
+    let Some(call) = expr.as_node::<CallObj>() else {
+        return Ok(None);
+    };
+    if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
+        return Ok(None);
+    }
+    let element = call.args.get(0)?;
+    let Some(load) = element.as_node::<TensorLoadObj>() else {
+        return Ok(None);
+    };
+    let Some(tensor) = as_buffer(&oref(load.source.clone())) else {
+        return Ok(None);
+    };
+    let ty = tensor.tensor_type();
+    if ty.layout.is_some() || load.indices.len() != ty.shape.len() {
+        return Ok(None);
+    }
+    // Views at a runtime offset are bounded by their owner in global and
+    // shared memory; register storage keeps such a view a plain pointer.
+    if !matches!(buffer_scope(&tensor).as_str(), "global" | "shared" | "shared.dyn") {
+        return Ok(None);
+    }
+    let dtype = crate::analyze::util::buffer_dtype(&tensor);
+    let data_type = DLDataType::try_from_str(&dtype)?;
+    if data_type.lanes != 1 || data_type.bits % 8 != 0 {
+        return Ok(None);
+    }
+    let itemsize = i64::from(data_type.bits) / 8;
+    let op = crate::analyze::layout::op_binary;
+    let mut linear: Option<Expr> = None;
+    for (index, extent) in load.indices.iter().zip(ty.shape.iter()) {
+        linear = Some(match linear {
+            None => index,
+            Some(outer) => op(
+                "_OpAdd",
+                Any::from(op("_OpMul", Any::from(outer), Any::from(extent))?),
+                Any::from(index),
+            )?,
+        });
+    }
+    let Some(linear) = linear else {
+        return Ok(None);
+    };
+    let bytes = op("_OpMul", Any::from(linear), Any::from(itemsize))?;
+    Ok(Some((tensor, bytes)))
 }
 
 /// `address` with `uint32(reinterpret(tensor_data_ptr(parent), uint64))`, the column

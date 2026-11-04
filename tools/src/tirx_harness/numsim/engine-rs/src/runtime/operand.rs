@@ -1133,6 +1133,29 @@ impl PhysicalPtr {
                 "DeclBuffer memory space disagrees with its resolved address",
             )),
         }?;
+        // The view's elements are accessed at their natural alignment, as a
+        // PTX access of that width requires, so its base address must have it.
+        if view_itemsize == 0 {
+            return Err(EngineError::message("DeclBuffer itemsize must be nonzero"));
+        }
+        let alignment = view_itemsize & view_itemsize.wrapping_neg();
+        let starts: Vec<(usize, usize)> = match &view {
+            RuntimeBuffer::Global(global) => vec![(first_lane, global.byte_offset())],
+            RuntimeBuffer::Shared { byte_offset, .. }
+            | RuntimeBuffer::Local { byte_offset, .. } => {
+                vec![(first_lane, *byte_offset)]
+            }
+            RuntimeBuffer::RemoteShared { byte_offsets, .. } => mask
+                .into_iter()
+                .map(|lane| (lane, byte_offsets[lane] as usize))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if let Some((lane, start)) = starts.into_iter().find(|(_, start)| start % alignment != 0) {
+            return Err(EngineError::message(format!(
+                "pointer-derived DeclBuffer requires {alignment}-byte alignment, got byte offset {start} on lane {lane}"
+            )));
+        }
         Ok(RuntimeBuffer::AccessView {
             buffer: Arc::new(view),
             readable_lanes: self.state.readable_lanes & mask,
@@ -2877,6 +2900,31 @@ mod tests {
                 .contains("non-writable DeclBuffer")
         );
         assert!(read_runtime_bytes(&physical, &context, &view, 0, 0, 4).is_ok());
+    }
+
+    #[test]
+    fn decl_buffer_runtime_view_requires_its_element_alignment() {
+        let (global, base) = global_pointer(64);
+        let topology = LaunchTopology::new(1, 1, 1).unwrap();
+        let context = topology.warp_contexts().next().unwrap();
+        let physical = PhysicalMemory::with_global(topology, global);
+        let lane = WarpMask::from_lanes([0]).unwrap();
+        let wide = base.with_pointee_itemsize(8);
+
+        assert!(wide
+            .runtime_view(&physical, PointerSpace::Global, 8, 16, 8, &context, lane)
+            .is_ok());
+        assert!(wide
+            .runtime_view(&physical, PointerSpace::Global, 4, 16, 8, &context, lane)
+            .err()
+            .expect("a misaligned view is rejected")
+            .to_string()
+            .contains("requires 8-byte alignment"));
+        // A 12-byte element is aligned to 4 bytes, its natural alignment.
+        assert!(base
+            .with_pointee_itemsize(12)
+            .runtime_view(&physical, PointerSpace::Global, 4, 24, 12, &context, lane)
+            .is_ok());
     }
 
     #[test]

@@ -42,6 +42,23 @@ def explicit_shared_strides_oob():
 
 
 @T.function
+def strided_shared_view_beside_a_neighbor(
+    index: T.Tensor((2,), "int32"), output: T.Tensor((1,), "float32")
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    pool = SMEMPool()
+    # Column-major: a strided layout whose span stays inside its own allocation.
+    columns = pool.alloc((4, 64), "float32", align=16, layout=TileLayout(S[(4, 64) : (1, 4)]))
+    neighbor = pool.alloc((4, 64), "float32", align=16)
+    pool.commit()
+    if lane == 0:
+        neighbor[0, 0] = T.float32(-1)
+        columns[3, 63] = T.float32(5)
+        output[0] = columns[index[0], index[1]]
+
+
+@T.function
 def nested_elect_only(output: T.Tensor((1,), "int32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     if T.cuda.elect_sync():
@@ -87,6 +104,30 @@ def test_explicit_shared_strides_still_reject_an_executed_oob_address(tmp_path):
 
     with pytest.raises(numsim.NumSimExecutionError, match="out of bounds|outside"):
         numsim.Engine().run(module, {})
+
+
+def _neighbor_inputs(row, column):
+    return {
+        "index": np.array([row, column], dtype=np.int32),
+        "output": np.zeros((1,), dtype=np.float32),
+    }
+
+
+def test_strided_shared_view_reads_inside_its_own_span(tmp_path):
+    module = numsim.transpile(strided_shared_view_beside_a_neighbor, cache_dir=tmp_path)
+    result = numsim.Engine().run(module, _neighbor_inputs(3, 63))
+
+    np.testing.assert_array_equal(result.outputs["output"], np.array([5], dtype=np.float32))
+
+
+def test_strided_shared_view_rejects_an_address_past_its_span_in_a_neighbor(tmp_path):
+    """Only a view spanning past its owner is bounded by the owner instead of itself."""
+
+    module = numsim.transpile(strided_shared_view_beside_a_neighbor, cache_dir=tmp_path)
+
+    # columns[0, 64] is element 256: the first element of `neighbor`.
+    with pytest.raises(numsim.NumSimExecutionError, match="out of bounds|outside"):
+        numsim.Engine().run(module, _neighbor_inputs(0, 64))
 
 
 @pytest.mark.parametrize(
