@@ -569,10 +569,29 @@ def _native_diagnostic_records(payload: dict[str, Any]):
         yield "execution_error", execution_error
 
 
+def _outermost_source_span(body: Any) -> dict[str, Any] | None:
+    """The first located node of ``body`` in reverse post-order.
+
+    tvm-tirx records locations on statements, not on a function or its root
+    sequence. Reverse post-order visits the root and then its last child first,
+    so this is the last located top-level statement -- for a kernel, its
+    ``device_entry`` -- the same choice ``_kernel_source_anchor`` makes from the
+    post-order source map.
+    """
+
+    from .transpiler.native_frontend import post_order_nodes
+
+    for node in reversed(list(post_order_nodes(body))):
+        span = serialize_source_span(source_span_from_node(node))
+        if _serialized_source_span_has_line(span):
+            return span
+    return None
+
+
 def _primfunc_source_anchor(func: Any, *, kernel_index: int = 0) -> dict[str, Any] | None:
     body = getattr(func, "body", None)
     if body is not None:
-        span = serialize_source_span(source_span_from_node(body))
+        span = _outermost_source_span(body)
         if _serialized_source_span_has_line(span):
             name = getattr(func, "__name__", None)
             attrs = getattr(func, "attrs", None)

@@ -625,7 +625,7 @@ def test_real_native_deadlock_report_names_the_blocked_kernel_statement(tmp_path
     rendered = report.format()
     assert "execution cannot make progress; blocked warps 0" in rendered
     assert "Blocked warps 0: await mbarrier.try_wait; phase 0" in rendered
-    assert "T.cuda.mbarrier_wait(T.address_of(barriers), 0)" in rendered
+    assert "TIRx: T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)" in rendered
     wait_line = next(
         line_number
         for line_number, line in enumerate(Path(__file__).read_text().splitlines(), start=1)

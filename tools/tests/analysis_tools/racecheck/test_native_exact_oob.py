@@ -426,10 +426,14 @@ def test_public_native_racecheck_missing_required_binding_is_typed_incomplete(na
     source_span = source_anchor["source_span"]
     source_path = Path(source_span["source_name"]).resolve()
     assert source_path == Path(__file__).resolve()
-    assert (
-        "def native_concrete_lane_oob_variants("
-        in source_path.read_text().splitlines()[source_span["line"] - 1]
+    # tvm-tirx locates statements, not functions: the kernel anchor is the
+    # kernel's outermost located statement, its device entry.
+    lines = source_path.read_text().splitlines()
+    assert "T.device_entry(" in lines[source_span["line"] - 1]
+    enclosing = next(
+        line for line in reversed(lines[: source_span["line"]]) if line.startswith("def ")
     )
+    assert enclosing.startswith("def native_concrete_lane_oob_variants(")
     assert missing_native["access_count"] == 0
     assert missing_native["accesses"] == []
     assert missing_native["execution_error"] is None

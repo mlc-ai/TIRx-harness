@@ -1,10 +1,10 @@
 """A frontend finding points at the offending node, with no anchor precondition.
 
-Reporting an unsupported node must not depend on the enclosing PrimFunc having a
-usable span. TVM's statement constructors (``SeqStmt(...)``,
-``PrimFunc.with_body(...)``) default ``span=None``, so a caller that recomposed
-the root hands in a spanless function -- and the finding is about one node
-anyway, whose own span the analysis already knows.
+Reporting an unsupported node must not depend on the enclosing function having a
+usable location. tvm-tirx records locations on statements only, and its
+constructors (``SeqStmt(...)``, ``Function.with_body(...)``) default to
+``UnknownLoc``, so no root carries one -- and the finding is about one node
+anyway, whose own location the analysis already knows.
 """
 
 from __future__ import annotations
@@ -82,12 +82,15 @@ def _anchor_span(finding) -> dict:
 
 
 def test_rebuilt_root_still_has_no_span():
-    """Guard the premise: this is the shape that used to be rejected outright."""
+    """Guard the premise: no root carries a location; only statements do."""
 
     kernel = _kernel_with_rebuilt_root()
     assert isinstance(kernel.loc, ir.UnknownLoc)
     assert isinstance(kernel.body.loc, ir.UnknownLoc)
-    assert not isinstance(unsupported_local_layout.body.loc, ir.UnknownLoc)
+    # tvm-tirx records no location on a parsed function or its root either.
+    assert isinstance(unsupported_local_layout.loc, ir.UnknownLoc)
+    assert isinstance(unsupported_local_layout.body.loc, ir.UnknownLoc)
+    assert not isinstance(unsupported_local_layout.body.seq[0].loc, ir.UnknownLoc)
 
 
 @pytest.mark.parametrize("rebuilt", [False, True], ids=["as-parsed", "rebuilt-root"])
@@ -132,8 +135,9 @@ def call_location_probe(source: T.Tensor((32,), "uint8")):
     """A valid call whose source location survives a frontend rejection."""
 
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    T.evaluate(T.cuda.mov_sreg(32, "nsmid") + T.uint32(source[lane]))
+    # The evaluated value must be the call: a pure expression around it has no
+    # effect, and NumSim does not emit it.
+    T.evaluate(T.cuda.mov_sreg(32, "nsmid"))
 
 
 _UNMODELED_CALL_LINE = _line_containing('T.cuda.mov_sreg(32, "nsmid")')
@@ -150,5 +154,5 @@ def test_unmodeled_form_is_also_located(tmp_path):
     )
 
     finding = _only_frontend_finding(report)
-    assert "register 'nsmid' is not modeled at 32 bits" in finding.message
+    assert 'register "nsmid" is not modeled at 32 bits' in finding.message
     assert _anchor_span(finding)["line"] == _UNMODELED_CALL_LINE

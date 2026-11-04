@@ -84,5 +84,5 @@ def test_race_report_prints_both_conflicting_source_operations():
     rendered = report.format()
     assert "Prior: warp 0, source op" in rendered
     assert "Current: warp 1, source op" in rendered
-    assert "shared = warp + 1" in rendered
+    assert "shared[0] = warp + 1" in rendered
     assert "allocation#" in rendered

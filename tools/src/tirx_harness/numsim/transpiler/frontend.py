@@ -13,6 +13,7 @@ from typing import Any
 
 from tvm_ffi import structural_hash
 
+from tvm_tirx import ir, tirx
 from tvm_tirx.tirx import Function
 
 from ..errors import NumSimBuildError, UnsupportedTIRxError
@@ -441,18 +442,32 @@ def _locate_unsupported_entry(kernel: Any, item: str) -> Any | None:
     named = re.match(r"(?:buffer|pointer):([^:]+):", item)
     if named is None:
         return None
-    # A buffer-level rejection names no operation, so point at the first access
-    # that touches the offending buffer. ``node`` is the live IR object, which
-    # keeps this an identity match rather than a text search; it is absent for
-    # a spec restored from cache, in which case this entry stays unlocated.
+    # A buffer-level rejection names no operation, so point at the first
+    # statement that declares or accesses the offending tensor, in program
+    # order: its Bind, then its loads and stores. ``node`` is the live IR
+    # object, which keeps this an identity match rather than a text search; it
+    # is absent for a spec restored from cache, in which case this entry stays
+    # unlocated.
     name = named.group(1)
     for entry in kernel.source_map:
         node = entry.node
         if entry.span is None or node is None:
             continue
-        buffer = getattr(node, "buffer", None)
-        if buffer is not None and _plain_text(buffer.name) == name:
+        tensor = _tensor_of(node)
+        if tensor is not None and _plain_text(tensor.name) == name:
             return entry.span
+    return None
+
+
+def _tensor_of(node: Any) -> Any | None:
+    """The tensor variable ``node`` declares (Bind) or accesses (load, store)."""
+
+    if isinstance(node, ir.Bind):
+        return node.var if tirx.is_tensor_var(node.var) else None
+    if isinstance(node, ir.TensorStore):
+        return node.dest
+    if isinstance(node, ir.TensorLoad):
+        return node.source
     return None
 
 
