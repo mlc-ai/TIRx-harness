@@ -343,7 +343,7 @@ def kernel(source: T.Tensor((32,), "int32"), replacement: T.Tensor((32,), "int32
         T.cuda.warp_sync()
         T.ptx.fence.proxy.async_.shared__cta()
         if lane == 0:
-            if {replace}:
+            if T.constexpr({replace}):
                 T.ptx.tensormap_replace.tile.global_address.global_.b1024.b64(
                     {descriptor}, T.reinterpret(replacement.ptr_to([0]), ty="uint64"))
                 T.ptx.fence.proxy.tensormap__generic.release.gpu()

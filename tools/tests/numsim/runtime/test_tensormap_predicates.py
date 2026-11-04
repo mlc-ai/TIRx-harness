@@ -23,8 +23,10 @@ def tensor_map_predicate_case(space, *, fault=None, carrier="uint"):
     pointer = f"{image}.ptr_to([lane * 128])"
     invalid_pointer = f"{image}.ptr_to([1024])"
     if not space:
-        pointer = f'T.reinterpret(T.reinterpret("uint64", {pointer}), ty="handle")'
-        invalid_pointer = f'T.reinterpret(T.reinterpret("uint64", {invalid_pointer}), ty="handle")'
+        pointer = f'T.reinterpret(T.reinterpret({pointer}, ty="uint64"), ty="handle")'
+        invalid_pointer = (
+            f'T.reinterpret(T.reinterpret({invalid_pointer}, ty="uint64"), ty="handle")'
+        )
     qualifier = f"{space}." if space else ""
     # Every replacement entry available on SM100, using one compatible image.
     # The non-issuing lanes have different values and out-of-bounds pointers.

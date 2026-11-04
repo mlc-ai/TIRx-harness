@@ -113,7 +113,10 @@ def _prepare(name, config, launch=None):
         stack.enter_context(patch.object(torch.cuda, "current_device", return_value=0))
         stack.enter_context(patch("tirx_kernels.runner.hardware_num_sms", return_value=1))
         stack.enter_context(patch("tirx_kernels.runner.compile_kernel", compile_kernel))
+        # tvm_tirx.compile and tvm_tirx.tirx.compile name one function; patch both
+        # names, since kernels call either.
         stack.enter_context(patch.object(tvm_tirx, "compile", compile_kernel))
+        stack.enter_context(patch.object(tvm_tirx.tirx, "compile", compile_kernel))
         stack.enter_context(
             patch.object(
                 tvm_ffi,

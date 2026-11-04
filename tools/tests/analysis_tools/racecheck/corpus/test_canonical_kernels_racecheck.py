@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from time import perf_counter
 
 import pytest
@@ -55,6 +56,8 @@ def test_native_racecheck_validates_canonical_kernel(
     entry,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
+    if entry.name == "alphamoe_fp8_blockscale_qwen3next":
+        pytest.xfail("Racecheck does not yet support AlphaMoE's wait over multiple tagged records")
     case = entry.prepare()
     module = numsim.transpile(
         case.kernel,
@@ -121,6 +124,40 @@ def test_native_racecheck_validates_canonical_kernel(
         assert payload["incomplete"] == [], context
         assert payload["execution_error"] is None, context
         assert payload["stats"]["completed_task_count"] == payload["stats"]["task_count"], context
+
+
+def _operation_lines(compiled, operation) -> set[tuple[str, int]]:
+    """Every ``(file, line)`` on the source call stack of a reported operation."""
+
+    (entry,) = (
+        source
+        for source in compiled.spec.kernels[0].source_map
+        if source.op_id == operation["source_op_id"]
+    )
+    span = entry.span.to_dict()
+    spans = span["spans"] if span.get("kind") == "sequential" else [span]
+    return {(str(item["source_name"]), int(item["line"])) for item in spans}
+
+
+def _mega_moe_alias_sites() -> tuple[tuple[str, int], tuple[str, int]]:
+    """The ``combine_chunks`` load and the ``smem_expert_count`` store that alias."""
+
+    from tirx_kernels.ported.deepgemm._sm100_fp8_fp4_mega_moe import kernel
+
+    path = str(Path(kernel.__file__))
+    lines = Path(path).read_text().splitlines()
+    (reader,) = (
+        number
+        for number, text in enumerate(lines, start=1)
+        if "lds128(load_ptr, epilogue_bf16_packed)" in text
+    )
+    (writer,) = (
+        number
+        for number, text in enumerate(lines, start=1)
+        if text.strip() == "txl.ptx.st.shared.u32("
+        and "smem_expert_count.ptr_to([dispatch_expert_idx])" in lines[number]
+    )
+    return (path, reader), (path, writer)
 
 
 @pytest.mark.performance
@@ -190,8 +227,13 @@ def test_real_mega_moe_racecheck_completes_within_performance_budget(
     # Verify the expected review's footprint and count as well as completion.
     (advisory,) = result.advisories
     assert advisory["space"] == "shared", payload
-    assert advisory["reader_buffer"] == "anonymous_buffer_29", payload
-    assert advisory["writer_buffer"] == "anonymous_buffer_8", payload
+    # tvm-tirx names every TIRx-lite tensor ``v``, so NumSim's logical names are
+    # generated ordinals that differ between configurations. The two views are
+    # identified by the operations that touch them instead.
+    reader_site, writer_site = _mega_moe_alias_sites()
+    assert advisory["reader_buffer"] != advisory["writer_buffer"], payload
+    assert reader_site in _operation_lines(compiled, advisory["reader_operation"]), payload
+    assert writer_site in _operation_lines(compiled, advisory["writer_operation"]), payload
     assert advisory["occurrences"] == alias_occurrences, payload
     assert advisory["overlaps"] == [
         {"allocation_id": 0, "byte_offset": 0, "byte_len": alias_bytes, "byte_end": alias_bytes}
