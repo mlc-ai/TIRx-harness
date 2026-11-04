@@ -38,7 +38,7 @@ common = [
   "nvidia-cuda-nvrtc==13.2.78",
   "nvidia-cuda-nvdisasm==13.3.73",
   # No tvm-tirx based release is on PyPI yet, so this pins its main branch.
-  "tirx-kernels @ git+https://github.com/mlc-ai/tirx-kernels@42c52881e8416d8d22ae9ada9dda9eae1a4d6d5a",
+  "tirx-kernels @ git+https://github.com/mlc-ai/tirx-kernels@7ab6f5252dcb27563680c3d140169e4cef6e49b3",
   "kcoral>=0.1.0",
 ]
 # setup.py also publishes this group as the package's default dependencies.
