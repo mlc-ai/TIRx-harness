@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
 from tests.numsim.support.execution import run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def swizzle96_kernel(offset=0, replace=False):
@@ -15,15 +15,14 @@ def swizzle96_kernel(offset=0, replace=False):
         if replace
         else "T.evaluate(0)"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(descriptor: T.Buffer((128,), "uint8"), out: T.Buffer((192,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((224,), "uint32", scope="shared", align=256)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(descriptor: T.Tensor((128,), "uint8"), out: T.Tensor((192,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((224,), "uint32", align=256)
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         {mutation}
         {"T.ptx.fence.proxy.tensormap__generic.release.gpu()" if replace else "T.evaluate(0)"}

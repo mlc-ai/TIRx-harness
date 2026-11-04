@@ -3,15 +3,15 @@
 import numpy as np
 
 from tirx_harness import racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def unconfigured_setmaxnreg(output: T.Buffer((384,), "int32")):
-    T.device_entry()
-    wg = T.warpgroup_id([3])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
+@T.function
+def unconfigured_setmaxnreg(output: T.Tensor((384,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=384))
+    wg = T.cuda.warpgroup_id()
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
     if wg == 2:
         T.ptx.setmaxnreg.dec.sync.aligned.u32(96)
     T.cuda.cta_sync()
@@ -31,13 +31,15 @@ def test_unconfigured_register_budget_is_still_checked(monkeypatch, tmp_path):
         assert any(f.kind == "setmaxnreg_pool_deadlock" for f in report.findings)
 
 
-@T.prim_func
-def resident_register_redistribution(output: T.Buffer((384,), "int32")):
-    T.device_entry()
-    T.attr({"tirx.launch_bounds_min_blocks_per_sm": 2})
-    wg = T.warpgroup_id([3])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
+@T.function
+def resident_register_redistribution(output: T.Tensor((384,), "int32")):
+    T.device_entry(
+        launch=T.cuda.LaunchConfig(grid=1, block=384),
+        kernel_attrs=T.cuda.KernelAttributes(min_blocks_per_sm=2),
+    )
+    wg = T.cuda.warpgroup_id()
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
     if wg == 0:
         T.ptx.setmaxnreg.inc.sync.aligned.u32(104)
     if wg == 1:

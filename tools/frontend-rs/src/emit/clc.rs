@@ -5,7 +5,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 pub struct ClcQueryParts {
     /// Register destinations in operand order; `None` is a sunk lane.
@@ -94,6 +94,12 @@ impl<'a> Emitter<'a> {
         source_op_id: i64,
     ) -> AResult<()> {
         let op_name = decoded.op_name.as_str();
+        if self.plan.topology.is_multidimensional() {
+            // A cancelled CTA's response carries a linear CTA id below.
+            return unsupported(format!(
+                "{op_name} on a grid or cluster that extends along y or z is not modeled"
+            ));
+        }
         let response =
             self.emit_as_unsigned_bits(&parts.response, 128, op_name, "clc_response", None)?;
         let first_ctaid = self.control_name("clc_first_ctaid");

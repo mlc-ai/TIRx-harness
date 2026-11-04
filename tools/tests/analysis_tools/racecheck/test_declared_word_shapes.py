@@ -35,8 +35,8 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.ir import PointerType, PrimType
-from tvm.script import tirx as T
+from tvm_tirx.ir import PrimType, PtrType
+from tvm_tirx.script import tirx as T
 
 GEN = 1
 WORD = (GEN << 32) | 0xDEADBEEF
@@ -45,13 +45,11 @@ WORD_B = (2 << 32) | 0xBBBB
 PAYLOAD = 0x1234
 
 
-@T.prim_func
-def poll_until_generation(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def poll_until_generation(slot: T.Tensor((1,), "uint64"), sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.global_.u64(slot.ptr_to([0]), T.uint64(0))
@@ -73,20 +71,18 @@ def poll_until_generation(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
-@T.prim_func
-def publish_via_shared_cluster(sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    slot = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def publish_via_shared_cluster(sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    slot = T.alloc_shared((1,), "uint64")
     mapped = T.alloc_local((1,), "uint64")
     T.ptx.mapa.u64(mapped[0], slot.ptr_to([0]), T.uint32(0))
-    remote_ptr: T.let[T.Var(name="dsm_slot", ty=PointerType(PrimType("uint64"), "shared"))] = (
-        T.reinterpret(PointerType(PrimType("uint64"), "shared"), mapped[0])
+    remote_ptr: T.let[T.Var(name="dsm_slot", ty=PtrType(PrimType("uint64"), "shared"))] = (
+        T.reinterpret(mapped[0], ty=PtrType(PrimType("uint64"), "shared"))
     )
-    remote = T.decl_buffer((1,), "uint64", scope="shared", data=remote_ptr)
+    remote = T.decl_tensor(remote_ptr, ty_args=[T.Tensor((1,), "uint64", scope="shared")])
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.shared__cluster.u64(remote.ptr_to([0]), T.uint64(0))
@@ -103,13 +99,11 @@ def publish_via_shared_cluster(sink: T.Buffer((1,), "uint64")):
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
-@T.prim_func
-def read_once(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def read_once(slot: T.Tensor((1,), "uint64"), sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.global_.u64(slot.ptr_to([0]), T.uint64(0))
@@ -124,13 +118,11 @@ def read_once(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
-@T.prim_func
-def poll_with_non_unique_exit(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def poll_with_non_unique_exit(slot: T.Tensor((1,), "uint64"), sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.global_.u64(slot.ptr_to([0]), T.uint64(0))
@@ -153,13 +145,11 @@ def poll_with_non_unique_exit(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,
             sink[0] = T.bitwise_and(observed[0], T.uint64(0xFFFFFFFF))
 
 
-@T.prim_func
-def concurrent_writes_then_read(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def concurrent_writes_then_read(slot: T.Tensor((1,), "uint64"), sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.global_.u64(slot.ptr_to([0]), T.uint64(WORD_A))
@@ -174,13 +164,11 @@ def concurrent_writes_then_read(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((
             sink[0] = observed[0]
 
 
-@T.prim_func
-def float_atomic_add_order(acc: T.Buffer((1,), "float32"), sink: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def float_atomic_add_order(acc: T.Tensor((1,), "float32"), sink: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "float32")
         if cta == 0:
@@ -196,13 +184,11 @@ def float_atomic_add_order(acc: T.Buffer((1,), "float32"), sink: T.Buffer((1,), 
             sink[0] = acc[0]
 
 
-@T.prim_func
-def integer_atomic_add_order(acc: T.Buffer((1,), "uint32"), sink: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def integer_atomic_add_order(acc: T.Tensor((1,), "uint32"), sink: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "uint32")
         if cta == 0:
@@ -216,30 +202,26 @@ def integer_atomic_add_order(acc: T.Buffer((1,), "uint32"), sink: T.Buffer((1,),
             sink[0] = acc[0]
 
 
-@T.prim_func
-def integer_atomic_ticket(acc: T.Buffer((1,), "uint32"), sink: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def integer_atomic_ticket(acc: T.Tensor((1,), "uint32"), sink: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "uint32")
         T.ptx.atom.relaxed.cluster.global_.add.u32(old[0], acc.ptr_to([0]), T.uint32(1))
         sink[cta] = old[0]
 
 
-@T.prim_func
+@T.function
 def poll_then_read_separate_payload(
-    slot: T.Buffer((1,), "uint64"),
-    data: T.Buffer((1,), "uint64"),
-    sink: T.Buffer((1,), "uint64"),
+    slot: T.Tensor((1,), "uint64"),
+    data: T.Tensor((1,), "uint64"),
+    sink: T.Tensor((1,), "uint64"),
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             T.ptx.st.relaxed.cluster.global_.u64(slot.ptr_to([0]), T.uint64(0))

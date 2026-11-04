@@ -2,12 +2,6 @@
 
 ## Running the Test Suites
 
-A fresh worktree first needs the Rust frontend dependency:
-
-```bash
-git submodule update --init thirdparty/tvm-rust-ext  # repo root
-```
-
 Tests load canonical kernels from the environment's installed `tirx-kernels`
 package. Then from `tools/`:
 
@@ -33,9 +27,7 @@ python -m pytest -q -n 16 --dist=worksteal -m "not numsim_gpu"
 Wiki cases can fail on a clean checkout. A failure count proves nothing on its
 own; only the **difference** between failure sets does.
 
-1. Create a pristine worktree at the base commit and initialize its submodules
-   (`git submodule update --init --recursive`). A submodule left at a different
-   commit manufactures dozens of phantom differences.
+1. Create a pristine worktree at the base commit.
 2. Run the identical command in both, **serially**. Concurrent runs contend for
    CPU and GPUs and produce failures that reproduce in neither tree alone.
 3. Compare the sorted `FAILED`/`ERROR` node id sets. Only ids appearing solely

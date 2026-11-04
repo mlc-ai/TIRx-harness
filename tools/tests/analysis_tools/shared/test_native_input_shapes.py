@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tirx_kernels.tirx_lite as txl
-from tvm import tirx
-from tvm.script import tirx as T
 
+import tirx_kernels.tirx_lite as txl
 from tirx_harness.numsim import checkers
 from tirx_harness.numsim.errors import NumSimExecutionError
+from tvm_tirx import tirx
+from tvm_tirx.script import tirx as T
 
 
 def symbolic_state(state_in, state_out):
     # Match the recurrence's rank-only parameter annotations and permit aliasing.
+    txl.device_entry(launch=txl.cuda.LaunchConfig(grid=1, block=32))
     lane = txl.lane_id()
     value = txl.local_scalar("uint32")
     txl.ptx.ld.global_.b32(value, state_in.ptr_to([0, 0, 0, lane]))
@@ -19,36 +20,34 @@ def symbolic_state(state_in, state_out):
 
 
 symbolic_state.__annotations__ = {
-    "state_in": txl.gptr["float32", 4],
-    "state_out": txl.gptr["float32", 4],
+    "state_in": txl.Tensor(tuple(txl.int64() for _ in range(4)), "float32"),
+    "state_out": txl.Tensor(tuple(txl.int64() for _ in range(4)), "float32"),
 }
-symbolic_state = txl.kernel(warps=1, grid=1)(symbolic_state)
+symbolic_state = txl.kernel()(symbolic_state)
 
 
 _ROWS = tirx.Var("rows", "int64")
 
 
-@T.prim_func
-def shared_rows(source: T.Buffer((_ROWS, 32), "float32"), output: T.Buffer((_ROWS, 32), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def shared_rows(source: T.Tensor((_ROWS, 32), "float32"), output: T.Tensor((_ROWS, 32), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[0, lane] = source[0, lane]
 
 
-@T.prim_func
-def explicit_rows(rows: T.int32, output: T.Buffer((rows, 32), "int32")):
-    T.device_entry()
-    cta = T.cta_id([rows])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def explicit_rows(rows: T.int32, output: T.Tensor((rows, 32), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=rows, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     output[cta, lane] = lane
 
 
-@T.prim_func
-def symbolic_tensor_map(output: T.Buffer((_ROWS, 32), "int32")):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
-    T.tensormap_encode_tiled(
+@T.function
+def symbolic_tensor_map(output: T.Tensor((_ROWS, 32), "int32")):
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
+    T.cuda.tensormap_encode_tiled(
         tensor_map,
         output.data,
         32,
@@ -61,17 +60,15 @@ def symbolic_tensor_map(output: T.Buffer((_ROWS, 32), "int32")):
         descriptor_dtype="int32",
         rank=2,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[0, lane] = lane
 
 
-@T.prim_func
-def symbolic_race(output: T.Buffer((T.int64(), 32), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def symbolic_race(output: T.Tensor((T.int64(), 32), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[0, 0] = lane
 
 

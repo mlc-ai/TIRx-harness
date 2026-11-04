@@ -5,7 +5,7 @@ use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::register_call::{require_register_call, table_marker, PTX_TYPE_MARKERS};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// The engine functions (below `v2::`) the lowerings call.
 pub const ACTIVEMASK: &str = "warp::activemask";

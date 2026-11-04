@@ -4,19 +4,19 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def global_scoped_message_passing(
     mode: T.int32,
-    data: T.Buffer((2,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((2,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     # Isolate release/acquire halves: an SC fence can independently order the
     # misplaced-publication case. CUDA thread_fence has separate SC coverage.
@@ -81,15 +81,15 @@ def global_scoped_message_passing(
         output[0] = data[1] if mode == 8 else data[0]
 
 
-@T.prim_func
+@T.function
 def typed_cluster_fence_message_passing(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     if (warp == 0) and (lane == 0):
         data[0] = T.int32(41)

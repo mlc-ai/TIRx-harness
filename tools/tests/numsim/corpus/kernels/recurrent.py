@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import (
     ComparisonRegion,
     ComparisonSpec,
@@ -197,7 +198,13 @@ def _tensor_map(
 
 
 def _agent_kda_tensor_map(
-    base: np.ndarray, seq_len: int, num_heads: int, *, beta: bool = False, rows: int = 64
+    base: np.ndarray,
+    seq_len: int,
+    num_heads: int,
+    *,
+    beta: bool = False,
+    rows: int = 64,
+    slabs: int = 2,
 ) -> np.ndarray:
     import torch
 
@@ -227,7 +234,7 @@ def _agent_kda_tensor_map(
         if beta:
             encoder(torch.from_numpy(base), seq_len, num_heads)
         else:
-            encoder(torch.from_numpy(base), seq_len, num_heads, rows=rows)
+            encoder(torch.from_numpy(base), seq_len, num_heads, rows=rows, slabs=slabs)
     [descriptor] = descriptors
     return descriptor
 
@@ -257,6 +264,18 @@ def prepare_native_kda_forward_case() -> NumSimCase:
     final_state = np.full_like(initial_state, np.nan)
     output = np.full(values_shape, 0x7FC0, dtype=np.uint16)
 
+    # The packed route takes a per-CTA work-item table, as its launcher builds
+    # with packed_schedule. Run the full 64-CTA schedule so each CTA owns one
+    # complete head across both sequences; the kernel and the table share the
+    # schedule, whose item capacity the kernel is built for.
+    cu = (0, seq_lens[0], seq_len)
+    schedule = native_kda_forward.packed_schedule(cu, num_heads, num_heads, False)
+    with patch("tirx_kernels.runner.hardware_num_sms", return_value=num_heads):
+        kernel = _specialize_runtime_scalars(
+            native_kda_forward.get_kernel(num_heads=num_heads, seq_lens=seq_lens),
+            {"num_ctas": num_heads},
+        )
+
     qkvg_binding = qkvg.reshape(-1)
     output_binding = output.reshape(-1)
 
@@ -282,8 +301,9 @@ def prepare_native_kda_forward_case() -> NumSimCase:
     output_map = _agent_kda_tensor_map(output_binding, seq_len, num_heads, rows=32)
     beta_map = _agent_kda_tensor_map(beta.reshape(-1), seq_len, num_heads, beta=True)
     args = {
-        "q_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads),
-        "k_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads),
+        # The launcher loads q and k as one 32-row slab and v and g as two 64-row slabs.
+        "q_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads, rows=32, slabs=1),
+        "k_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads, rows=32, slabs=1),
         "v_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads),
         "g_map": _agent_kda_tensor_map(qkvg_binding, seq_len, num_heads),
         "beta_map": beta_map,
@@ -295,17 +315,12 @@ def prepare_native_kda_forward_case() -> NumSimCase:
         "final_state": final_state.reshape(-1),
         "hand": np.zeros(num_heads * _HEAD_DIM * _HEAD_DIM, dtype=np.float32),
         "flags": np.zeros(num_heads + 1, dtype=np.int32),
-        "cu": np.array([0, seq_lens[0], seq_len], dtype=np.int64),
-        "nseq": np.int32(len(seq_lens)),
+        "items": np.frombuffer(schedule.words, dtype=np.uint32).copy(),
+        "item_counts": np.array(schedule.counts, dtype=np.int32),
         "scale": np.float32(1.0 / math.sqrt(_HEAD_DIM)),
     }
     return NumSimCase(
-        # The public packed dispatch returns one PrimFunc. Run its full 64-CTA
-        # schedule so each CTA owns one complete head across both sequences.
-        kernel=_specialize_runtime_scalars(
-            native_kda_forward.get_kernel(num_heads=num_heads, seq_lens=seq_lens),
-            {"num_ctas": num_heads},
-        ),
+        kernel=kernel,
         args=args,
         outputs={"output": "o_map", "final_state": "final_state"},
         reference=lambda: {
@@ -495,7 +510,7 @@ def _specialize_runtime_scalars(kernel: Any, values: dict[str, int]) -> Any:
     substitutions = {
         parameter: values[parameter.name] for parameter in kernel.params if parameter.name in values
     }
-    return kernel.specialize(substitutions)
+    return specialize(kernel, substitutions)
 
 
 def _prepare_kda_decode_case(

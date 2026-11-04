@@ -9,21 +9,21 @@ from .checker_report import RaceReport, SyncCheckReport
 from .checker_runner import run_native_checker
 
 if TYPE_CHECKING:
-    from tvm.tir import PrimFunc
+    from tvm_tirx.tirx import Function
 
 
-def synccheck(kernel: PrimFunc, inputs: dict | None = None) -> SyncCheckReport:
+def synccheck(kernel: Function, inputs: dict | None = None) -> SyncCheckReport:
     """Run native synchronization analysis for one concrete invocation."""
     return _run_synccheck(kernel, inputs=inputs)
 
 
-def racecheck(kernel: PrimFunc, inputs: dict | None = None) -> RaceReport:
+def racecheck(kernel: Function, inputs: dict | None = None) -> RaceReport:
     """Run native memory-race analysis for one concrete invocation."""
     return _run_racecheck(kernel, inputs=inputs)
 
 
 def _run_synccheck(
-    kernel: PrimFunc,
+    kernel: Function,
     inputs: dict | None = None,
     *,
     coverage_bounds=None,
@@ -55,7 +55,7 @@ def _run_synccheck(
 
 
 def _run_racecheck(
-    kernel: PrimFunc,
+    kernel: Function,
     inputs: dict | None = None,
     *,
     subset=None,

@@ -11,12 +11,13 @@ from tests.numsim.corpus.kernels.gemm import (
     _pack_e2m1,
 )
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
 
 
 def _specialize(kernel, values: dict[str, int | float]):
-    return kernel.specialize(
-        {param: values[param.name] for param in kernel.params if param.name in values}
+    return specialize(
+        kernel, {param: values[param.name] for param in kernel.params if param.name in values}
     )
 
 
@@ -290,12 +291,13 @@ def prepare_flashinfer_fused_dit_layernorm_case() -> NumSimCase:
         "runtime_epsilon": epsilon,
         "runtime_has_residual": 1,
     }
-    kernel = kernel.specialize(
+    kernel = specialize(
+        kernel,
         {
             param: runtime_values[param.name]
             for param in kernel.params
             if param.name in runtime_values
-        }
+        },
     )
 
     def to_bfloat16(values: np.ndarray) -> np.ndarray:

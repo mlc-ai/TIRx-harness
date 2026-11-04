@@ -41,7 +41,6 @@ the Rust toolchain listed above.
 ```bash
 git clone https://github.com/mlc-ai/TIRx-harness.git
 cd TIRx-harness
-git submodule update --init thirdparty/tvm-rust-ext
 python -m pip install .
 ```
 
@@ -59,7 +58,7 @@ source .venv/bin/activate
 After any of these methods, check imports (this does not run checks or GPU kernels):
 
 ```bash
-python -c "import tvm.tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
+python -c "import tvm_tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
 ```
 
 ## Install kcoral server dependencies

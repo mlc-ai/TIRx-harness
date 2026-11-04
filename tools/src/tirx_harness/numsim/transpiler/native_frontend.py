@@ -1,9 +1,9 @@
-"""Installed, compile-time services backed by the unmodified TVM Rust extension."""
+"""Installed, compile-time services backed by the native frontend over the tvm-tirx crate."""
 
 from __future__ import annotations
 
 import json
-from functools import cache, partial
+from functools import cache
 from importlib.machinery import EXTENSION_SUFFIXES
 from importlib.metadata import distributions
 from pathlib import Path
@@ -41,6 +41,9 @@ def library_path() -> Path:
 def _library() -> Any:
     import tvm_ffi
 
+    # Load libtvm_tirx_compiler, which the frontend links without an rpath.
+    import tvm_tirx  # noqa: F401
+
     library = tvm_ffi.load_module(str(library_path()))
     actual = str(library["numsim_frontend_identity"]())
     expected = _expected_identity()
@@ -49,14 +52,9 @@ def _library() -> Any:
             f"NumSim TVM Rust frontend mismatch: expected {expected}, found {actual}"
         )
     try:
-        from tvm.backend.cuda.tile_primitive.copy_async.tcgen05_cp import _build_plan
-
         from .ptx_dialect import register_native_ptx_decoder
 
         register_native_ptx_decoder(library["numsim_ptx_payload_schema"]())
-        tvm_ffi.register_global_func(
-            NATIVE_TCGEN05_CP_PLAN, partial(_tcgen05_cp_plan_error, _build_plan), override=True
-        )
     except Exception as error:
         raise NumSimBuildError("NumSim native callback registration failed") from error
     return library
@@ -71,19 +69,6 @@ def _expected_identity() -> str:
         ) from error
 
 
-NATIVE_TCGEN05_CP_PLAN = "numsim.frontend.tcgen05_cp_plan_error"
-
-
-def _tcgen05_cp_plan_error(build_plan: Any, node: Any) -> str:
-    """`tile_forms._validate_tcgen_cp_layout`: the production plan's rejection, or ``""``."""
-
-    try:
-        build_plan(node)
-    except (TypeError, ValueError) as error:
-        return str(error)
-    return ""
-
-
 def layout_linear_offsets(layout: Any, count: int) -> Any:
     """Map a bounded logical range in one native call."""
     return _library()["numsim_layout_linear_offsets"](layout, count)
@@ -94,15 +79,15 @@ def post_order_nodes(node: Any) -> Any:
 
 
 def normalize_host_tensor_maps(func: Any) -> Any:
-    import tvm
+    import tvm_tirx
 
-    return _call("numsim_normalize_host_tensor_maps", func, tvm.__version__)
+    return _call("numsim_normalize_host_tensor_maps", func, tvm_tirx.__version__)
 
 
 def semantic_ir_json(value: Any) -> str:
-    import tvm
+    import tvm_tirx
 
-    return str(_library()["numsim_semantic_ir_json"](value, tvm.__version__))
+    return str(_library()["numsim_semantic_ir_json"](value, tvm_tirx.__version__))
 
 
 def ptx_call_parts(call: Any, modifier_count: int) -> Any:

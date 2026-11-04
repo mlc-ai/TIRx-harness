@@ -215,11 +215,11 @@ def prepare_bmm_fp8_rubin_case() -> NumSimCase:
             "bmm_fp8_rubin must declare exactly one sm_107a runtime architecture, "
             f"got {runtime_archs!r}"
         )
-    kernel = bmm_fp8_rubin.get_kernel(**config).with_attr("tirx.cuda_arch", runtime_archs[0])
+    kernel = bmm_fp8_rubin.get_kernel(**config, backend_config={"cuda": {"arch": runtime_archs[0]}})
 
     return NumSimCase(
-        # get_kernel() exposes a PrimFunc, so retain its registry-owned target
-        # explicitly for architecture-sensitive SM100/SM107 descriptor decoding.
+        # The factory records its registry-owned target on the device entry for
+        # architecture-sensitive SM100/SM107 descriptor decoding.
         kernel=kernel,
         args={
             "a": a.reshape(-1),

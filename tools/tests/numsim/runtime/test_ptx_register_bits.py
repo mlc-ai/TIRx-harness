@@ -3,37 +3,35 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_mov_b128_pack_store(
-    low: T.Buffer((32,), "uint64"),
-    high: T.Buffer((32,), "uint64"),
-    output: T.Buffer((32, 4), "uint32"),
+    low: T.Tensor((32,), "uint64"),
+    high: T.Tensor((32,), "uint64"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed = T.alloc_local((1,), "uint128")
     T.ptx.mov.b128(packed[0], low[lane], high[lane])
     T.ptx["st.global.b128"](output.ptr_to([lane, 0]), packed[0])
 
 
-@T.prim_func
+@T.function
 def ptx_register_bits(
-    input_u32: T.Buffer((32, 2), "uint32"),
-    input_i32: T.Buffer((32, 2), "int32"),
-    input_u64: T.Buffer((32, 2), "uint64"),
-    input_f32: T.Buffer((32, 3), "float32"),
-    output_u32: T.Buffer((32, 3), "uint32"),
-    output_i32: T.Buffer((32,), "int32"),
-    output_u64: T.Buffer((32, 3), "uint64"),
-    output_f32: T.Buffer((32, 3), "float32"),
+    input_u32: T.Tensor((32, 2), "uint32"),
+    input_i32: T.Tensor((32, 2), "int32"),
+    input_u64: T.Tensor((32, 2), "uint64"),
+    input_f32: T.Tensor((32, 3), "float32"),
+    output_u32: T.Tensor((32, 3), "uint32"),
+    output_i32: T.Tensor((32,), "int32"),
+    output_u64: T.Tensor((32, 3), "uint64"),
+    output_f32: T.Tensor((32, 3), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed_u32 = T.alloc_local((1,), "uint64")
     packed_f32 = T.alloc_local((1,), "uint64")
 
@@ -51,21 +49,20 @@ def ptx_register_bits(
     T.evaluate(T.ptx.abs.f32(output_f32[lane, 2], input_f32[lane, 2]))
 
 
-@T.prim_func
+@T.function
 def ptx_scalar_move_and_shift_bits(
-    input_f32: T.Buffer((32,), "float32"),
-    input_i32: T.Buffer((32,), "int32"),
-    input_u32: T.Buffer((32,), "uint32"),
-    shifts: T.Buffer((32,), "uint32"),
-    moved_i32: T.Buffer((32,), "int32"),
-    roundtrip_f32: T.Buffer((32,), "float32"),
-    shifted_i32: T.Buffer((32,), "int32"),
-    shifted_u32: T.Buffer((32,), "uint32"),
-    shifted_f32: T.Buffer((32,), "float32"),
+    input_f32: T.Tensor((32,), "float32"),
+    input_i32: T.Tensor((32,), "int32"),
+    input_u32: T.Tensor((32,), "uint32"),
+    shifts: T.Tensor((32,), "uint32"),
+    moved_i32: T.Tensor((32,), "int32"),
+    roundtrip_f32: T.Tensor((32,), "float32"),
+    shifted_i32: T.Tensor((32,), "int32"),
+    shifted_u32: T.Tensor((32,), "uint32"),
+    shifted_f32: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     moved = T.alloc_local((1,), "int32")
 
     T.evaluate(T.ptx.mov.b32(moved[0], input_f32[lane]))
@@ -76,42 +73,39 @@ def ptx_scalar_move_and_shift_bits(
     T.evaluate(T.ptx.shl.b32(shifted_f32[lane], input_f32[lane], shifts[lane]))
 
 
-@T.prim_func
+@T.function
 def ptx_scalar_shift_right_bits(
-    input_i32: T.Buffer((32,), "int32"),
-    shifts: T.Buffer((32,), "uint32"),
-    shifted_i32: T.Buffer((32,), "int32"),
+    input_i32: T.Tensor((32,), "int32"),
+    shifts: T.Tensor((32,), "uint32"),
+    shifted_i32: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.evaluate(T.ptx.shr.s32(shifted_i32[lane], input_i32[lane], shifts[lane]))
 
 
-@T.prim_func
+@T.function
 def ptx_packed_f16_minmax(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    maximum: T.Buffer((32,), "uint32"),
-    minimum: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    maximum: T.Tensor((32,), "uint32"),
+    minimum: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.max.f16x2(maximum[lane], lhs[lane], rhs[lane])
     T.ptx.min.f16x2(minimum[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_predicate_data_path(
-    lhs_f32: T.Buffer((32,), "float32"),
-    lhs_u32: T.Buffer((32,), "uint32"),
-    selected_u32: T.Buffer((32,), "uint32"),
-    selected_f32: T.Buffer((32,), "float32"),
+    lhs_f32: T.Tensor((32,), "float32"),
+    lhs_u32: T.Tensor((32,), "uint32"),
+    selected_u32: T.Tensor((32,), "uint32"),
+    selected_f32: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     p_float = T.alloc_local((1,), "uint32")
     p_integer = T.alloc_local((1,), "uint32")
     p_both = T.alloc_local((1,), "uint32")
@@ -122,117 +116,110 @@ def ptx_predicate_data_path(
     T.ptx.selp.f32(selected_f32[lane], lhs_f32[lane], T.float32(7), T.ptx.pred(p_both[0]))
 
 
-@T.prim_func
+@T.function
 def ptx_predicate_or(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    result: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    result: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.or_.pred(result[lane], T.ptx.pred(lhs[lane]), T.ptx.pred(rhs[lane]))
 
 
-@T.prim_func
+@T.function
 def ptx_setp_nan_f32(
-    lhs: T.Buffer((32,), "float32"),
-    rhs: T.Buffer((32,), "float32"),
-    nan_result: T.Buffer((32,), "uint32"),
-    equ_result: T.Buffer((32,), "uint32"),
-    neu_result: T.Buffer((32,), "uint32"),
-    ne_result: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "float32"),
+    rhs: T.Tensor((32,), "float32"),
+    nan_result: T.Tensor((32,), "uint32"),
+    equ_result: T.Tensor((32,), "uint32"),
+    neu_result: T.Tensor((32,), "uint32"),
+    ne_result: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.setp.nan.f32(nan_result[lane], lhs[lane], rhs[lane])
     T.ptx.setp.equ.f32(equ_result[lane], lhs[lane], rhs[lane])
     T.ptx.setp.neu.f32(neu_result[lane], lhs[lane], rhs[lane])
     T.ptx.setp.ne.f32(ne_result[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_selp_b16_bits(
-    predicate: T.Buffer((32,), "uint32"),
-    on_true: T.Buffer((32,), "uint16"),
-    on_false: T.Buffer((32,), "uint16"),
-    selected: T.Buffer((32,), "uint16"),
+    predicate: T.Tensor((32,), "uint32"),
+    on_true: T.Tensor((32,), "uint16"),
+    on_false: T.Tensor((32,), "uint16"),
+    selected: T.Tensor((32,), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.selp.b16(selected[lane], on_true[lane], on_false[lane], T.ptx.pred(predicate[lane]))
 
 
-@T.prim_func
+@T.function
 def ptx_selp_b32_signed_bits(
-    predicate: T.Buffer((32,), "uint32"),
-    on_true: T.Buffer((32,), "int32"),
-    on_false: T.Buffer((32,), "int32"),
-    selected: T.Buffer((32,), "int32"),
+    predicate: T.Tensor((32,), "uint32"),
+    on_true: T.Tensor((32,), "int32"),
+    on_false: T.Tensor((32,), "int32"),
+    selected: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.selp.b32(selected[lane], on_true[lane], on_false[lane], T.ptx.pred(predicate[lane]))
 
 
-@T.prim_func
+@T.function
 def ptx_half_abs_and_setp(
-    packed: T.Buffer((32,), "uint32"),
-    lhs: T.Buffer((32,), "uint16"),
-    rhs: T.Buffer((32,), "uint16"),
-    absolute: T.Buffer((32,), "uint32"),
-    greater: T.Buffer((32,), "uint32"),
+    packed: T.Tensor((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint16"),
+    rhs: T.Tensor((32,), "uint16"),
+    absolute: T.Tensor((32,), "uint32"),
+    greater: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.abs.f16x2(absolute[lane], packed[lane])
     T.ptx.setp.gt.f16(greater[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_typed_move_and_b16_pack(
-    low: T.Buffer((32,), "uint16"),
-    high: T.Buffer((32,), "uint16"),
-    source_i32: T.Buffer((32,), "int32"),
-    packed: T.Buffer((32,), "uint32"),
-    unpacked_low: T.Buffer((32,), "uint16"),
-    unpacked_high: T.Buffer((32,), "uint16"),
-    moved_i32: T.Buffer((32,), "int32"),
+    low: T.Tensor((32,), "uint16"),
+    high: T.Tensor((32,), "uint16"),
+    source_i32: T.Tensor((32,), "int32"),
+    packed: T.Tensor((32,), "uint32"),
+    unpacked_low: T.Tensor((32,), "uint16"),
+    unpacked_high: T.Tensor((32,), "uint16"),
+    moved_i32: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mov.b32(packed[lane], low[lane], high[lane])
     T.ptx.mov.b32(unpacked_low[lane], unpacked_high[lane], packed[lane])
     T.ptx.mov.s32(moved_i32[lane], source_i32[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_latest_canonical_scalar_forms(
-    lhs_i32: T.Buffer((32,), "int32"),
-    rhs_i32: T.Buffer((32,), "int32"),
-    lhs_bf16: T.Buffer((32,), "uint16"),
-    rhs_bf16: T.Buffer((32,), "uint16"),
-    addend: T.Buffer((32,), "float32"),
-    unary_input: T.Buffer((32,), "float32"),
-    divisor: T.Buffer((32,), "float32"),
-    maximum: T.Buffer((32,), "int32"),
-    mixed_add: T.Buffer((32,), "float32"),
-    mixed_sub: T.Buffer((32,), "float32"),
-    mixed_fma: T.Buffer((32,), "float32"),
-    negated: T.Buffer((32,), "float32"),
-    quotient: T.Buffer((32,), "float32"),
-    quotient_rn: T.Buffer((32,), "float32"),
-    reciprocal: T.Buffer((32,), "float32"),
-    inverse_sqrt: T.Buffer((32,), "float32"),
+    lhs_i32: T.Tensor((32,), "int32"),
+    rhs_i32: T.Tensor((32,), "int32"),
+    lhs_bf16: T.Tensor((32,), "uint16"),
+    rhs_bf16: T.Tensor((32,), "uint16"),
+    addend: T.Tensor((32,), "float32"),
+    unary_input: T.Tensor((32,), "float32"),
+    divisor: T.Tensor((32,), "float32"),
+    maximum: T.Tensor((32,), "int32"),
+    mixed_add: T.Tensor((32,), "float32"),
+    mixed_sub: T.Tensor((32,), "float32"),
+    mixed_fma: T.Tensor((32,), "float32"),
+    negated: T.Tensor((32,), "float32"),
+    quotient: T.Tensor((32,), "float32"),
+    quotient_rn: T.Tensor((32,), "float32"),
+    reciprocal: T.Tensor((32,), "float32"),
+    inverse_sqrt: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["max.s32"](maximum[lane], lhs_i32[lane], rhs_i32[lane])
     T.ptx["add.rn.f32.bf16"](mixed_add[lane], lhs_bf16[lane], addend[lane])
     T.ptx["sub.rn.f32.bf16"](mixed_sub[lane], lhs_bf16[lane], addend[lane])

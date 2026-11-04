@@ -6,13 +6,14 @@ import numpy as np
 from tvm_ffi import structural_map
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
-from tvm import tirx
+from tvm_tirx import tirx
 
 
 def _specialize(kernel, values: dict[str, int | float]):
-    return kernel.specialize(
-        {param: values[param.name] for param in kernel.params if param.name in values}
+    return specialize(
+        kernel, {param: values[param.name] for param in kernel.params if param.name in values}
     )
 
 
@@ -61,7 +62,7 @@ def _name_buffer_parameters(kernel, names: tuple[str, ...]):
         params.append(renamed)
     if not replacements:
         return kernel
-    return tirx.PrimFunc(
+    return tirx.Function(
         params,
         structural_map(
             kernel.body, (tirx.Var, lambda var: replacements.get(var, var)), order="post"

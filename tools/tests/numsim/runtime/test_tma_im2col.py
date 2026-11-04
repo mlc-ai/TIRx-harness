@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def interleaved_im2col_case(rank, width, *, packed=False, store=False):
@@ -37,13 +37,12 @@ def interleaved_im2col_case(rank, width, *, packed=False, store=False):
     words = 12 * width // 4
     index = "((i * 4) ^ (((i * 4 >> 7) & 1) << 4)) // 4" if width == 32 else "i"
     kernel_source = f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), out: T.Buffer(({words},), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint32", scope="shared", align=1024)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), out: T.Tensor(({words},), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint32", align=1024)
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -58,11 +57,10 @@ def kernel(tmap: T.TensorMap(), out: T.Buffer(({words},), "uint32")):
 """
     if store:
         kernel_source = f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), source: T.Buffer(({words},), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), source: T.Tensor(({words},), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((512,), "uint32", align=1024)
     for i in T.serial({words}):
         if lane == 0:
@@ -75,7 +73,7 @@ def kernel(tmap: T.TensorMap(), source: T.Buffer(({words},), "uint32")):
         T.ptx.cp.async_.bulk.commit_group()
         T.ptx.cp.async_.bulk.wait_group(0)
 """
-    kernel = tvm.script.from_source(kernel_source, {"T": T})
+    kernel = tvm_tirx.script.from_source(kernel_source, {"T": T})
     expected = np.zeros(words, np.uint32)
     stored = np.zeros_like(source) if store else None
     # Flatten only the spatial axes, keeping channel slice one fixed.
@@ -126,17 +124,16 @@ def im2col_kernel(rank, pixels, *, override=False, cluster=False):
     args = ", ".join(f"T.int32({value})" for value in coordinates)
     extra = ", ".join(f"T.uint16({value})" for value in info)
     suffix = ".override::global_address" if override else ""
-    address = ', T.reinterpret("uint64", source.ptr_to([0]))' if override else ""
-    return tvm.script.from_source(
+    address = ', T.reinterpret(source.ptr_to([0]), ty="uint64")' if override else ""
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), source: T.Buffer((32768,), "uint32"),
-           out: T.Buffer(({pixels * 4},), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    smem = T.alloc_buffer(({max(pixels * 4, 256)},), "uint32", scope="shared", align=1024)
-    mbar = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), source: T.Tensor((32768,), "uint32"),
+           out: T.Tensor(({pixels * 4},), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    smem = T.alloc_shared(({max(pixels * 4, 256)},), "uint32", align=1024)
+    mbar = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(mbar.ptr_to([0]), 1)
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -200,20 +197,19 @@ def im2col_store_kernel(wide=False, reduction=False, override=False):
     prefix = "cp.reduce.async.bulk.tensor" if reduction else "cp.async.bulk.tensor"
     redop = ".add" if reduction else ""
     suffix = ".override::global_address" if override else ""
-    address = ', T.reinterpret("uint64", output.ptr_to([0]))' if override else ""
+    address = ', T.reinterpret(output.ptr_to([0]), ty="uint64")' if override else ""
     index = (
         "((row * 64 + channel * 4) ^ (((row * 64 >> 7) & 3) << 4)) // 4"
         if wide
         else "row * 4 + channel"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def kernel(tmap: T.TensorMap(), output: T.Buffer((32768,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint32", scope="shared", align=1024)
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), output: T.Tensor((32768,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint32", align=1024)
     if lane == 0:
         for row in T.serial(12):
             for channel in T.serial({channels}):

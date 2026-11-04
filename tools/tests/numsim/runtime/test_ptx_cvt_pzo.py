@@ -3,12 +3,11 @@ from __future__ import annotations
 import numpy as np
 from tvm_ffi import structural_walk
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness import numsim
-from tvm.ir import Expr
-from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 _PZO_CALL_IDS = {
     "f16": "tirx.ptx.cvt_pzo_scalar_f32",
@@ -67,11 +66,11 @@ def _decoded_call(spelling: str, destination: str):
     arguments = "T.float32(-0.0)"
     if destination.endswith("x2"):
         arguments += ", T.float32(1.0)"
-    function = tvm.script.from_source(
+    function = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     output = T.local_scalar("{destination_dtype}")
     T.ptx["{spelling}"](output, {arguments})
 """,
@@ -104,19 +103,18 @@ def test_all_forty_pzo_forms_resolve_to_distinct_reviewed_semantics():
     assert len(seen) == 40
 
 
-@T.prim_func
+@T.function
 def pzo_conversions(
-    source: T.Buffer((32,), "float32"),
-    low: T.Buffer((32,), "float32"),
-    f16: T.Buffer((32,), "uint16"),
-    bf16: T.Buffer((32,), "uint16"),
-    tf32: T.Buffer((32,), "uint32"),
-    packed_f16: T.Buffer((32,), "uint32"),
-    packed_bf16: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32,), "float32"),
+    low: T.Tensor((32,), "float32"),
+    f16: T.Tensor((32,), "uint16"),
+    bf16: T.Tensor((32,), "uint16"),
+    tf32: T.Tensor((32,), "uint32"),
+    packed_f16: T.Tensor((32,), "uint32"),
+    packed_bf16: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["cvt.rz.pzo.f16.f32"](f16[lane], source[lane])
     T.ptx["cvt.rz.pzo.bf16.f32"](bf16[lane], source[lane])
     T.ptx["cvt.rz.pzo.tf32.f32"](tf32[lane], source[lane])

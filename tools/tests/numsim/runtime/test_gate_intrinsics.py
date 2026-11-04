@@ -3,17 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def gate_intrinsics(
-    source: T.Buffer((32,), "float32"),
-    output: T.Buffer((32, 3), "float32"),
+    source: T.Tensor((32,), "float32"),
+    output: T.Tensor((32, 3), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value: T.float32 = source[lane]
     output[lane, 0] = T.abs(value)
     output[lane, 1] = T.log1p(value)

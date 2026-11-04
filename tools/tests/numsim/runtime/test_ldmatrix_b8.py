@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 LDMATRIX_B8_CASES = [
     (bits, rows, count)
@@ -27,14 +27,14 @@ def ldmatrix_b8_kernel(
     instruction += ".trans" if rows == 16 else ""
     instruction += f".shared::cta.{fmt}"
     destinations = ", ".join(f"fragment[{i}]" for i in range(registers))
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def load_matrix(source: T.Buffer((32, 32), "uint8"), output: T.Buffer(({registers}, 32), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([{1 if synchronize else 2}])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32, 32), "uint8", scope="shared", align=16)
+@T.function
+def load_matrix(source: T.Tensor((32, 32), "uint8"), output: T.Tensor(({registers}, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={1 if synchronize else 2} * 32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32, 32), "uint8", align=16)
     fragment = T.alloc_local(({registers},), "uint32")
     if warp == 0:
         for byte in T.serial({bits * 2}):

@@ -3,22 +3,22 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import racecheck, synccheck
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _raw_spin(*, ordered):
     store_order = "release" if ordered else "relaxed"
     rendezvous = "T.ptx.bar.sync(T.uint32(0), T.uint32(64))" if ordered else "T.evaluate(0)"
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def raw_spin(flag: T.Buffer((1,), "int32"), out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def raw_spin(flag: T.Tensor((1,), "int32"), out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if warp == 0 and lane == 0:
         T.ptx.st.{store_order}.gpu.global_.s32(flag.ptr_to([0]), T.int32(7))
@@ -64,13 +64,12 @@ def test_hb_ordered_raw_spin_does_not_need_a_wait_declaration():
 
 @pytest.mark.parametrize("checker", [synccheck, racecheck])
 def test_wait_without_any_possible_publisher_is_a_sync_deadlock(checker):
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def blocked_wait(flag: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def blocked_wait(flag: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         T.cuda.wait_until(seen[0], flag.ptr_to([0]), seen[0] == 7, "gpu", "global")

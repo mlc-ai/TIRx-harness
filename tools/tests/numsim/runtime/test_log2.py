@@ -7,14 +7,13 @@ import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def log2_kernel(output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def log2_kernel(output: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.log2(T.cast(lane + 1, "float32"))
 
 

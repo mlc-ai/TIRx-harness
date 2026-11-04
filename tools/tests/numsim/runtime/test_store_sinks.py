@@ -2,9 +2,9 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def sink_release_kernel(bits, release=True, sinks=True, space="global"):
@@ -22,14 +22,14 @@ def sink_release_kernel(bits, release=True, sinks=True, space="global"):
     values = ", ".join(
         f"T.uint{bits}(1)" if i < 2 or not sinks else "T.ptx.SINK" for i in range(width)
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(flag: T.Buffer(({width},), "uint{bits}"), data: T.Buffer((1,), "uint32"),
-           output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def kernel(flag: T.Tensor(({width},), "uint{bits}"), data: T.Tensor((1,), "uint32"),
+           output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     ready = T.alloc_local((1,), "uint{bits}")
     {setup}
     if warp == 0 and lane == 0:

@@ -124,15 +124,15 @@ def _torch_buffer(value: PairedBuffer):
 
 
 def _logical_dtype_lanes(logical_dtype: str) -> int:
-    import tvm
+    import tvm_ffi
 
-    return int(tvm.DataType(logical_dtype).lanes)
+    return int(tvm_ffi.dtype(logical_dtype).lanes)
 
 
 def _vector_base_dtype(logical_dtype: str) -> np.dtype:
-    import tvm
+    import tvm_ffi
 
-    data_type = tvm.DataType(logical_dtype)
+    data_type = tvm_ffi.dtype(logical_dtype)
     if data_type.lanes <= 1:
         raise TypeError(f"logical dtype {logical_dtype!r} is not a vector dtype")
     suffix = f"x{data_type.lanes}"
@@ -146,12 +146,12 @@ def _vector_base_dtype(logical_dtype: str) -> np.dtype:
 
 
 def _tvm_vector_buffer(value: PairedBuffer):
-    import tvm
+    import tvm_tirx
 
     lanes = _logical_dtype_lanes(value.logical_dtype)
     base_dtype = _vector_base_dtype(value.logical_dtype)
     logical = np.ascontiguousarray(value.array).view(base_dtype).reshape(*value.array.shape, lanes)
-    device = tvm.runtime.empty(value.array.shape, value.logical_dtype, tvm.cuda())
+    device = tvm_tirx.runtime.empty(value.array.shape, value.logical_dtype, tvm_tirx.cuda())
     device.copyfrom(logical)
     return device
 
@@ -163,8 +163,7 @@ def _torch_tensor_map(
     by_value: bool = True,
 ) -> _GpuTensorMap:
     import torch
-
-    import tvm
+    import tvm_ffi
 
     logical_dtype = value.logical_dtype or value.array.dtype.name
     if base is None:
@@ -224,7 +223,7 @@ def _torch_tensor_map(
             opaque = np.ctypeslib.as_array((ctypes.c_uint8 * 128).from_address(descriptor_address))
             device_image = torch.from_numpy(opaque.copy()).to("cuda")
         if value.inactive_swizzle_atomicity:
-            from tvm.script import tirx as T
+            from tvm_tirx.script import tirx as T
 
             # CUDA's encoder has no inactive-atomicity argument. Initialize
             # that independent field through PTX, never by guessing CUDA's
@@ -233,14 +232,13 @@ def _torch_tensor_map(
                 asm volatile("tensormap.replace.tile.swizzle_atomicity.global.b1024.b32 [%0], {value.inactive_swizzle_atomicity};"
                              :: "l"(p) : "memory");
             }}"""
-            initialize = tvm.script.from_source(
-                """@T.prim_func
-def initialize(image: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+            initialize = tvm_tirx.script.from_source(
+                """@T.function
+def initialize(image: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
-        T.cuda.func_call("set_atomicity", image.ptr_to([0]), source_code=source, return_type="void")
+        T.cuda.func_call("set_atomicity", image.ptr_to([0]), source)
 """,
                 {"T": T, "source": source},
             )
@@ -324,10 +322,10 @@ def initialize(image: T.Buffer((128,), "uint8")):
         if status:
             raise RuntimeError(f"CUDA tiled encoder failed with status {status}")
         return finish()
-    encode = tvm.get_global_func("runtime.cuTensorMapEncodeTiled")
+    encode = tvm_ffi.get_global_func("runtime.cuTensorMapEncodeTiled")
     encode_args = [
         descriptor,
-        tvm.DataType(logical_dtype),
+        tvm_ffi.dtype(logical_dtype),
         len(value.global_shape),
         ctypes.c_void_p(base.data_ptr()),
         *value.global_shape,
@@ -405,14 +403,14 @@ def _parameter_names(prim_func: Any) -> tuple[str, ...]:
 
 
 def _compile_gpu(prim_func: Any, *, arch: str) -> Any:
-    import tvm
+    import tvm_tirx
 
-    target = tvm.target.Target({"kind": "cuda", "arch": arch})
+    target = tvm_tirx.target.Target({"kind": "cuda", "arch": arch})
     with target:
-        return tvm.compile(
-            tvm.IRModule({"main": prim_func}),
+        return tvm_tirx.compile(
+            tvm_tirx.IRModule({"main": prim_func}),
             target=target,
-            tir_pipeline="tirx",
+            pipeline="tirx",
         )
 
 
@@ -426,8 +424,8 @@ def run_gpu_primfunc(
     import torch
 
     from tirx_harness.numsim.bindings import prepare_bindings
-    from tvm.ir.type import PointerType
-    from tvm.tirx import TensorMapType
+    from tvm_tirx.ir import PtrType
+    from tvm_tirx.tirx import TensorMapType
 
     parameter_names = _parameter_names(prim_func)
     # GPU execution must remain available for instructions NumSim cannot model.
@@ -435,7 +433,7 @@ def run_gpu_primfunc(
     tensor_map_names = {
         parameter.name
         for parameter in prim_func.params
-        if isinstance(parameter.ty, PointerType)
+        if isinstance(parameter.ty, PtrType)
         and isinstance(parameter.ty.element_type, TensorMapType)
     }
     missing = sorted(set(parameter_names) - set(arguments))

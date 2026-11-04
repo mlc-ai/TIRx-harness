@@ -2,8 +2,8 @@
 
 import numpy as np
 
-import tvm
-from tvm.script import tirx as T
+import tvm_tirx
+from tvm_tirx.script import tirx as T
 
 
 def masked_arithmetic_case(forms, inputs, *, preserved, operand_dtype=None):
@@ -13,9 +13,9 @@ def masked_arithmetic_case(forms, inputs, *, preserved, operand_dtype=None):
     operand = operand_dtype or carrier
 
     def read(expression):
-        return f'T.reinterpret("{operand}", {expression})' if operand != carrier else expression
+        return f'T.reinterpret({expression}, ty="{operand}")' if operand != carrier else expression
 
-    stored = f'T.reinterpret("{carrier}", dst[0])' if operand != carrier else "dst[0]"
+    stored = f'T.reinterpret(dst[0], ty="{carrier}")' if operand != carrier else "dst[0]"
     lines = []
     for row, (spelling, sources) in enumerate(forms):
         args = ", ".join(read(f"{name}[i]") for name in sources)
@@ -31,17 +31,16 @@ def masked_arithmetic_case(forms, inputs, *, preserved, operand_dtype=None):
         ]
     rows = 2 * len(forms)
     parameters = [
-        f'{name}: T.Buffer(({size},), "{value.dtype.name}")' for name, value in inputs.items()
+        f'{name}: T.Tensor(({size},), "{value.dtype.name}")' for name, value in inputs.items()
     ]
-    parameters.append(f'output: T.Buffer(({rows}, {size}), "{carrier}")')
-    kernel = tvm.script.from_source(
+    parameters.append(f'output: T.Tensor(({rows}, {size}), "{carrier}")')
+    kernel = tvm_tirx.script.from_source(
         f'''
-@T.prim_func
+@T.function
 def kernel({", ".join(parameters)}):
-    T.device_entry()
-    block = T.cta_id([{size // 32}])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid={size // 32}, block=32))
+    block = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     i = block * 32 + lane
     source = T.Select(lane % 2 == 0, i, {size})
     dst = T.alloc_local((1,), "{operand}")

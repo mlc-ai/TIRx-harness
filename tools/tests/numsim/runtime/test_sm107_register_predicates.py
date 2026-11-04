@@ -3,19 +3,18 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def sm107_register_predicate_kernel(preserve):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(output: T.Buffer((5, 32), "uint32"), selected: T.uint32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(output: T.Tensor((5, 32), "uint32"), selected: T.uint32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     active = (selected & (T.uint32(1) << T.Cast("uint32", lane))) != T.uint32(0)
     src = T.alloc_local((5,), "uint32")
     dst = T.alloc_local((5,), "uint32")

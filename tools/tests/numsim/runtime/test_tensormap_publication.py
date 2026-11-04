@@ -2,14 +2,14 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_raw_tensor_map_descriptors import (
     _GDN_ACQUIRE_SOURCE,
     _GDN_RELEASE_SOURCE,
     _gdn_replace_dim_source,
 )
 from tirx_harness import numsim, racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 PUBLICATION_CASES = ("replace", "bytes", "helper")
 
@@ -25,25 +25,22 @@ def tensor_map_publication_case(kind, ordering="before", cross_warp=False):
     elif kind == "helper":
         update = (
             "T.cuda.func_call('gdn_tensormap_replace_global_dim_0', descriptor.ptr_to([0]), "
-            f"T.uint32(2), source_code={_gdn_replace_dim_source(0)!r}, return_type='void')"
+            f"T.uint32(2), {_gdn_replace_dim_source(0)!r})"
         )
         acquire = (
             "T.cuda.func_call('gdn_tensormap_acquire', descriptor.ptr_to([0]), "
-            f"source_code={_GDN_ACQUIRE_SOURCE!r}, return_type='void')"
+            f"{_GDN_ACQUIRE_SOURCE!r})"
         )
-        release = (
-            f"T.cuda.func_call('gdn_tensormap_release', source_code={_GDN_RELEASE_SOURCE!r}, "
-            "return_type='void')"
-        )
+        release = f"T.cuda.func_call('gdn_tensormap_release', {_GDN_RELEASE_SOURCE!r})"
     sync = "T.cuda.cta_sync()" if cross_warp else "T.cuda.warp_sync()"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(descriptor: T.Buffer((128,), "uint8"), source_map: T.Buffer((128,), "uint8"),
-           output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([{2 if cross_warp else 1}])
-    lane = T.lane_id([32])
+@T.function
+def kernel(descriptor: T.Tensor((128,), "uint8"), source_map: T.Tensor((128,), "uint8"),
+           output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={2 if cross_warp else 1} * 32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     data = T.alloc_shared((4,), "uint32", align=128)
     barrier = T.alloc_shared((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")

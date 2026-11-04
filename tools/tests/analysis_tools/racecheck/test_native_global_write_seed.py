@@ -6,21 +6,19 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def structured_write(
-    source: T.Buffer((1,), "int32"),
-    target: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    target: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    alias = T.decl_buffer((1,), "int32", data=target.data)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    alias = T.decl_tensor(target.data, ty_args=[T.Tensor((1,), "int32", scope="global")])
     if lane == 0:
         if cta == 0:
             output[0] = source[0]
@@ -28,16 +26,15 @@ def structured_write(
             alias[0] = 7
 
 
-@T.prim_func
+@T.function
 def raw_write(
-    source: T.Buffer((1,), "int32"),
-    target: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    target: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             output[0] = source[0]
@@ -45,12 +42,11 @@ def raw_write(
             T.ptx.st.global_.s32(target.ptr_to([0]), T.int32(7))
 
 
-@T.prim_func
-def tile_write(source: T.Buffer((32,), "float32"), output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
-    Tx.copy(output[:], source[:])
+@T.function
+def tile_write(source: T.Tensor((32,), "float32"), output: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    for _i0_0 in T.grid(output.shape[0]):
+        output[_i0_0] = source[_i0_0]
 
 
 def race_source(func):
@@ -108,12 +104,11 @@ def test_read_before_write_is_still_checked_for_host_aliases(
         )
 
 
-@T.prim_func
-def register_result_to_global(source: T.Buffer((1,), "float32"), output: T.Buffer((2,), "float32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def register_result_to_global(source: T.Tensor((1,), "float32"), output: T.Tensor((2,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx.ex2.approx.ftz.f32(output[cta], source[0])
 
@@ -123,12 +118,11 @@ def test_register_instruction_buffer_destinations_are_not_assumed_readonly():
     assert "let global_write_allocations = [1_usize].map" in race_source(register_result_to_global)
 
 
-@T.prim_func
+@T.function
 def pointer_view_write(pointer: T.handle("int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    view = T.decl_buffer((1,), "int32", data=pointer)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    view = T.decl_tensor(pointer, ty_args=[T.Tensor((1,), "int32", scope="global")])
     if lane == 0:
         view[0] = 7
 
@@ -150,11 +144,9 @@ def test_bound_pointer_view_uses_the_physical_parameter(tmp_path):
     assert report["incomplete"] == []
 
 
-@T.prim_func
-def readonly(source: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+@T.function
+def readonly(source: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.evaluate(source[0])
 
 
@@ -200,33 +192,32 @@ def test_register_result_writes_preserve_host_alias_races(tmp_path, alias_inputs
         )
 
 
-@T.prim_func
+@T.function
 def selected_pointer_write(
-    source: T.Buffer((3,), "int32"),
-    a: T.Buffer((3,), "int32"),
-    b: T.Buffer((3,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((3,), "int32"),
+    a: T.Tensor((3,), "int32"),
+    b: T.Tensor((3,), "int32"),
+    output: T.Tensor((1,), "int32"),
     select_b: T.int32,
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pointer = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    pointer = T.alloc_local((1,), "uint64")
     if lane == 0:
         if cta == 0:
             output[0] = source[2]
         else:
-            T.ptx.mov.b64(pointer[0], T.reinterpret("uint64", a.ptr_to([0])))
+            T.ptx.mov.b64(pointer[0], T.reinterpret(a.ptr_to([0]), ty="uint64"))
             T.ptx.selp.u64(
                 pointer[0],
-                T.reinterpret("uint64", b.ptr_to([0])),
+                T.reinterpret(b.ptr_to([0]), ty="uint64"),
                 pointer[0],
                 T.ptx.pred(select_b != 0),
             )
             for _ in T.serial(2):
                 pointer[0] = pointer[0] + T.uint64(4)
-            T.ptx.st.global_.s32(T.reinterpret("handle", pointer[0]), 7)
+            T.ptx.st.global_.s32(T.reinterpret(pointer[0], ty="handle"), 7)
 
 
 @pytest.mark.parametrize("select_b", [0, 1])
@@ -263,47 +254,46 @@ def test_loop_carried_selected_pointer_preserves_compact_alias_races(tmp_path, s
         assert any(f["access_pair"] in {"read_write", "write_read"} for f in report["findings"])
 
 
-@T.prim_func
+@T.function
 def clobbered_pointer_write(
-    source: T.Buffer((1,), "int32"),
-    target: T.Buffer((1,), "int32"),
-    pointer_bits: T.Buffer((1,), "uint64"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    target: T.Tensor((1,), "int32"),
+    pointer_bits: T.Tensor((1,), "uint64"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pointer = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    pointer = T.alloc_local((1,), "uint64")
     if lane == 0:
         if cta == 0:
             output[0] = source[0]
         else:
-            pointer[0] = T.reinterpret("uint64", target.ptr_to([0]))
+            pointer[0] = T.reinterpret(target.ptr_to([0]), ty="uint64")
             T.ptx.xor.b64(pointer[0], pointer_bits[0], T.uint64(0))
-            T.ptx.st.global_.s32(T.reinterpret("handle", pointer[0]), 7)
+            T.ptx.st.global_.s32(T.reinterpret(pointer[0], ty="handle"), 7)
 
 
-@T.prim_func
+@T.function
 def copied_pointer_write(
-    source: T.Buffer((1,), "int32"),
-    target: T.Buffer((1,), "int32"),
-    pointer_bits: T.Buffer((1,), "uint64"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    target: T.Tensor((1,), "int32"),
+    pointer_bits: T.Tensor((1,), "uint64"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pointer = T.alloc_buffer((1,), "uint64", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    pointer = T.alloc_local((1,), "uint64")
     if cta == 0:
         if lane == 0:
             output[0] = source[0]
     else:
-        pointer[0] = T.reinterpret("uint64", target.ptr_to([0]))
-        Tx.copy(pointer[:], pointer_bits[:])
+        pointer[0] = T.reinterpret(target.ptr_to([0]), ty="uint64")
+        for _i1_0 in T.grid(pointer.shape[0]):
+            pointer[_i1_0] = pointer_bits[_i1_0]
         if lane == 0:
-            T.ptx.st.global_.s32(T.reinterpret("handle", pointer[0]), 7)
+            T.ptx.st.global_.s32(T.reinterpret(pointer[0], ty="handle"), 7)
 
 
 @pytest.mark.parametrize("func", [clobbered_pointer_write, copied_pointer_write])
@@ -330,21 +320,21 @@ def test_unknown_register_overwrite_keeps_read_before_write_race(tmp_path, func)
 
 
 def tensor_map_writer(replace):
-    from tvm.script import from_source
+    from tvm_tirx.script import from_source
 
     # Typed TensorMap parameters are grid-constant. Mutate a global descriptor
     # buffer instead, just as the raw descriptor runtime cases do.
-    map_type = 'T.Buffer((128,), "uint8")' if replace else "T.TensorMap()"
+    map_type = 'T.Tensor((128,), "uint8")' if replace else "T.Ptr(T.TensorMap)"
     descriptor = "target_map.ptr_to([0])" if replace else "T.address_of(target_map)"
-    return from_source(f"""
-@T.prim_func
-def kernel(source: T.Buffer((32,), "int32"), replacement: T.Buffer((32,), "int32"),
-           output: T.Buffer((1,), "int32"), target_map: {map_type}):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    return from_source(
+        f"""
+@T.function
+def kernel(source: T.Tensor((32,), "int32"), replacement: T.Tensor((32,), "int32"),
+           output: T.Tensor((1,), "int32"), target_map: {map_type}):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     if cta == 0:
         if lane == 0:
             output[0] = source[0]
@@ -353,16 +343,18 @@ def kernel(source: T.Buffer((32,), "int32"), replacement: T.Buffer((32,), "int32
         T.cuda.warp_sync()
         T.ptx.fence.proxy.async_.shared__cta()
         if lane == 0:
-            if {replace}:
+            if T.constexpr({replace}):
                 T.ptx.tensormap_replace.tile.global_address.global_.b1024.b64(
-                    {descriptor}, T.reinterpret("uint64", replacement.ptr_to([0])))
+                    {descriptor}, T.reinterpret(replacement.ptr_to([0]), ty="uint64"))
                 T.ptx.fence.proxy.tensormap__generic.release.gpu()
                 T.ptx.fence.proxy.tensormap__generic.acquire.gpu({descriptor})
             T.ptx["cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"](
                 {descriptor}, 0, shared.ptr_to([0]))
             T.ptx.cp.async_.bulk.commit_group()
             T.ptx.cp.async_.bulk.wait_group(0)
-""")
+""",
+        {"T": T},
+    )
 
 
 @pytest.mark.parametrize("replace", [False, True])
@@ -404,16 +396,15 @@ def test_tensor_map_initial_and_replaced_bases_keep_compact_alias_races(
         assert any(f["access_pair"] in {"read_write", "write_read"} for f in report["findings"])
 
 
-@T.prim_func
+@T.function
 def discard_after_read(
-    source: T.Buffer((128,), "uint8"),
-    target: T.Buffer((128,), "uint8"),
-    output: T.Buffer((1,), "uint8"),
+    source: T.Tensor((128,), "uint8"),
+    target: T.Tensor((128,), "uint8"),
+    output: T.Tensor((1,), "uint8"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             output[0] = source[0]
@@ -445,18 +436,17 @@ def test_discard_is_a_write_for_compact_alias_races(tmp_path, alias_inputs):
     assert report["verdict"] == ("error" if alias_inputs else "clean"), report
 
 
-@T.prim_func
+@T.function
 def offset_pointer_write(
-    source: T.Buffer((1,), "int32"),
-    target: T.Buffer((1,), "int32"),
-    redirected: T.Buffer((1,), "int32"),
-    offset: T.Buffer((1,), "uint64"),
-    output: T.Buffer((1,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    target: T.Tensor((1,), "int32"),
+    redirected: T.Tensor((1,), "int32"),
+    offset: T.Tensor((1,), "uint64"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         if cta == 0:
             output[0] = source[0]
@@ -464,7 +454,7 @@ def offset_pointer_write(
             if target[0] == 0:
                 T.ptx.st.global_.s32(
                     T.reinterpret(
-                        "handle", T.reinterpret("uint64", target.ptr_to([0])) + offset[0]
+                        T.reinterpret(target.ptr_to([0]), ty="uint64") + offset[0], ty="handle"
                     ),
                     7,
                 )

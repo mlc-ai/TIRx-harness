@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _check_race_report(report, expected, space="shared"):
@@ -58,12 +58,12 @@ def test_shared_frontier_relay(relay, tmp_path):
         )
         output[0] = data[0]
 """
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(flag: T.Buffer((2,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([{2 if warp_relay else 3}])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(flag: T.Tensor((2,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={2 if warp_relay else 3} * 32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     data = T.alloc_shared((1,), "int32")
     observed = T.local_scalar("int32")
     if (warp == 0) and (lane == 0):
@@ -99,12 +99,12 @@ def test_shared_async_handoff(fence_side, tmp_path):
     )
     for writer, reader, expected in controls:
         fence = "T.ptx.fence.proxy.async_.shared__cta()"
-        kernel = tvm.script.from_source(
-            f"""@T.prim_func
-def kernel(flag: T.Buffer((1,), "int32"), output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+        kernel = tvm_tirx.script.from_source(
+            f"""@T.function
+def kernel(flag: T.Tensor((1,), "int32"), output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     data = T.alloc_shared((4,), "int32", align=16)
     observed = T.local_scalar("int32")
     if warp == 0:
@@ -156,12 +156,11 @@ def _fence_case(space, order, publisher=0, consumer=1):
         if order == "cuda"
         else f'T.ptx["{mnemonic}"](pred=lane == {consumer})'
     )
-    return tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(data: T.Buffer((1,), "int32"), output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    return tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(data: T.Tensor((1,), "int32"), output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     {allocation}
     if lane == 0:
         {data}[0] = 0

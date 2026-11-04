@@ -118,34 +118,34 @@ def serialize_source_span(value: SerializedSourceSpan | None) -> dict[str, Any] 
 
 
 def source_span_from_tvm(value: Any) -> SerializedSourceSpan | None:
-    """Convert a TVM Span/SequentialSpan without using its unstable string form."""
+    """Convert a TIRx SourceLoc/CallSiteLoc without using its unstable string form."""
 
     if value is None:
         return None
-    children = getattr(value, "spans", None)
-    if children is not None:
+    if getattr(value, "callee", None) is not None:
+        # A CallSiteLoc chain flattens to its source locations, outermost call site first.
         spans = tuple(
-            child_span
-            for child in children
-            if (child_span := source_span_from_tvm(child)) is not None
+            leaf
+            for child in (value.caller, value.callee)
+            for leaf in flatten_source_span(source_span_from_tvm(child))
         )
         return None if not spans else SequentialSourceSpan(spans)
     try:
         source_name = str(value.source_name.name)
         return SourceSpan(
             source_name=source_name,
-            line=int(value.line),
-            column=int(value.column),
+            line=int(value.start_line),
+            column=int(value.start_column),
             end_line=int(value.end_line),
             end_column=int(value.end_column),
         )
     except (AttributeError, TypeError, ValueError):
-        # Hand-built IR and older TIRx versions may not expose a usable span.
+        # UnknownLoc and hand-built IR carry no usable source location.
         return None
 
 
 def source_span_from_node(node: Any) -> SerializedSourceSpan | None:
-    return source_span_from_tvm(getattr(node, "span", None))
+    return source_span_from_tvm(getattr(node, "loc", None))
 
 
 def flatten_source_span(value: SerializedSourceSpan | None) -> tuple[SourceSpan, ...]:

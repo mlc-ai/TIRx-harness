@@ -1,15 +1,17 @@
 //! Host-evaluable scalar bindings used by runtime buffer shapes.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, PrimExpr, TensorLoad, TensorLoadObj, Var};
-use tvm::tirx::{BindObj, BufferStoreObj, BufferVar, ForObj, IfThenElseObj, Stmt, WhileObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, TensorLoad, TensorLoadObj, Var};
+use tvm_tirx::ir::{ForObj, IfObj, Stmt, TensorStoreObj, WhileObj};
+
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, structural_map, Any, Map, ObjectRefCore, WalkOrder};
 
 use super::buffers::{same_buffer, BufferBindings};
 use super::layout::{expr_any, int_any, op_binary};
 use super::util::{
-    as_buffer, buffer_scope, ident, int_imm_expr, oref, simplify, unsupported, AResult, IdSet,
+    as_buffer, buffer_scope, ident, int_imm_expr, oref, prim_expr, scalar_bind, simplify,
+    tensor_var, unsupported, AResult, IdSet, TensorVarExt,
 };
 
 pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
@@ -22,7 +24,7 @@ pub fn structural_equal(lhs: &Any, rhs: &Any) -> AResult<bool> {
     Ok(bool::try_from(result)?)
 }
 
-fn is_zero_index(analyzer: &Analyzer, value: &PrimExpr) -> AResult<bool> {
+fn is_zero_index(analyzer: &Analyzer, value: &Expr) -> AResult<bool> {
     Ok(int_imm_expr(&simplify(analyzer, value)?) == Some(0))
 }
 
@@ -30,7 +32,7 @@ fn is_zero_index(analyzer: &Analyzer, value: &PrimExpr) -> AResult<bool> {
 #[derive(Clone)]
 pub enum Scalar {
     Int(i64),
-    Expr(PrimExpr),
+    Expr(Expr),
 }
 
 impl Scalar {
@@ -56,7 +58,7 @@ impl Scalar {
 
 pub struct ShapeExpressionContext {
     pub bindings: Vec<(Var, Expr)>,
-    pub scalar_initializers: Vec<(BufferVar, Expr)>,
+    pub scalar_initializers: Vec<(Var, Expr)>,
 }
 
 impl ShapeExpressionContext {
@@ -67,36 +69,36 @@ impl ShapeExpressionContext {
     ) -> AResult<Self> {
         let mut bindings = Vec::new();
         for statement in statements {
-            if let Some(bind) = statement.as_node::<BindObj>() {
+            if let Some(bind) = scalar_bind(statement) {
                 bindings.push((bind.var.clone(), bind.value.clone()));
             }
         }
         let mut controlled = IdSet::default();
         for statement in statements {
-            if statement.as_node::<IfThenElseObj>().is_some()
+            if statement.as_node::<IfObj>().is_some()
                 || statement.as_node::<ForObj>().is_some()
                 || statement.as_node::<WhileObj>().is_some()
             {
                 for child in crate::walk_statements(statement.clone())?.iter() {
-                    if child.as_node::<BufferStoreObj>().is_some() {
+                    if child.as_node::<TensorStoreObj>().is_some() {
                         controlled.add(oref(child));
                     }
                 }
             }
         }
-        let stores: Vec<(ObjectRef, BufferVar, Vec<PrimExpr>, PrimExpr)> = statements
+        let stores: Vec<(ObjectRef, Var, Vec<Expr>, Expr)> = statements
             .iter()
             .filter_map(|statement| {
-                statement.as_node::<BufferStoreObj>().map(|store| {
-                    (
+                statement.as_node::<TensorStoreObj>().map(|store| {
+                    Ok((
                         oref(statement.clone()),
-                        store.buffer.clone(),
+                        tensor_var(&oref(store.dest.clone()))?,
                         store.indices.iter().collect(),
                         store.value.clone(),
-                    )
+                    ))
                 })
             })
-            .collect();
+            .collect::<AResult<_>>()?;
         let mut initializers = Vec::new();
         for (node, buffer, indices, value) in &stores {
             if controlled.contains(node) {
@@ -106,7 +108,7 @@ impl ShapeExpressionContext {
             if !["local", "local_scalar", "register", "reg"].contains(&scope.as_str()) {
                 continue;
             }
-            let shape: Vec<PrimExpr> = buffer.buffer_type().shape.iter().collect();
+            let shape: Vec<Expr> = buffer.tensor_type().shape.iter().collect();
             if shape.len() != 1 {
                 continue;
             }
@@ -177,7 +179,7 @@ impl ShapeExpressionContext {
                 return Err(error);
             }
             if structural_equal(&current, &resolved)? {
-                let simplified = simplify(analyzer, &PrimExpr::try_from(resolved)?)?;
+                let simplified = simplify(analyzer, &prim_expr(resolved)?)?;
                 return Ok(Scalar::Expr(simplified));
             }
             current = resolved;

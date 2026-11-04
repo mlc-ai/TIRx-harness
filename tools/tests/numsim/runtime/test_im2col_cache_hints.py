@@ -3,25 +3,24 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def hint_kernel(override, mode="im2col"):
     suffix = ".override::global_address" if override else ""
-    address = ', T.reinterpret("uint64", source.ptr_to([0]))' if override else ""
+    address = ', T.reinterpret(source.ptr_to([0]), ty="uint64")' if override else ""
     extra = ", T.uint16(0)" if mode == "im2col" else ", T.uint16(0), T.uint16(0)"
     operands = f"T.address_of(tmap){address}, T.int32(0), T.int32(0), T.int32(0){extra}"
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), source: T.Buffer((32768,), "float32"),
-           out: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), source: T.Tensor((32768,), "float32"),
+           out: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.ptx["cp.async.bulk.prefetch.tensor.3d.L2.global.{mode}{suffix}"]({operands})
         T.ptx["cp.async.bulk.prefetch.tensor.3d.L2.global.{mode}.L2::evict_last{suffix}"]({operands})

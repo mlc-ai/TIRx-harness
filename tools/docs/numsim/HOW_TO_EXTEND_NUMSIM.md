@@ -20,12 +20,11 @@ gets one `OpRow` in `registry.rs` with an `emit` callback. For `tirx.ptx.*`,
 is the only wire-ABI decoder and produces `DecodedPtxCall`; `Decoded::new`
 calls it on demand and the family functions consume the
 decoded operands and modifiers directly. Non-PTX entries read the raw `Call`
-where needed. Two routes sit outside that registry and you should know which
-one you are in before starting — tile ops dispatch through
-`analyze/tile_forms/` and `emit/tile*.rs` (see the end of this section), and
-`tirx.address_of` is resolved contextually, because a TensorMap address shares
-the generic op name and is detected by `is_tensor_map_address_call` before the
-registry lookup in `decode.rs::Decoded::entry`.
+where needed. One route sits outside that registry: `tirx.address_of` is
+resolved contextually, because a TensorMap address shares the generic op name
+and is detected by `is_tensor_map_address_call` before the registry lookup in
+`decode.rs::Decoded::entry`. CUDA tile operations (`tirx.cuda.tile.apply` and
+`tirx.cuda.tile.ewise`) never reach the frontend (see the end of this section).
 
 **1. Own the op name in its instruction-family module.** Exact PTX op names
 come from the target TVM table and are listed once, as the `registry.rs` rows
@@ -68,13 +67,11 @@ a separate IR pass or manifest field. The generated launch passes allocation IDs
 from the already prepared buffers directly to Racecheck, preserving host aliases
 without changing the Python input payload or host output selection.
 
-Tile ops are a separate route: `registry.rs::TILE_OPS` (names),
-`analyze/tile_forms/` (validation in `parse.rs` and the per-family files)
-and `emit/tile.rs::emit_tile_call`, with the
-per-family emitters in `emit/tile_async_copy.rs`, `emit/tile_gemm_async.rs`
-and `emit/tile_tcgen05.rs`. Adding one means a `TILE_OPS` entry, a
-validation entry, a lowering arm, and the TVM-side schedule registration that
-`test_tile_registry_contract.py` cross-checks.
+CUDA tile operations are expanded before analysis:
+`transpiler/host_prelude.py::dispatch_tile_operations` runs TIRx's
+`TileDispatch` on any kernel that calls them, and the frontend models the
+instructions and statements it selects. A new tile pattern needs registry rows
+only for instructions it selects that NumSim does not model yet.
 
 ### What a lowering may and may not do
 
@@ -92,8 +89,7 @@ site and operands a family passes it. The Rust architecture test
 (`frontend-rs/tests/architecture.rs`) enforces this mechanically. Naming a variant marker
 is explicitly *not* a violation.
 
-Use these `emit/abi.rs` builders instead of literal text (the few listed with
-another path are tile-side helpers kept next to their only consumers):
+Use these `emit/abi.rs` builders instead of literal text:
 
 | Need | Builder |
 |---|---|
@@ -103,26 +99,16 @@ another path are tile-side helpers kept next to their only consumers):
 | site identity | `site`, `site_expr` |
 | addresses and buffers | `address`, `buffer_address`, `physical_ptr`, `named_buffer` |
 | register operands | `register`, `splat`, `per_lane`, `cloned` |
-| lane masks | `lane_mask`; `single_lane_mask` (`emit/tile_tcgen05.rs`) |
-| mapped elements | `element_ref` |
-| mapped views | `mapped_view`, `table_state`, `empty_table_state`, `FN_MAP_STATE` |
-
-`capture_pure_closure` (`emit/tile_async_copy.rs`) is the one shared
-implementation of the lazy-capture algorithm for mapper closures; do not
-re-derive it per family.
+| lane masks | `lane_mask` |
 
 ### Checker slices
 
 The Python frontend's `checker_slices.py` — the Synccheck backward slice, the
 Racecheck memory-validation slice and the fixed-trace eligibility proof — was
-not ported as a whole. The emitted text only ever depended on the
-sync slice's `has_unknown_call` bit and the memory-validation slice had no
-caller, so what survives is that one predicate:
-`fixed_trace_has_unknown_call` in `analyze/tile_forms/mod.rs`. It is true when a
-tile sink expression references an unrecognized `Call` without a source-map entry, which
-disables fixed-trace verification for the whole kernel, and `emit/module.rs`
-evaluates it only for analysis-capable artifacts. A new op needs attention here
-only if it can appear in a tile sink expression without a source ID.
+not ported. The emitted text only ever depended on the sync slice's
+`has_unknown_call` bit over tile sink expressions, and the memory-validation
+slice had no caller. Tile operations are expanded before analysis, so every
+kernel is statically eligible for fixed-trace verification (`emit/module.rs`).
 
 ### What must pass
 

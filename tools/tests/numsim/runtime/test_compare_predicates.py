@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # Spelling, number of destinations, source expressions. Existing numerical
 # tests own comparison/GF(2) oracles; this case adds masking and GPU bit parity.
@@ -48,7 +48,7 @@ def compare_predicate_case(preserve=True):
                 h=f'T.Cast("uint16", {a})',
                 k=f'T.Cast("uint16", {b})',
                 p=f"({a} & T.uint64(1)) != T.uint64(0)",
-                f=f'T.reinterpret("float32", T.Cast("uint32", {a}))',
+                f=f'T.reinterpret(T.Cast("uint32", {a}), ty="float32")',
             )
             alias = mode == 1 and spelling == "setp.ne.s32"
             statements += [f"    {slots}[0] = 91", f"    {slots}[1] = 91"]
@@ -67,14 +67,13 @@ def compare_predicate_case(preserve=True):
                 for index in range(count)
             ]
         row += count
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(lhs: T.Buffer((32,), "uint64"), rhs: T.Buffer((32,), "uint64"),
-           output: T.Buffer((2, {_ROWS}, 32), "uint64"), selected: T.uint32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(lhs: T.Tensor((32,), "uint64"), rhs: T.Tensor((32,), "uint64"),
+           output: T.Tensor((2, {_ROWS}, 32), "uint64"), selected: T.uint32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     active = (selected & (T.uint32(1) << T.Cast("uint32", lane))) != T.uint32(0)
     staged = T.alloc_local((2,), "uint64")
     dst = T.alloc_local((2,), "uint32")

@@ -4,9 +4,9 @@ use crate::analyze::util::{dtype_of, unsupported, AResult};
 use crate::decode::ptx::DecodedPtx;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use std::borrow::Cow;
-use tvm::ir::TensorLoadObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::TensorLoadObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 pub const PREDICATE_CARRIER_DTYPES: [&str; 3] = ["bool", "int32", "uint32"];
 

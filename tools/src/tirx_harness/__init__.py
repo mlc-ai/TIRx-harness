@@ -6,21 +6,21 @@ from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tvm.tir import PrimFunc
+    from tvm_tirx.tirx import Function
 
 __version__ = version("tirx-harness")
 
 __all__ = ["racecheck", "synccheck"]
 
 
-def synccheck(kernel: PrimFunc, inputs: dict | None = None):
+def synccheck(kernel: Function, inputs: dict | None = None):
     """Run native synchronization analysis for one concrete TIRx invocation."""
     from .numsim.checkers import synccheck as _synccheck
 
     return _synccheck(kernel, inputs)
 
 
-def racecheck(kernel: PrimFunc, inputs: dict | None = None):
+def racecheck(kernel: Function, inputs: dict | None = None):
     """Run native data-race analysis for one concrete TIRx invocation."""
     from .numsim.checkers import racecheck as _racecheck
 

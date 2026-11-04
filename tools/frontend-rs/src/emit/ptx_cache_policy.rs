@@ -4,9 +4,9 @@ use crate::analyze::util::{dtype_of, ffi_error, unsupported, AResult, Failure};
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::ir::TensorLoadObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::TensorLoadObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 /// The validated parts of one `createpolicy` instruction.
 pub struct CachePolicyParts {

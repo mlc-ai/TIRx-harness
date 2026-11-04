@@ -11,6 +11,7 @@ from tests.numsim.corpus.kernels.recurrent import (
     _float32_to_bfloat16_bits,
 )
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import (
     ComparisonSpec,
     NumSimCase,
@@ -157,7 +158,7 @@ def _prepare_selective_state_update_case(
             for parameter in kernel.params
             if parameter.name == "dim_tiles_runtime"
         }
-        kernel = kernel.specialize(substitutions)
+        kernel = specialize(kernel, substitutions)
     state_slots = _BATCH
 
     x_values = np.empty((_BATCH, tokens, _NHEADS, _DIM), dtype=np.float32)

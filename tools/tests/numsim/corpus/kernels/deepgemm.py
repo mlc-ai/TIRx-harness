@@ -13,8 +13,8 @@ import numpy as np
 from tvm_ffi import structural_map
 
 from tests.numsim.support._tirx_kernels import config_params, load_tirx_kernel
-from tvm import tirx
-from tvm.ir import Call
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Call
 
 _E2M1_POSITIVE_VALUES = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0], dtype=np.float32)
 _E2M1_SAMPLE_CODES = np.array(
@@ -235,8 +235,8 @@ def _inline_wrelu_reduce(kernel: Any, num_heads: int) -> Any:
         zero = tirx.const(0.0, "float32")
         total = zero
         for head in range(num_heads):
-            accum = tirx.BufferLoad(accum_load.source, [head])
-            weight = tirx.BufferLoad(weights_load.source, [weights_load.indices[0], head])
+            accum = ir.TensorLoad(accum_load.source, [head])
+            weight = ir.TensorLoad(weights_load.source, [weights_load.indices[0], head])
             total = total + tirx.Select(accum > zero, accum, zero) * weight
         return total
 

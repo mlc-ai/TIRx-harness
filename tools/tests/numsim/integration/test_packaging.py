@@ -10,14 +10,14 @@ from pathlib import Path
 import tomllib
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.paths import REPO_ROOT, TOOLS_ROOT
 
 
 def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     project_root = REPO_ROOT
     source_package = TOOLS_ROOT / "src" / "tirx_harness" / "numsim"
-    tvm_python_root = Path(tvm.__file__).resolve().parent.parent
+    tvm_python_root = Path(tvm_tirx.__file__).resolve().parent.parent
     tvm_ffi_root = Path(tvm_ffi.__file__).resolve().parent.parent
     env = os.environ.copy()
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
@@ -38,12 +38,9 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     assert project_metadata["name"] == "tirx-harness"
     assert not (project / "tools" / "setup.py").exists()
 
-    # The archive must preserve the pinned upstream bindings byte for byte.
-    original_bindings = project_root / "thirdparty" / "tvm-rust-ext" / "src"
-    bundled_bindings = project / "tools" / "frontend-rs" / "thirdparty" / "tvm-rust-ext" / "src"
-    for original in original_bindings.rglob("*.rs"):
-        bundled = bundled_bindings / original.relative_to(original_bindings)
-        assert bundled.read_bytes() == original.read_bytes(), original.name
+    # The frontend builds with --locked, so the archive must carry the lock that pins tvm-tirx.
+    lock = tomllib.loads((project / "tools" / "frontend-rs" / "Cargo.lock").read_text())
+    bindings = next(p["version"] for p in lock["package"] if p["name"] == "tvm-tirx")
 
     wheel_dir = tmp_path / "wheel"
     wheel_dir.mkdir()
@@ -76,7 +73,7 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
         native_identity = (
             archive.read("tirx_harness/numsim/_tvm_rust_ext.identity").decode().strip()
         )
-        assert native_identity
+        assert native_identity.endswith(f":tvm-tirx-{bindings}"), native_identity
         assert "tirx_harness/numsim/dtype_registry.json" in packaged
 
     engine_root = source_package / "engine-rs"
@@ -147,14 +144,13 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
         (
             "import pathlib",
             "import numpy as np",
-            "from tvm.script import tirx as T",
+            "from tvm_tirx.script import tirx as T",
             "from tirx_harness import numsim",
-            "@T.prim_func",
-            "def wheel_add_one(source: T.Buffer((32,), 'float32'), "
-            "output: T.Buffer((32,), 'float32')):",
-            "    T.device_entry()",
-            "    _warp = T.warp_id([1])",
-            "    lane = T.lane_id([32])",
+            "@T.function",
+            "def wheel_add_one(source: T.Tensor((32,), 'float32'), "
+            "output: T.Tensor((32,), 'float32')):",
+            "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+            "    lane = T.cuda.lane_id()",
             "    output[lane] = source[lane] + T.float32(1)",
             "source = np.arange(32, dtype=np.float32)",
             "module = numsim.transpile(wheel_add_one, cache_dir=pathlib.Path('cache'))",

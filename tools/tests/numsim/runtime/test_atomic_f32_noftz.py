@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 ATOMIC_CASES = [
     (kind, width, space)
@@ -29,15 +29,15 @@ def atomic_kernel(kind, width, space, *, noftz=True, offset=0, race=False):
         arguments.append("pred=lane % 2 == 0")
         if kind == "atom":
             arguments.append("preserve_dst=True")
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def atomic(destination: T.Buffer((128,), "float32"), value: T.Buffer((128,), "float32"),
-           returned: T.Buffer((128,), "float32")):
-    T.device_entry()
-    warp = T.warp_id([{2 if race else 1}])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "float32", scope="shared", align=16)
+@T.function
+def atomic(destination: T.Tensor((128,), "float32"), value: T.Tensor((128,), "float32"),
+           returned: T.Tensor((128,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={2 if race else 1} * 32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "float32", align=16)
     old = T.alloc_local(({width},), "float32")
     if warp == 0:
         for i in T.serial({width}):
@@ -112,15 +112,14 @@ def test_atomic_f32_noftz(kind, width, space, tmp_path):
 
 
 def bulk_kernel(*, early_read=False):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def bulk(source: T.Buffer((16,), "float32"), destination: T.Buffer((16,), "float32"),
-         observed: T.Buffer((1,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "float32", scope="shared", align=16)
+@T.function
+def bulk(source: T.Tensor((16,), "float32"), destination: T.Tensor((16,), "float32"),
+         observed: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "float32", align=16)
     if lane == 0:
         for i in T.serial(16):
             shared[i] = source[i]

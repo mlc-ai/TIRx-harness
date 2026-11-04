@@ -2,22 +2,22 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def handoff_case(dtype="int32", scope="gpu", release=True, backoff=0):
     suffix = dtype.replace("uint", "u").replace("int", "s")
     order = "release" if release else "relaxed"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def handoff(state: T.Buffer((1,), "{dtype}"), payload: T.Buffer((1,), "int32"),
-            out: T.Buffer((2,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.thread_id([32])
+@T.function
+def handoff(state: T.Tensor((1,), "{dtype}"), payload: T.Tensor((1,), "int32"),
+            out: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.linear_thread_id()
     seen = T.alloc_local((1,), "{dtype}")
     published = T.alloc_local((1,), "{dtype}")
     if lane == 0:
@@ -50,13 +50,12 @@ def handoff(state: T.Buffer((1,), "{dtype}"), payload: T.Buffer((1,), "int32"),
 
 def initial_case(dtype="int32", ptx_type=None, predicate_op="Select"):
     extra = "" if ptx_type is None else f", ptx_type={ptx_type!r}"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def initial(state: T.Buffer((32,), "{dtype}"), out: T.Buffer((32,), "{dtype}")):
-    T.device_entry()
-    T.cta_id([1])
-    lane = T.thread_id([32])
+@T.function
+def initial(state: T.Tensor((32,), "{dtype}"), out: T.Tensor((32,), "{dtype}")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.linear_thread_id()
     seen = T.alloc_local((1,), "{dtype}")
     target = T.alloc_local((1,), "{dtype}")
     seen[0] = T.{dtype}(999)
@@ -89,13 +88,12 @@ def indexed_predicate_case(alias=False, table_size=2):
     table_initialization = "\n".join(
         f"    table[{index}] = {int(index == candidate)}" for index in range(table_size)
     )
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def indexed(state: T.Buffer((32,), "int32"), out: T.Buffer((32,), "int32")):
-    T.device_entry()
-    T.cta_id([1])
-    lane = T.thread_id([32])
+@T.function
+def indexed(state: T.Tensor((32,), "int32"), out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.linear_thread_id()
     seen = T.alloc_local((2,), "int32")
     table = T.alloc_local(({table_size},), "int32")
     seen[1] = 1

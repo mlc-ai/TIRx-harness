@@ -3,26 +3,31 @@
 import numpy as np
 import pytest
 
+from tests.numsim.support.execution import with_cuda_arch
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.script import tirx as T
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM = TileLayout(S[(128, 32) : (1 @ TLane, 1 @ TCol)])
+_TMEM = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 def _kernel(offset, a_in_tmem):
-    @T.prim_func
-    def kernel(output: T.Buffer((64, 8), "uint32")):
-        T.device_entry()
-        lane = T.thread_id([32])
-        barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-        arena = T.alloc_buffer((offset + 9216,), "uint8", scope="shared", align=1024)
-        a = T.decl_buffer((8192,), "uint8", data=arena.data, elem_offset=offset, scope="shared")
-        b = T.decl_buffer(
-            (1024,), "uint8", data=arena.data, elem_offset=offset + 8192, scope="shared"
+    @T.function
+    def kernel(output: T.Tensor((64, 8), "uint32")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.linear_thread_id()
+        barrier = T.alloc_shared((1,), "uint64")
+        arena = T.alloc_shared((offset + 9216,), "uint8", align=1024)
+        a = T.decl_tensor(
+            T.ptr_byte_offset(arena.data, offset * 1, ty=T.Ptr("uint8", "shared")),
+            ty_args=[T.Tensor((8192,), "uint8", scope="shared")],
         )
-        tmem = T.decl_buffer((128, 32), "uint32", scope="tmem", layout=_TMEM, allocated_addr=0)
+        b = T.decl_tensor(
+            T.ptr_byte_offset(arena.data, (offset + 8192) * 1, ty=T.Ptr("uint8", "shared")),
+            ty_args=[T.Tensor((1024,), "uint8", scope="shared")],
+        )
+        tmem = T.tmem((128, 32), "uint32", allocated_addr=0, layout=_TMEM)
         da: T.uint64
         db: T.uint64
         di: T.uint32
@@ -30,7 +35,7 @@ def _kernel(offset, a_in_tmem):
             a[lane + i * 32] = T.uint8(0x38)  # E4M3 1.0
         for i in T.serial(32):
             b[lane + i * 32] = T.uint8(0x38)
-        if a_in_tmem:
+        if T.constexpr(a_in_tmem):
             for rg in T.unroll(4):
                 for col in T.unroll(8):
                     tmem[rg * 32 + lane, 16 + col] = T.uint32(0x38383838)
@@ -69,7 +74,7 @@ def _kernel(offset, a_in_tmem):
             da = (da & T.bitwise_not(T.uint64(0x7FFF))) | T.cast(
                 T.shift_right(T.cuda.cvta_generic_to_shared(a.ptr_to([0])), T.uint32(4)), "uint64"
             )
-            if a_in_tmem:
+            if T.constexpr(a_in_tmem):
                 T.ptx["tcgen05.mma.cta_group::1.kind::f8f6f4"](
                     T.uint32(0),
                     T.uint32(16),
@@ -108,7 +113,7 @@ def _kernel(offset, a_in_tmem):
 @pytest.mark.parametrize("a_in_tmem", [False, True], ids=["ss", "ts"])
 def test_fp8_cta1_extended_shared_addresses(tmp_path, a_in_tmem):
     for offset in (0, 1 << 18):
-        kernel = _kernel(offset, a_in_tmem).with_attr("tirx.cuda_arch", "sm_107a")
+        kernel = with_cuda_arch(_kernel(offset, a_in_tmem), "sm_107a")
         arguments = {"output": np.zeros((64, 8), dtype=np.uint32)}
         module = numsim.transpile(kernel, cache_dir=tmp_path)
         result = numsim.Engine(max_workers=1).run(module, arguments)
@@ -117,4 +122,4 @@ def test_fp8_cta1_extended_shared_addresses(tmp_path, a_in_tmem):
             checker(kernel, arguments).require_clean()
     # The wider field belongs to SM107, not to FP8 or K=32 generally.
     with pytest.raises(UnsupportedTIRxError, match="exceeds the 18-bit descriptor address space"):
-        numsim.transpile(kernel.with_attr("tirx.cuda_arch", "sm_100a"), cache_dir=tmp_path)
+        numsim.transpile(with_cuda_arch(kernel, "sm_100a"), cache_dir=tmp_path)

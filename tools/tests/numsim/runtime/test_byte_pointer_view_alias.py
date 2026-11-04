@@ -3,23 +3,23 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.ir.type import PointerType, PrimType
-from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
+from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def byte_pointer_uint16_alias(output: T.Buffer((32,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    raw = T.alloc_buffer((64,), "uint8", scope="shared")
+@T.function
+def byte_pointer_uint16_alias(output: T.Tensor((32,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    raw = T.alloc_shared((64,), "uint8")
     raw_data: T.let[
         T.Var(
             name="raw_byte_pointer",
-            ty=PointerType(PrimType("void"), "shared"),
+            ty=PtrType(PrimType("void"), "shared"),
         )
-    ] = T.reinterpret(PointerType(PrimType("void"), "shared"), raw.ptr_to([0]))
-    wide = T.decl_buffer((32,), "uint16", data=raw_data, scope="shared")
+    ] = T.reinterpret(raw.ptr_to([0]), ty=PtrType(PrimType("void"), "shared"))
+    wide = T.decl_tensor(raw_data, ty_args=[T.Tensor((32,), "uint16", scope="shared")])
     wide[lane] = T.cast(lane * 257, "uint16")
     T.cuda.warp_sync()
     output[lane] = T.cast(raw[lane * 2], "uint16") | T.shift_left(

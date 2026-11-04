@@ -7,22 +7,20 @@ import pytest
 
 from tests.analysis_tools.racecheck._native_race_trace import full_direct_race_run
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_racecheck_exact_data_dependent_control(
     mode: T.int32,
     if_limit: T.int32,
-    for_extents: T.Buffer((32,), "int32"),
-    while_extents: T.Buffer((32,), "int32"),
-    source: T.Buffer((4,), "int32"),
-    output: T.Buffer((32,), "int32"),
+    for_extents: T.Tensor((32,), "int32"),
+    while_extents: T.Tensor((32,), "int32"),
+    source: T.Tensor((4,), "int32"),
+    output: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     iteration = T.local_scalar("int32")
     iteration = T.int32(0)
 
@@ -40,14 +38,14 @@ def native_racecheck_exact_data_dependent_control(
             iteration = iteration + 1
 
 
-@T.prim_func
+@T.function
 def native_racecheck_data_guarded_cross_lane(
-    enabled: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")
+    enabled: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
 
     if warp == 0:
         shared[lane] = 0
@@ -56,31 +54,6 @@ def native_racecheck_data_guarded_cross_lane(
         shared[lane] = lane + 1
     if warp == 1:
         output[lane] = shared[(lane + 1) % 32]
-
-
-@T.prim_func
-def native_racecheck_tile_address_from_local_scalar(output: T.Buffer((8,), "float32")):
-    T.device_entry()
-    cluster = T.cluster_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    destination_start = T.local_scalar("int32")
-
-    if lane == 0:
-        destination_start = cluster * 4
-    if lane < 4:
-        shared[lane] = T.cast(cluster * 4 + lane, "float32")
-    T.ptx.fence.proxy.async_.shared__cta()
-    T.cuda.cta_sync()
-    if lane == 0:
-        Tx.copy_async(
-            output[destination_start : destination_start + 4],
-            shared[:],
-            dispatch="tma_auto",
-        )
-        T.ptx.cp.async_.bulk.commit_group()
-        T.ptx.cp.async_.bulk.wait_group(0)
 
 
 @pytest.fixture(scope="module")
@@ -254,31 +227,3 @@ def test_public_native_racecheck_resolves_data_guarded_cross_lane_hazard_exactly
 
     assert error_native["engine"]["artifact_key"] == clean_native["engine"]["artifact_key"]
     assert error_native["input"]["digest"] != clean_native["input"]["digest"]
-
-
-def test_public_native_racecheck_preserves_tile_address_local_scalars(native_cache_dir):
-    inputs = {"output": np.zeros(8, dtype=np.float32)}
-    report = racecheck(
-        native_racecheck_tile_address_from_local_scalar,
-        inputs=inputs,
-        cache_dir=native_cache_dir,
-    )
-
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["incomplete"] == []
-    replay = full_direct_race_run(
-        native_racecheck_tile_address_from_local_scalar,
-        inputs,
-        native_cache_dir,
-        native,
-    )
-    global_writes = [
-        access
-        for access in replay["accesses"]
-        if access["space"] == "global" and access["access_kind"] == "write"
-    ]
-    assert len(global_writes) == 8
-    assert sorted(
-        access["lanes"][0]["spans"][0]["byte_offset"] for access in global_writes
-    ) == list(range(0, 32, 4))

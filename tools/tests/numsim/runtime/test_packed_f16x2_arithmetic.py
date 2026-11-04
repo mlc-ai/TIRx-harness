@@ -5,90 +5,83 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def scalar_f16_add(
-    lhs: T.Buffer((32,), "uint16"),
-    rhs: T.Buffer((32,), "uint16"),
-    output: T.Buffer((32,), "uint16"),
+    lhs: T.Tensor((32,), "uint16"),
+    rhs: T.Tensor((32,), "uint16"),
+    output: T.Tensor((32,), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.add.f16(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_subtract(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.sub.f16x2(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_multiply(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mul.f16x2(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_subtract_rn(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.sub.rn.f16x2(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_subtract_ftz(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.sub.ftz.f16x2(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_subtract_sat(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.sub.sat.f16x2(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def packed_bf16x2_subtract(
-    lhs: T.Buffer((32,), "uint32"),
-    rhs: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    lhs: T.Tensor((32,), "uint32"),
+    rhs: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.sub.bf16x2(output[lane], lhs[lane], rhs[lane])
 
 

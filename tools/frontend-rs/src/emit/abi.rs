@@ -141,55 +141,10 @@ pub fn physical_ptr(base: &str, index: &str, itemsize: i64) -> String {
     )
 }
 
-pub(super) fn element_ref(space: &str, constructor: &str, arguments: &[String]) -> String {
-    call(
-        &format!("ElementRef::<{space}>::{constructor}"),
-        arguments,
-        &[],
-        false,
-        false,
-    )
-}
-
 pub(super) fn named_buffer(space: &str, buffer_ref: &str, buffer_name: &str) -> String {
     format!(
         "v2_named_buffer::<{space}>({}, {})",
         cloned(buffer_ref),
         json_string(buffer_name)
-    )
-}
-
-pub(super) const FN_MAP_STATE: &str = "()";
-
-fn dims(dimensions: &[i64]) -> String {
-    dimensions
-        .iter()
-        .map(|dimension| format!("{dimension}_usize"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub(super) fn table_state(dimensions: &[i64], table: &str) -> String {
-    format!("(vec![{}], {table})", dims(dimensions))
-}
-
-pub(super) fn empty_table_state(dimensions: &[i64], space: &str) -> String {
-    format!(
-        "(vec![{}], Vec::<v2::ElementRef<{space}>>::new())",
-        dims(dimensions)
-    )
-}
-
-pub(super) fn mapped_view(
-    name: &str,
-    space: &str,
-    buffer_ref: &str,
-    buffer_name: &str,
-    mapper: &str,
-    state: &str,
-) -> String {
-    format!(
-        "let {name} = v2::MappedView::new({}, {mapper}, {state});",
-        named_buffer(space, buffer_ref, buffer_name)
     )
 }

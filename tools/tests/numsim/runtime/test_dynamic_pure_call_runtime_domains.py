@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 INTEGER_DTYPES = (
     "int8",
@@ -48,9 +48,9 @@ def _name(dtype: str) -> str:
 
 
 def _make_integer_runtime_kernel():
-    parameters = ['    output_bool: T.Buffer((4,), "bool"),']
+    parameters = ['    output_bool: T.Tensor((4,), "bool"),']
     parameters.extend(
-        f'    output_{_name(dtype)}: T.Buffer((20,), "{dtype}"),' for dtype in INTEGER_DTYPES
+        f'    output_{_name(dtype)}: T.Tensor((20,), "{dtype}"),' for dtype in INTEGER_DTYPES
     )
     statements = [
         "        output_bool[0] = T.bitwise_and(T.bool(True), T.bool(False))",
@@ -78,16 +78,15 @@ def _make_integer_runtime_kernel():
                     f'        {output}[{5 + index * 2}] = T.cast(T.shift_right({lhs}, {amount}), "{dtype}")',
                 )
             )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def dynamic_integer_runtime_domain(",
                 *parameters,
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 "    if lane == 0:",
                 *statements,
             )
@@ -102,17 +101,17 @@ DYNAMIC_INTEGER_RUNTIME_DOMAIN = _make_integer_runtime_kernel()
 def _make_if_then_else_runtime_kernel():
     parameters = []
     for dtype in SCALAR_DTYPES:
-        parameters.append(f'    output_{_name(dtype)}: T.Buffer((2,), "{dtype}"),')
+        parameters.append(f'    output_{_name(dtype)}: T.Tensor((2,), "{dtype}"),')
     parameters.extend(
         (
-            '    left: T.Buffer((32,), "uint32"),',
-            '    right: T.Buffer((32,), "uint32"),',
-            '    pointer_output: T.Buffer((34,), "uint32"),',
+            '    left: T.Tensor((32,), "uint32"),',
+            '    right: T.Tensor((32,), "uint32"),',
+            '    pointer_output: T.Tensor((34,), "uint32"),',
         )
     )
     statements = [
-        '        output_bool[0] = T.call_intrin("bool", "prim.if_then_else", lane == 0, T.bool(True), T.bool(False))',
-        '        output_bool[1] = T.call_intrin("bool", "prim.if_then_else", lane != 0, T.bool(True), T.bool(False))',
+        '        output_bool[0] = T.call_intrin("prim.if_then_else", lane == 0, T.bool(True), T.bool(False), ty="bool")',
+        '        output_bool[1] = T.call_intrin("prim.if_then_else", lane != 0, T.bool(True), T.bool(False), ty="bool")',
     ]
     for dtype in SCALAR_DTYPES:
         if dtype == "bool":
@@ -120,29 +119,28 @@ def _make_if_then_else_runtime_kernel():
         output = f"output_{_name(dtype)}"
         statements.extend(
             (
-                f'        {output}[0] = T.call_intrin("{dtype}", "prim.if_then_else", lane == 0, T.cast(3, "{dtype}"), T.cast(7, "{dtype}"))',
-                f'        {output}[1] = T.call_intrin("{dtype}", "prim.if_then_else", lane != 0, T.cast(3, "{dtype}"), T.cast(7, "{dtype}"))',
+                f'        {output}[0] = T.call_intrin("prim.if_then_else", lane == 0, T.cast(3, "{dtype}"), T.cast(7, "{dtype}"), ty="{dtype}")',
+                f'        {output}[1] = T.call_intrin("prim.if_then_else", lane != 0, T.cast(3, "{dtype}"), T.cast(7, "{dtype}"), ty="{dtype}")',
             )
         )
     pointer_statements = (
-        '    selected: T.let[T.handle] = T.call_intrin("handle", "prim.if_then_else", lane % 2 == 0, left.ptr_to([lane]), right.ptr_to([lane]))',
+        '    selected: T.let[T.handle] = T.call_intrin("prim.if_then_else", lane % 2 == 0, left.ptr_to([lane]), right.ptr_to([lane]), ty="handle")',
         "    T.ptx.ld.global_.u32(pointer_output[lane], selected)",
         "    if lane == 0:",
-        '        selected_left: T.let[T.handle] = T.call_intrin("handle", "prim.if_then_else", T.bool(True), left.ptr_to([0]), right.ptr_to([0]))',
-        '        selected_right: T.let[T.handle] = T.call_intrin("handle", "prim.if_then_else", T.bool(False), left.ptr_to([0]), right.ptr_to([0]))',
+        '        selected_left: T.let[T.handle] = T.call_intrin("prim.if_then_else", T.bool(True), left.ptr_to([0]), right.ptr_to([0]), ty="handle")',
+        '        selected_right: T.let[T.handle] = T.call_intrin("prim.if_then_else", T.bool(False), left.ptr_to([0]), right.ptr_to([0]), ty="handle")',
         "        T.ptx.ld.global_.u32(pointer_output[32], selected_left)",
         "        T.ptx.ld.global_.u32(pointer_output[33], selected_right)",
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def dynamic_if_then_else_runtime_domain(",
                 *parameters,
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 "    if lane == 0:",
                 *statements,
                 *pointer_statements,
@@ -155,29 +153,28 @@ def _make_if_then_else_runtime_kernel():
 DYNAMIC_IF_THEN_ELSE_RUNTIME_DOMAIN = _make_if_then_else_runtime_kernel()
 
 
-@T.prim_func
+@T.function
 def IF_THEN_ELSE_MIXED_POINTER_SPACES(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
     shared[lane] = T.uint32(0xA7)
     T.cuda.warp_sync()
     selected: T.let[T.handle] = T.call_intrin(
-        "handle",
         "prim.if_then_else",
         lane % 2 == 0,
         source.ptr_to([lane]),
         shared.ptr_to([lane]),
+        ty="handle",
     )
     T.ptx.ld.global_.u32(output[lane], selected)
 
 
 def _make_tvm_shuffle_runtime_kernel():
     parameters = [
-        f'    output_{_name(dtype)}: T.Buffer((32, 4), "{dtype}"),' for dtype in SCALAR_DTYPES
+        f'    output_{_name(dtype)}: T.Tensor((32, 4), "{dtype}"),' for dtype in SCALAR_DTYPES
     ]
     statements = []
     for dtype in SCALAR_DTYPES:
@@ -185,22 +182,21 @@ def _make_tvm_shuffle_runtime_kernel():
         output = f"output_{_name(dtype)}"
         statements.extend(
             (
-                f"    {output}[lane, 0] = T.tvm_warp_shuffle(T.uint32(0xFFFFFFFF), {value}, 31 - lane, 32, 32)",
-                f"    {output}[lane, 1] = T.tvm_warp_shuffle_xor(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
-                f"    {output}[lane, 2] = T.tvm_warp_shuffle_up(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
-                f"    {output}[lane, 3] = T.tvm_warp_shuffle_down(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
+                f"    {output}[lane, 0] = T.gpu_warp_shuffle(T.uint32(0xFFFFFFFF), {value}, 31 - lane, 32, 32)",
+                f"    {output}[lane, 1] = T.gpu_warp_shuffle_xor(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
+                f"    {output}[lane, 2] = T.gpu_warp_shuffle_up(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
+                f"    {output}[lane, 3] = T.gpu_warp_shuffle_down(T.uint32(0xFFFFFFFF), {value}, 1, 32, 32)",
             )
         )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def dynamic_tvm_shuffle_runtime_domain(",
                 *parameters,
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 *statements,
             )
         ),

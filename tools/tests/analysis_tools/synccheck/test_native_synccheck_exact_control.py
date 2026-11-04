@@ -7,16 +7,15 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_boolean_guard_warp_collective(
-    mode: T.int32, bound: T.int32, flag: T.Buffer((1,), "int32")
+    mode: T.int32, bound: T.int32, flag: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     if mode == 0:
         if (flag[0] != 0) and (lane < bound):

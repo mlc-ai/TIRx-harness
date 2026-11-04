@@ -1,7 +1,7 @@
 //! Instruction-owned pointer flow facts consumed by generic root analysis.
 
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::ptx::DecodedPtx;
 use crate::analyze::buffers::call_op_name;
@@ -42,9 +42,6 @@ pub fn pointer_call(call: &CallObj) -> AResult<PointerCall> {
             | "tirx.cuda.smem_addr_from_u64"
             | "tirx.cuda.sm100_mbarrier_addr",
         ) if !call.args.is_empty() => PointerCall::Forward(oref(call.args.get(0)?)),
-        Some("tirx.tvm_access_ptr") if call.args.len() > 1 => {
-            PointerCall::Forward(oref(call.args.get(1)?))
-        }
         Some("prim.if_then_else") if call.args.len() == 3 => {
             PointerCall::Select(oref(call.args.get(1)?), oref(call.args.get(2)?))
         }
@@ -84,26 +81,19 @@ pub fn register_pointer_sources(decoded: &DecodedPtx) -> AResult<Vec<ObjectRef>>
 mod tests {
     use super::super::ptx::PtxOperand;
     use super::*;
-    use crate::analyze::util::same;
-    use tvm::ir::{Call, Expr, IntImm, Op, PrimType};
-
-    fn initialize() {
-        tvm::libinfo::load_compiler().expect("TVM compiler");
-    }
+    use crate::analyze::util::{int_const, prim_type, same};
+    use tvm_tirx::ir::{Call, Expr, Location, Op, Type};
 
     fn call(name: &str, args: Vec<Expr>) -> Call {
-        Call::new(
-            PrimType::new("uint64").unwrap(),
-            Op::get(name).unwrap(),
-            args,
-        )
+        let ty: Type = prim_type("uint64").unwrap().into();
+        Call::new(Some(&ty), Op::get(name).unwrap(), args, None, Vec::<Type>::new(), Location::unknown())
+            .unwrap()
     }
 
     #[test]
     fn pointer_calls_preserve_sources_arity_and_address_escapes() {
-        initialize();
-        let a: Expr = IntImm::new("int32", 1).unwrap().into();
-        let b: Expr = IntImm::new("int32", 2).unwrap().into();
+        let a: Expr = int_const("int32", 1).unwrap().into();
+        let b: Expr = int_const("int32", 2).unwrap().into();
         let address = call("tirx.address_of", vec![a.clone()]);
         assert!(
             matches!(pointer_call(&address).unwrap(), PointerCall::Address(v) if same(&v, &oref(a.clone())))
@@ -130,9 +120,6 @@ mod tests {
                 PointerCall::Opaque
             ));
         }
-        assert!(
-            matches!(pointer_call(&call("tirx.tvm_access_ptr", vec![a.clone(), b.clone()])).unwrap(), PointerCall::Forward(v) if same(&v, &oref(b.clone())))
-        );
         let select = call("prim.if_then_else", vec![a.clone(), a.clone(), b.clone()]);
         assert!(
             matches!(pointer_call(&select).unwrap(), PointerCall::Select(x, y) if same(&x, &oref(a.clone())) && same(&y, &oref(b.clone())))
@@ -159,9 +146,8 @@ mod tests {
 
     #[test]
     fn register_sources_preserve_width_destination_and_sink_guards() {
-        initialize();
-        let a = oref(IntImm::new("int32", 1).unwrap());
-        let b = oref(IntImm::new("int32", 2).unwrap());
+        let a = oref(int_const("int32", 1).unwrap());
+        let b = oref(int_const("int32", 2).unwrap());
         let mut decoded = DecodedPtx {
             op_name: "tirx.ptx.mov".into(),
             operands: vec![operand("d", "w", b.clone()), operand("a", "r", a.clone())],

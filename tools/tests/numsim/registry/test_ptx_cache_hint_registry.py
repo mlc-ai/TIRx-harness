@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from tvm_ffi import structural_walk
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import emitted_calls, emitted_module
 from tirx_harness.numsim.transpiler import native_frontend
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME, decode_ptx_call
-from tvm.backend.cuda.ptx.table import mods
-from tvm.ir import Expr
-from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx.backend.cuda.ptx.table import mods
+from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 _TENSOR_OVERRIDE_SUFFIXES = (
     "override_address",
@@ -106,12 +105,12 @@ _CANONICAL_TOKENS = {
 }
 
 
-@T.prim_func
+@T.function
 def baseline_cache_hint_forms(
-    source: T.Buffer((128,), "uint8"),
-    input_map: T.TensorMap(),
+    source: T.Tensor((128,), "uint8"),
+    input_map: T.Ptr(T.TensorMap),
 ):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx["prefetch.global.L2"](source.ptr_to([0]))
     T.ptx["cp.async.bulk.prefetch.L2.global"](source.ptr_to([0]), T.uint32(32))
     T.ptx["cp.async.bulk.prefetch.tensor.2d.L2.global.tile"](T.address_of(input_map), 0, 0)
@@ -150,11 +149,11 @@ def _public_form_call(op_name: str, tokens: tuple[str, ...], *, predicated: bool
         arguments = ["source.ptr_to([0])"]
     if predicated:
         arguments.append("pred=T.bool(True)")
-    function = tvm.script.from_source(
+    function = tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
-                "def kernel(source: T.Buffer((256,), 'uint8'), tmap: T.TensorMap()):",
+                "@T.function",
+                "def kernel(source: T.Tensor((256,), 'uint8'), tmap: T.Ptr(T.TensorMap)):",
                 "    T.device_entry()",
                 f'    T.ptx["{spelling}"]({", ".join(arguments)})',
             )

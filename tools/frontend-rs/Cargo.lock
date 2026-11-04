@@ -9,6 +9,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "linkme"
+version = "0.3.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3045e122bd98aef8ec3ad58ce84f0791f64e70163d1a02710af4aa11a4d54cc5"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77060ebe535362c3da75682cd17b0431017b6e7c5661e714fc69a7ad017d1301"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21,7 +41,7 @@ dependencies = [
  "proc-macro2",
  "serde_json",
  "syn 1.0.109",
- "tvm-rust",
+ "tvm-tirx",
 ]
 
 [[package]]
@@ -138,9 +158,11 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-ffi.git?rev=54382cf123ae1b41221d52c9d36b2a0609767d61#54382cf123ae1b41221d52c9d36b2a0609767d61"
+version = "0.1.15-post2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e095d903684186f6ee266d6fc8dcb01a23e088ceb0a4587092589b1d6223df"
 dependencies = [
+ "linkme",
  "paste",
  "tvm-ffi-macros",
  "tvm-ffi-sys",
@@ -148,8 +170,9 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi-macros"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-ffi.git?rev=54382cf123ae1b41221d52c9d36b2a0609767d61#54382cf123ae1b41221d52c9d36b2a0609767d61"
+version = "0.1.15-post2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ef875249d14266836bec9fd3bef42477a5b32e8dee40a5d031888899766d5eb"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -159,12 +182,15 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi-sys"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-ffi.git?rev=54382cf123ae1b41221d52c9d36b2a0609767d61#54382cf123ae1b41221d52c9d36b2a0609767d61"
+version = "0.1.15-post2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f87f504ced3d8997ed7f761c024fab2f6a4f6c8fda81a377f1215aa92a5c4a16"
 
 [[package]]
-name = "tvm-rust"
-version = "0.1.0"
+name = "tvm-tirx"
+version = "0.1.0-alpha.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afa005ffb8872117d5e108be122cac6b36b9154b517345f698eedb34283cd698"
 dependencies = [
  "tvm-ffi",
 ]

@@ -12,15 +12,14 @@ import numpy as np
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def packed_f32x2_float32_destination(output: T.Buffer((32, 4, 2), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    pair = T.alloc_buffer((2,), "float32", scope="local")
+@T.function
+def packed_f32x2_float32_destination(output: T.Tensor((32, 4, 2), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    pair = T.alloc_local((2,), "float32")
     pair_u64 = pair.view("uint64")
 
     lhs: T.let = T.cuda.make_float2(T.cast(lane, "float32"), T.cast(lane + 1, "float32"))
@@ -44,13 +43,12 @@ def packed_f32x2_float32_destination(output: T.Buffer((32, 4, 2), "float32")):
     output[lane, 3, 1] = pair[1]
 
 
-@T.prim_func
-def packed_f32x2_uint64_destination(output: T.Buffer((32, 4), "uint64")):
+@T.function
+def packed_f32x2_uint64_destination(output: T.Tensor((32, 4), "uint64")):
     """Byte-identical control whose destination pointee is already 8 bytes."""
 
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     lhs: T.let = T.cuda.make_float2(T.cast(lane, "float32"), T.cast(lane + 1, "float32"))
     rhs: T.let = T.cuda.make_float2(T.float32(0.75), T.float32(0.5))
@@ -62,11 +60,10 @@ def packed_f32x2_uint64_destination(output: T.Buffer((32, 4), "uint64")):
     T.ptx.mul.rn.ftz.f32x2(output[lane, 3], lhs, rhs)
 
 
-@T.prim_func
-def packed_f32x2_value_forms(output: T.Buffer((32, 2), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def packed_f32x2_value_forms(output: T.Tensor((32, 2), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     lhs: T.let = T.cuda.make_float2(T.cast(lane, "float32"), T.cast(lane + 1, "float32"))
     rhs: T.let = T.cuda.make_float2(T.float32(0.75), T.float32(0.5))
     addend: T.let = T.cuda.make_float2(T.float32(1), T.float32(2))
@@ -135,14 +132,14 @@ def test_checkers_accept_the_float32_pair_destination(tmp_path):
     race.require_clean()
 
 
-@T.prim_func
-def packed_store_races_with_second_element(output: T.Buffer((2,), "float32")):
+@T.function
+def packed_store_races_with_second_element(output: T.Tensor((2,), "float32")):
     """The packed store spans smem[0..2); warp 1 concurrently writes smem[1]."""
 
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    smem = T.alloc_buffer((2,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    smem = T.alloc_shared((2,), "float32")
     smem_pair = smem.view("uint64")
 
     lhs: T.let = T.cuda.make_float2(T.float32(1), T.float32(2))

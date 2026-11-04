@@ -13,11 +13,11 @@ import re
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tests.numsim.support.wait_until import indexed_predicate_case, initial_case
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _memory_variants(rust_source):
@@ -102,14 +102,14 @@ def _rendezvous(*, primitive):
         )
         read = 'T.ptx["ld.relaxed.gpu.global.s32"](got[0], slot.ptr_to([0]))'
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def rendezvous(state: T.Buffer((1,), "int32"), slot: T.Buffer((1,), "int32"),
-               tickets: T.Buffer((1,), "int32"), observed: T.Buffer((2,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def rendezvous(state: T.Tensor((1,), "int32"), slot: T.Tensor((1,), "int32"),
+               tickets: T.Tensor((1,), "int32"), observed: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     got = T.alloc_local((1,), "int32")
     ticket = T.alloc_local((1,), "int32")
@@ -168,13 +168,13 @@ def _packed(*, primitive, dtype):
         publish = f'T.ptx["st.relaxed.gpu.global.{suffix}"](state.ptr_to([0]), T.{dtype}(7))'
         wait = f'while seen[0] == 0:\n                T.ptx["{load}"](seen[0], state.ptr_to([0]))'
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def packed(state: T.Buffer((1,), "{dtype}"), observed: T.Buffer((1,), "{dtype}")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def packed(state: T.Tensor((1,), "{dtype}"), observed: T.Tensor((1,), "{dtype}")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "{dtype}")
     if lane == 0:
         if warp == 0:
@@ -280,13 +280,13 @@ def _mixed(*, scoped_reset):
         if scoped_reset
         else "state[0] = T.int32(0)"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def mixed(state: T.Buffer((1,), "int32"), observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
+@T.function
+def mixed(state: T.Tensor((1,), "int32"), observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if warp == 0:
@@ -318,17 +318,17 @@ def _ordered_reset():
     word handed out.
     """
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         """
-@T.prim_func
+@T.function
 def ordered_reset(
-    state: T.Buffer((1,), "int32"),
-    gate: T.Buffer((1,), "int32"),
-    observed: T.Buffer((1,), "int32"),
+    state: T.Tensor((1,), "int32"),
+    gate: T.Tensor((1,), "int32"),
+    observed: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     ready = T.alloc_local((1,), "int32")
     if lane == 0:
@@ -416,13 +416,13 @@ def test_wait_has_its_own_hb_event(waiter, prior_access, ordering):
         "prefix_only": barrier + wait + plain,
         "none": wait + plain,
     }[ordering]
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def wait_event(state: T.Buffer((1,), "int32"), observed: T.Buffer((2,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def wait_event(state: T.Tensor((1,), "int32"), observed: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if warp == {waiter} and lane == 0:
         {initial_access}
@@ -462,13 +462,13 @@ def _bit_typed(*, primitive):
             '                T.ptx["ld.acquire.gpu.global.b32"](seen[0], state.ptr_to([0]))'
         )
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def bit_typed(state: T.Buffer((1,), "int32"), observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def bit_typed(state: T.Tensor((1,), "int32"), observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if warp == 0:
@@ -512,14 +512,14 @@ def _two_arrivals(*, target):
     is judged on the first arrival alone however late the loop actually left.
     """
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def two_arrivals(state: T.Buffer((1,), "int32"), first: T.Buffer((1,), "int32"),
-                 second: T.Buffer((1,), "int32"), observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
+@T.function
+def two_arrivals(state: T.Tensor((1,), "int32"), first: T.Tensor((1,), "int32"),
+                 second: T.Tensor((1,), "int32"), observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if warp == 0:
@@ -571,13 +571,13 @@ def _woken_by_a_bypass():
     given.
     """
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         """
-@T.prim_func
-def woken_by_a_bypass(state: T.Buffer((1,), "int32"), observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def woken_by_a_bypass(state: T.Tensor((1,), "int32"), observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if warp == 0:
@@ -631,14 +631,14 @@ def _backoff_spin(*, primitive):
         )
         publish = 'T.ptx["red.release.gpu.global.add.s32"](state.ptr_to([0]), T.int32(1))'
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def backoff(state: T.Buffer((1,), "int32"), slot: T.Buffer((1,), "int32"),
-            observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def backoff(state: T.Tensor((1,), "int32"), slot: T.Tensor((1,), "int32"),
+            observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if warp == 0:
@@ -729,13 +729,13 @@ def _packed_payload(*, retry):
         else ("T.ptx.ld.relaxed.gpu.global_.u64(\n                observed[0], slot.ptr_to([0]))")
     )
     word = (1 << 32) | 0xDEADBEEF
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def packed(slot: T.Buffer((1,), "uint64"), sink: T.Buffer((1,), "uint64")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def packed(slot: T.Tensor((1,), "uint64"), sink: T.Tensor((1,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     observed = T.alloc_local((1,), "uint64")
     if lane == 0:
         if cta == 0:

@@ -30,8 +30,9 @@ from tests.numsim.corpus.kernels.gemm import (
     prepare_fp16_bf16_case,
     prepare_nvfp4_case,
 )
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.bindings import _tensor_map_base_array
-from tvm import tirx
+from tvm_tirx import tirx
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ def _prepared_numsim_case(case) -> PreparedWikiRacecheckCase:
         for param in case.kernel.params
         if param.name in _MQA_RUNTIME_SCALARS
     }
-    case.kernel = case.kernel.specialize(substitutions)
+    case.kernel = specialize(case.kernel, substitutions)
     args = {name: value for name, value in case.args.items() if name not in _MQA_RUNTIME_SCALARS}
     tensor_map_buffers = {
         "tensor_map_q": "q_gmem",
@@ -124,7 +125,7 @@ def _prepared_numsim_case(case) -> PreparedWikiRacecheckCase:
             expected = next(
                 buffer
                 for buffer in case.kernel.params
-                if tirx.is_buffer_var(buffer)
+                if tirx.is_tensor_var(buffer)
                 if str(buffer.name) == buffer_name
             )
             expected_shape = tuple(int(extent) for extent in expected.shape)

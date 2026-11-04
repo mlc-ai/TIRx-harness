@@ -1,8 +1,9 @@
 //! Validation and emission of the matrix instruction family.
 
 use crate::analyze::util::{
-    as_buffer, capitalize, dtype_of, ffi_error, int_imm_expr, not_covered, oref, prim, repr_text,
-    same, simplify, static_int, static_string, unmodeled, unsupported, AResult, Failure,
+    as_buffer, capitalize, dtype_of, ffi_error, int_const, int_imm_expr, not_covered, oref, prim,
+    repr_text, same, simplify, static_int, static_string, unmodeled, unsupported, AResult, Failure,
+    TensorVarExt,
 };
 use crate::analyze::Ctx;
 use crate::decode::projected_buffer;
@@ -14,10 +15,10 @@ use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
 use crate::tables::{dtype_byte_len, v2_memory_type_rust, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm::ir::{CallObj, FloatImmObj, IntImm, IntImmObj, PrimExpr, TensorLoadObj, VarObj};
-use tvm::tirx::BufferVar;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, Expr, FloatImmObj, IntImmObj, TensorLoadObj, Var, VarObj};
+
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 /// The engine functions (below `v2::`) the MMA lowerings call.
 pub const MMA_SYNC: &str = "matrix::mma_sync";
@@ -263,7 +264,7 @@ pub fn resolve_legacy_matrix_call(
             &MMA_ACCUMULATOR_DTYPES, &result_dtype
         ));
     }
-    if op_name == "tirx.mma_fill" || op_name == "tirx.mma_fill_legacy" {
+    if op_name == "tirx.cuda.mma_fill" {
         if args.len() != 3 {
             return unsupported(format!("{op_name} expects 3 arguments, got {}", args.len()));
         }
@@ -895,10 +896,10 @@ impl<'a> Emitter<'a> {
     }
 
     /// `kernel.emit_buffer_address(buffer, zeros)`.
-    fn matrix_buffer_base_address(&mut self, buffer: &BufferVar) -> AResult<String> {
-        let mut zeros: Vec<PrimExpr> = Vec::new();
-        for _ in buffer.buffer_type().shape.iter() {
-            zeros.push(IntImm::new("int32", 0)?.into());
+    fn matrix_buffer_base_address(&mut self, buffer: &Var) -> AResult<String> {
+        let mut zeros: Vec<Expr> = Vec::new();
+        for _ in buffer.tensor_type().shape.iter() {
+            zeros.push(int_const("int32", 0)?.into());
         }
         Ok(self.emit_buffer_address(buffer, &zeros)?.code)
     }
@@ -920,7 +921,7 @@ impl<'a> Emitter<'a> {
             return crate::analyze::util::not_covered("MMA register source is not a typed buffer");
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let pointer = self.emit_buffer_address(&buffer, &indices)?;
         let pointer_name = self.control_name(label);
         self.emit_line(&format!("let {pointer_name} = {};", pointer.code));
@@ -1321,8 +1322,8 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         match call.op_name.as_str() {
             "tirx.ptx_legacy.mma" => self.emit_legacy_mma(call, source_op_id),
-            "tirx.mma_fill" | "tirx.mma_fill_legacy" => self.emit_mma_fill(call, source_op_id),
-            "tirx.mma_store" | "tirx.mma_store_legacy" => self.emit_mma_store(call, source_op_id),
+            "tirx.cuda.mma_fill" => self.emit_mma_fill(call, source_op_id),
+            "tirx.cuda.mma_store" => self.emit_mma_store(call, source_op_id),
             other => {
                 crate::analyze::util::not_covered(format!("statement call {other} has no lowering"))
             }

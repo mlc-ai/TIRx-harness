@@ -6,7 +6,7 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.frontend import analyze, verify
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _SMEM_DESC_ADD_16B_OFFSET_SOURCE = r"""
 __forceinline__ __device__ uint64_t tvm_builtin_smem_desc_add_16B_offset(
@@ -27,69 +27,63 @@ __forceinline__ __device__ void smem_desc_make_lo_uniform(uint64_t* desc) {
 """
 
 
-@T.prim_func
-def opaque_value_helper(output: T.Buffer((32,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def opaque_value_helper(output: T.Tensor((32,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.func_call(
         "opaque_fdividef",
         T.float32(1),
         T.cast(lane + 1, "float32"),
-        source_code="float opaque_fdividef(float, float);",
-        return_type="float32",
+        "float opaque_fdividef(float, float);",
+        ty="float32",
     )
 
 
-@T.prim_func
+@T.function
 def opaque_statement_helper():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.evaluate(
             T.cuda.func_call(
                 "tvm_builtin_tcgen05_mma_mxf4_block32_ss",
-                source_code="void tvm_builtin_tcgen05_mma_mxf4_block32_ss();",
-                return_type="void",
+                "void tvm_builtin_tcgen05_mma_mxf4_block32_ss();",
             )
         )
 
 
-@T.prim_func
+@T.function
 def smem_descriptor_offset_helper(
-    descriptors: T.Buffer((32,), "uint64"),
-    offsets: T.Buffer((32,), "int32"),
-    output: T.Buffer((32,), "uint64"),
+    descriptors: T.Tensor((32,), "uint64"),
+    offsets: T.Tensor((32,), "int32"),
+    output: T.Tensor((32,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.func_call(
         "tvm_builtin_smem_desc_add_16B_offset",
         descriptors[lane],
         offsets[lane],
-        source_code=_SMEM_DESC_ADD_16B_OFFSET_SOURCE,
-        return_type="uint64",
+        _SMEM_DESC_ADD_16B_OFFSET_SOURCE,
+        ty="uint64",
     )
 
 
-@T.prim_func
+@T.function
 def smem_descriptor_make_lo_uniform_helper(
-    descriptors: T.Buffer((32,), "uint64"),
-    output: T.Buffer((32,), "uint64"),
+    descriptors: T.Tensor((32,), "uint64"),
+    output: T.Tensor((32,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     descriptor = T.alloc_local((1,), "uint64")
     descriptor[0] = descriptors[lane]
     T.evaluate(
         T.cuda.func_call(
             "smem_desc_make_lo_uniform",
             T.address_of(descriptor[0]),
-            source_code=_SMEM_DESC_MAKE_LO_UNIFORM_SOURCE,
-            return_type="void",
+            _SMEM_DESC_MAKE_LO_UNIFORM_SOURCE,
         )
     )
     output[lane] = descriptor[0]

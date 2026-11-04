@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 
 from ..abi import NUMSIM_ABI_VERSION
 from ..errors import NumSimBuildError
@@ -63,11 +63,11 @@ def codegen_dependency_paths() -> tuple[Path, ...]:
     paths.append(numsim_root / "dtype_registry.json")
     paths.extend((numsim_root / name) for name in _CODEGEN_DEPENDENCY_MODULES)
     try:
-        import tvm
+        import tvm_tirx
     except ImportError:
         pass
     else:
-        tvm_root = Path(tvm.__file__).resolve().parent
+        tvm_root = Path(tvm_tirx.__file__).resolve().parent
         paths.extend((tvm_root / name) for name in ("__init__.py", "base.py"))
         paths.extend((tvm_root / "tirx").rglob("*.py"))
         paths.extend((tvm_root / "ir").rglob("*.py"))
@@ -111,7 +111,7 @@ def _ensure_cache_root(root: Path) -> None:
 
 
 def _tvm_library_identity() -> list[dict[str, Any]]:
-    from tvm.base import _LOADED_LIBS
+    from tvm_tirx.base import _LOADED_LIBS
 
     libraries = {Path(tvm_ffi.LIB._name).resolve()}
     libraries.update(Path(library._name).resolve() for library in _LOADED_LIBS.values())
@@ -142,7 +142,7 @@ def _compile_identity(source_identity: str, *, kind: str) -> dict[str, Any]:
         "transpiler_source": codegen_dependency_source_digest(),
         "split_configuration": split_configuration_identity(),
         "python_cache_tag": sys.implementation.cache_tag,
-        "tvm_version": tvm.__version__,
+        "tvm_version": tvm_tirx.__version__,
         "tvm_library": _tvm_library_identity(),
     }
 

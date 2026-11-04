@@ -3,15 +3,14 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def ptx_ldmatrix_x1_x2_domain(output: T.Buffer((96,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
+@T.function
+def ptx_ldmatrix_x1_x2_domain(output: T.Tensor((96,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
     x1 = T.alloc_local((1,), "uint32")
     x2 = T.alloc_local((2,), "uint32")
     for byte in T.unroll(16):
@@ -24,13 +23,12 @@ def ptx_ldmatrix_x1_x2_domain(output: T.Buffer((96,), "uint32")):
         output[32 + matrix * 32 + lane] = x2[matrix]
 
 
-@T.prim_func
-def legacy_ldmatrix_x1_domain(output: T.Buffer((64,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((256,), "uint16", scope="shared")
-    local = T.alloc_buffer((2,), "uint16", scope="local")
+@T.function
+def legacy_ldmatrix_x1_domain(output: T.Tensor((64,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((256,), "uint16")
+    local = T.alloc_local((2,), "uint16")
     for element in T.unroll(8):
         shared[lane * 8 + element] = T.cast(lane * 8 + element + 1, "uint16")
     T.cuda.warp_sync()
@@ -43,20 +41,19 @@ def legacy_ldmatrix_x1_domain(output: T.Buffer((64,), "uint16")):
             0,
             shared.data,
             0,
-            dtype="uint16",
+            ty="uint16",
         )
     )
     output[lane * 2] = local[0]
     output[lane * 2 + 1] = local[1]
 
 
-@T.prim_func
-def stmatrix_b16_x1_domain(output: T.Buffer((64,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8, 8), "uint16", scope="shared")
-    source = T.alloc_buffer((1,), "uint32", scope="local")
+@T.function
+def stmatrix_b16_x1_domain(output: T.Tensor((64,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8, 8), "uint16")
+    source = T.alloc_local((1,), "uint32")
     low = T.cast(lane * 2 + 1, "uint32")
     high = T.cast(lane * 2 + 2, "uint32")
     source[0] = low | T.shift_left(high, T.uint32(16))
@@ -70,13 +67,12 @@ def stmatrix_b16_x1_domain(output: T.Buffer((64,), "uint16")):
         output[linear] = shared[linear // 8, linear % 8]
 
 
-@T.prim_func
-def stmatrix_b8_x4_domain(output: T.Buffer((512,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32, 16), "uint8", scope="shared")
-    source = T.alloc_buffer((4,), "uint32", scope="local")
+@T.function
+def stmatrix_b8_x4_domain(output: T.Tensor((512,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32, 16), "uint8")
+    source = T.alloc_local((4,), "uint32")
     for matrix in T.unroll(4):
         value0 = T.cast((matrix * 73 + lane * 5 + 3) % 256, "uint32")
         value1 = T.cast((matrix * 73 + lane * 5 + 20) % 256, "uint32")

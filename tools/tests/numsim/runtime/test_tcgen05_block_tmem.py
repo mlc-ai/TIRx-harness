@@ -7,7 +7,7 @@ from tvm_ffi import structural_map
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def block_tmem_case(
@@ -139,8 +139,8 @@ def test_block_scaled_tmem_a(cta_group, a_format, b_format, tmp_path):
                 operands,
                 attrs=node.attrs,
                 ty_args=node.ty_args,
-                span=node.span,
-                ret_ty=node.ty,
+                loc=node.loc,
+                ty=node.ty,
             )
 
         changed = kernel.with_body(structural_map(kernel.body, replace_descriptor))

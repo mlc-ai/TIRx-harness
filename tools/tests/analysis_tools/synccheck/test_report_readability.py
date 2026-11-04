@@ -18,15 +18,15 @@ from tirx_harness.numsim.checker_runner import (
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.frontend import analyze, module_spec_from_manifest
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def report_mbarrier_deadlock():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if (warp == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 2)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -625,7 +625,7 @@ def test_real_native_deadlock_report_names_the_blocked_kernel_statement(tmp_path
     rendered = report.format()
     assert "execution cannot make progress; blocked warps 0" in rendered
     assert "Blocked warps 0: await mbarrier.try_wait; phase 0" in rendered
-    assert "T.cuda.mbarrier_wait(T.address_of(barriers), 0)" in rendered
+    assert "TIRx: T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)" in rendered
     wait_line = next(
         line_number
         for line_number, line in enumerate(Path(__file__).read_text().splitlines(), start=1)

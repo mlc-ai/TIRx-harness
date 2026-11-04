@@ -3,22 +3,10 @@
 use crate::analyze::util::{dtype_of, oref, unsupported, AResult};
 use crate::analyze::Ctx;
 use crate::decode::Decoded;
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::{ControlProvenance, Emitter, RustValue, Uniformity};
-
-pub fn break_loop(emitter: &mut Emitter, decoded: &Decoded) -> AResult<Option<RustValue>> {
-    validate_control_call(emitter.ctx, decoded.node, decoded.call, &decoded.op_name)?;
-    emitter.emit_break()?;
-    Ok(None)
-}
-
-pub fn continue_loop(emitter: &mut Emitter, decoded: &Decoded) -> AResult<Option<RustValue>> {
-    validate_control_call(emitter.ctx, decoded.node, decoded.call, &decoded.op_name)?;
-    emitter.emit_continue()?;
-    Ok(None)
-}
 
 pub fn trap_assert(emitter: &mut Emitter, decoded: &Decoded) -> AResult<Option<RustValue>> {
     validate_control_call(emitter.ctx, decoded.node, decoded.call, &decoded.op_name)?;
@@ -98,11 +86,4 @@ impl<'a> Emitter<'a> {
         self.emit_line("}");
         Ok(())
     }
-}
-
-pub fn is_loop_transfer(node: &ObjectRef) -> AResult<bool> {
-    Ok(matches!(
-        crate::decode::call_name(node)?.as_deref(),
-        Some("tirx.break_loop" | "tirx.continue_loop")
-    ))
 }

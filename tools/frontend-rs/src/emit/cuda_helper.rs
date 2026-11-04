@@ -2,8 +2,8 @@
 
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
-    as_buffer, buffer_dtype, buffer_scope, dtype_of, dtype_text, expr_type, ffi_text, int_imm,
-    not_covered, oref, prim, prim_dtype, unsupported, AResult,
+    as_buffer, buffer_dtype, buffer_scope, dtype_of, dtype_text, enum_name, expr_type, ffi_text,
+    int_imm, not_covered, oref, prim, prim_dtype, prim_type, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::Decoded;
 use crate::emit::async_copy::ST_ASYNC;
@@ -11,11 +11,11 @@ use crate::emit::ptx_warp::SHFL_SYNC;
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::{json_string, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
-use tvm::ir::StringImmObj;
-use tvm::ir::{CallObj, IntImmObj, PointerTypeObj, PrimType, TensorLoadObj};
-use tvm::prim::Cast;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{CallObj, IntImmObj, Location, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::prim::Cast;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KnownCudaFuncKind {
@@ -417,7 +417,7 @@ fn helper_dtype(node: &ObjectRef) -> String {
     let Some(ty) = expr_type(node) else {
         return String::new();
     };
-    if ty.as_node::<PointerTypeObj>().is_some() {
+    if ty.as_node::<PtrTypeObj>().is_some() {
         return "handle".to_owned();
     }
     prim_dtype(&ty).map(dtype_text).unwrap_or_default()
@@ -440,11 +440,11 @@ fn address_of_load(value: &ObjectRef) -> AResult<Option<ObjectRef>> {
 
 fn pointer_scope_and_dtype(value: &ObjectRef) -> Option<(String, String)> {
     let ty = expr_type(value)?;
-    let pointer = ty.as_node::<PointerTypeObj>()?;
+    let pointer = ty.as_node::<PtrTypeObj>()?;
     let dtype = prim_dtype(&pointer.element_type)
         .map(dtype_text)
         .unwrap_or_default();
-    Some((ffi_text(&pointer.storage_scope), dtype))
+    Some((enum_name(&*pointer.scope), dtype))
 }
 
 fn require_local_f32_array_address(
@@ -475,7 +475,7 @@ fn require_local_f32_array_address(
     let Some(base) = last.as_node::<IntImmObj>().and_then(|imm| int_value(imm).ok()) else {
         return unsupported(format!("{field} final array index must be a static zero"));
     };
-    let shape: Vec<ObjectRef> = source.buffer_type().shape.iter().map(oref).collect();
+    let shape: Vec<ObjectRef> = source.tensor_type().shape.iter().map(oref).collect();
     let extent = match shape.last() {
         Some(extent) if base == 0 => int_imm(extent),
         _ => None,
@@ -1020,12 +1020,13 @@ impl<'a> Emitter<'a> {
                 // These known C++ helpers take unsigned 32-/64-bit parameters before
                 // passing their register bits to PTX.
                 let operand = Cast::new(
-                    PrimType::new(if field == "global_dim" {
+                    prim_type(if field == "global_dim" {
                         "uint32"
                     } else {
                         "uint64"
                     })?,
                     prim(&parsed.arguments[1])?,
+                    Location::unknown(),
                 )?;
                 let value =
                     self.v2_register_operand(&oref(operand), "u64", "tensor_map_replace_value")?;
@@ -1735,7 +1736,7 @@ impl<'a> Emitter<'a> {
         source_op_id: i64,
     ) -> AResult<()> {
         let args: Vec<ObjectRef> = expr
-            .as_node::<tvm::ir::CallObj>()
+            .as_node::<tvm_tirx::ir::CallObj>()
             .map(|call| call.args.iter().map(crate::analyze::util::oref).collect())
             .unwrap_or_default();
         match op_name {

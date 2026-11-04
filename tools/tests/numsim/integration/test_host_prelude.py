@@ -7,13 +7,13 @@ import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def typed_host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
-    T.tensormap_encode_tiled(
+@T.function
+def typed_host_encoded_tensor_map_store(output: T.Tensor((32,), "int32")):
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
+    T.cuda.tensormap_encode_tiled(
         tensor_map,
         output.data,
         32,
@@ -27,10 +27,9 @@ def typed_host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
         oob_fill=0,
         force_cu_dtype=-1,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane
     T.cuda.warp_sync()
     T.ptx.fence.proxy.async_.shared__cta()
@@ -45,10 +44,10 @@ def typed_host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
 
 
 def _typed_host_tensor_map_2d(swizzle=3):
-    @T.prim_func
-    def kernel(source: T.Buffer((64, 64), "bfloat16"), output: T.Buffer((32,), "int32")):
-        tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
-        T.tensormap_encode_tiled(
+    @T.function
+    def kernel(source: T.Tensor((64, 64), "bfloat16"), output: T.Tensor((32,), "int32")):
+        tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
+        T.cuda.tensormap_encode_tiled(
             tensor_map,
             source.data,
             64,
@@ -66,9 +65,8 @@ def _typed_host_tensor_map_2d(swizzle=3):
             oob_fill=0,
             force_cu_dtype=-1,
         )
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         output[lane] = 0
 
     return kernel
@@ -99,9 +97,9 @@ def test_typed_tensor_map_modes_are_validated(tmp_path):
         numsim.transpile(_typed_host_tensor_map_2d(swizzle=99), cache_dir=tmp_path)
 
 
-@T.prim_func
-def host_encoded_tensor_map(output: T.Buffer((32,), "int32")):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+@T.function
+def host_encoded_tensor_map(output: T.Tensor((32,), "int32")):
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -116,15 +114,14 @@ def host_encoded_tensor_map(output: T.Buffer((32,), "int32")):
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = lane
 
 
-@T.prim_func
-def host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+@T.function
+def host_encoded_tensor_map_store(output: T.Tensor((32,), "int32")):
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -139,10 +136,9 @@ def host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane
     T.cuda.warp_sync()
     T.ptx.fence.proxy.async_.shared__cta()
@@ -156,11 +152,11 @@ def host_encoded_tensor_map_store(output: T.Buffer((32,), "int32")):
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
+@T.function
 def host_encoded_reinterpreted_tensor_map(
-    source: T.Buffer((64,), "uint8"), output: T.Buffer((32,), "uint8")
+    source: T.Tensor((64,), "uint8"), output: T.Tensor((32,), "uint8")
 ):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -175,17 +171,16 @@ def host_encoded_reinterpreted_tensor_map(
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = source[lane]
 
 
-@T.prim_func
+@T.function
 def host_encoded_offset_tensor_map(
-    source: T.Buffer((32,), "uint8"), output: T.Buffer((16,), "uint8")
+    source: T.Tensor((32,), "uint8"), output: T.Tensor((16,), "uint8")
 ):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -200,11 +195,10 @@ def host_encoded_offset_tensor_map(
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -228,12 +222,12 @@ def host_encoded_offset_tensor_map(
         output[lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def host_encoded_fp4_tensor_map(
-    source: T.Buffer((256,), "float4_e2m1fn"),
-    output: T.Buffer((64,), "uint8"),
+    source: T.Tensor((256,), "float4_e2m1fn"),
+    output: T.Tensor((64,), "uint8"),
 ):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -249,11 +243,10 @@ def host_encoded_fp4_tensor_map(
         0,
         13,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -277,13 +270,13 @@ def host_encoded_fp4_tensor_map(
     output[lane * 2 + 1] = shared[lane * 2 + 1]
 
 
-@T.prim_func
+@T.function
 def host_encoded_dynamic_integer_tensor_map(
-    source: T.Buffer((32,), "uint8"),
-    output: T.Buffer((16,), "uint8"),
+    source: T.Tensor((32,), "uint8"),
+    output: T.Tensor((16,), "uint8"),
     delta: T.int32,
 ):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -298,11 +291,10 @@ def host_encoded_dynamic_integer_tensor_map(
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((16,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((16,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -326,9 +318,9 @@ def host_encoded_dynamic_integer_tensor_map(
         output[lane] = shared[lane]
 
 
-@T.prim_func
-def host_encoded_unregistered_integer_tensor_map(source: T.Buffer((32,), "uint8"), delta: T.int32):
-    tensor_map: T.let[T.TensorMap()] = T.tvm_stack_alloca("tensormap", 1)
+@T.function
+def host_encoded_unregistered_integer_tensor_map(source: T.Tensor((32,), "uint8"), delta: T.int32):
+    tensor_map: T.let[T.Ptr(T.TensorMap())] = T.stack_alloca("tensormap", 1)
     T.call_packed(
         "runtime.cuTensorMapEncodeTiled",
         tensor_map,
@@ -343,13 +335,11 @@ def host_encoded_unregistered_integer_tensor_map(source: T.Buffer((32,), "uint8"
         0,
         0,
     )
-    T.device_entry()
-    _warp = T.warp_id([1])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
 
 
-@T.prim_func
-def direct_cuda_launch(output: T.Buffer((4, 64), "int32")):
+@T.function
+def direct_cuda_launch(output: T.Tensor((4, 64), "int32")):
     cta_in_cluster = T.launch_thread("clusterCtaIdx.x", 2)
     global_cta = T.launch_thread("blockIdx.x", 4)
     thread = T.launch_thread("threadIdx.x", 64)

@@ -3,20 +3,19 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def sparse_f16_m16n8k32(
-    packed_a: T.Buffer((16, 16), "float16"),
-    b: T.Buffer((32, 8), "float16"),
-    c: T.Buffer((16, 8), "float32"),
-    metadata_words: T.Buffer((32,), "uint32"),
-    output: T.Buffer((16, 8), "float32"),
+    packed_a: T.Tensor((16, 16), "float16"),
+    b: T.Tensor((32, 8), "float16"),
+    c: T.Tensor((16, 8), "float32"),
+    metadata_words: T.Tensor((32,), "uint32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((8,), "float16")
@@ -63,17 +62,16 @@ def sparse_f16_m16n8k32(
     output[group + 8, thread * 2 + 1] = acc[3]
 
 
-@T.prim_func
+@T.function
 def sparse_tf32_m16n8k8(
-    packed_a: T.Buffer((16, 4), "float32"),
-    b: T.Buffer((8, 8), "float32"),
-    c: T.Buffer((16, 8), "float32"),
-    metadata_words: T.Buffer((32,), "uint32"),
-    output: T.Buffer((16, 8), "float32"),
+    packed_a: T.Tensor((16, 4), "float32"),
+    b: T.Tensor((8, 8), "float32"),
+    c: T.Tensor((16, 8), "float32"),
+    metadata_words: T.Tensor((32,), "uint32"),
+    output: T.Tensor((16, 8), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((2,), "float32")
@@ -113,17 +111,16 @@ def sparse_tf32_m16n8k8(
     output[group + 8, thread * 2 + 1] = acc[3]
 
 
-@T.prim_func
+@T.function
 def sparse_s8_u8_m16n8k64(
-    packed_a: T.Buffer((16, 32), "int8"),
-    b: T.Buffer((64, 8), "uint8"),
-    c: T.Buffer((16, 8), "int32"),
-    metadata_words: T.Buffer((32,), "uint32"),
-    output: T.Buffer((16, 8), "int32"),
+    packed_a: T.Tensor((16, 32), "int8"),
+    b: T.Tensor((64, 8), "uint8"),
+    c: T.Tensor((16, 8), "int32"),
+    metadata_words: T.Tensor((32,), "uint32"),
+    output: T.Tensor((16, 8), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     group = T.meta_var(lane // 4)
     thread = T.meta_var(lane % 4)
     a_regs = T.alloc_local((16,), "int8")
@@ -171,11 +168,10 @@ def sparse_s8_u8_m16n8k64(
     output[group + 8, thread * 2 + 1] = acc[3]
 
 
-@T.prim_func
-def sparse_float8_m16n8k64_zero(output: T.Buffer((32, 4), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def sparse_float8_m16n8k64_zero(output: T.Tensor((32, 4), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a_regs = T.alloc_local((16,), "float8_e4m3fn")
     b_regs = T.alloc_local((16,), "float8_e4m3fn")
     acc = T.alloc_local((4,), "float32")

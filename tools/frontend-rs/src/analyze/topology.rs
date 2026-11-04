@@ -1,21 +1,21 @@
-//! Launch topology extraction and the AttrStmt/For validators.
+//! Launch topology extraction and the launch region and For validators.
 
 use crate::analyze::util::json_object;
 use crate::tvm_compat::int_value;
-use tvm::ir::{FloatImmObj, IntImmObj, VarObj};
-use tvm::prim::{CastObj, NotObj, SelectObj};
-use tvm::tirx::{
-    AttrStmtObj, BindObj, ForKind, ForObj, IterVar, ScopeIdDefStmtObj, SeqStmtObj, Stmt,
-};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore, TypeIndex};
+use tvm_tirx::ir::prim::{CastObj, NotObj, SelectObj};
+use tvm_tirx::ir::{Expr, FloatImmObj, IntImmObj, VarObj};
+use tvm_tirx::ir::{ForKind, ForObj, RegionStmtObj, SeqStmtObj, Stmt};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, Array, Map, ObjectRefCore, String as FfiString, TypeIndex};
 
-use super::util::{dtype_of, ffi_text, kind, oref, repr_text, unsupported, AResult, IdMap, Json};
+use super::util::{
+    dtype_of, ffi_text, int_imm, kind, oref, repr_text, scalar_bind, static_string, unsupported,
+    AResult, IdMap, Json,
+};
 use super::{topology_operands, Ctx};
 
 const WARP_SIZE: i64 = 32;
 const WARPS_PER_WARPGROUP: i64 = 4;
-const THREADS_PER_WARPGROUP: i64 = WARP_SIZE * WARPS_PER_WARPGROUP;
 
 #[derive(Clone, Copy, Debug)]
 pub enum StaticValue {
@@ -315,9 +315,54 @@ pub struct LaunchTopology {
     /// setmaxnreg count with it; it stays out of `json()` so the manifest is
     /// unchanged.
     pub min_blocks_per_sm: i64,
+    /// The CTA grid and cluster shapes along x, y and z. The engine numbers
+    /// clusters and CTAs linearly; emission recovers each coordinate from
+    /// these shapes, which stay out of `json()` like `min_blocks_per_sm`.
+    pub grid: [i64; 3],
+    pub cluster: [i64; 3],
 }
 
 impl LaunchTopology {
+    /// Whether the grid or a cluster extends along y or z.
+    pub fn is_multidimensional(&self) -> bool {
+        self.grid[1] != 1 || self.grid[2] != 1 || self.cluster[1] != 1 || self.cluster[2] != 1
+    }
+
+    /// Rust code for the CTA coordinate special register `register`
+    /// (`ctaid`, `clusterid` and `cluster_ctaid` with their extents), or
+    /// `None` for any other register. The engine numbers clusters with x
+    /// fastest, and `ctx.cta_id_in_cluster()` is the PTX `%cluster_ctarank`,
+    /// which also linearizes the CTA's position in its cluster with x fastest.
+    pub fn cta_coordinate(&self, register: &str) -> Option<String> {
+        let (name, axis) = register.rsplit_once('.')?;
+        let axis = ["x", "y", "z"]
+            .iter()
+            .position(|candidate| *candidate == axis)?;
+        let clusters = [
+            self.grid[0] / self.cluster[0],
+            self.grid[1] / self.cluster[1],
+            self.grid[2] / self.cluster[2],
+        ];
+        let coordinate = |linear: &str, extents: [i64; 3]| {
+            let stride: i64 = extents[..axis].iter().product();
+            format!("(({linear} / {stride}) % {})", extents[axis])
+        };
+        Some(match name {
+            "ctaid" => format!(
+                "({} * {} + {})",
+                coordinate("ctx.cluster_id()", clusters),
+                self.cluster[axis],
+                coordinate("ctx.cta_id_in_cluster()", self.cluster)
+            ),
+            "clusterid" => coordinate("ctx.cluster_id()", clusters),
+            "cluster_ctaid" => coordinate("ctx.cta_id_in_cluster()", self.cluster),
+            "nctaid" => self.grid[axis].to_string(),
+            "nclusterid" => clusters[axis].to_string(),
+            "cluster_nctaid" => self.cluster[axis].to_string(),
+            _ => return None,
+        })
+    }
+
     pub fn json(&self) -> Json {
         json_object(vec![
             ("clusters", Json::from(self.clusters)),
@@ -359,8 +404,42 @@ impl Constraints {
     }
 }
 
-pub fn iter_var_of(value: &Any) -> Option<IterVar> {
-    IterVar::try_from(value.clone()).ok()
+pub const DEVICE_ENTRY: &str = "tirx.device_entry";
+/// The launch region `TileDispatch` makes of a device entry.
+pub const DEVICE_SCOPE: &str = "tirx.device_scope";
+pub const LAUNCH_THREAD: &str = "tirx.launch_thread";
+
+/// Whether `region` launches a kernel with its `cuda.launch_fields` operands.
+pub fn is_launch_entry(region: &RegionStmtObj) -> bool {
+    matches!(region.op.name.as_str(), DEVICE_ENTRY | DEVICE_SCOPE)
+}
+/// Launch thread tags NumSim executes, with the constraint each extent sets.
+const LAUNCH_THREAD_TAGS: &[(&str, &str)] = &[
+    ("blockIdx.x", "global CTAs"),
+    ("clusterCtaIdx.x", "CTAs per cluster"),
+    ("threadIdx.x", "threads per CTA"),
+];
+
+/// The `(field, value)` operands a `tirx.device_entry` region's
+/// `cuda.launch_fields` names.
+pub fn launch_values(region: &RegionStmtObj) -> AResult<Vec<(String, Expr)>> {
+    let Some(fields) = region.attrs.dict.get(&FfiString::from("cuda.launch_fields"))? else {
+        return Ok(Vec::new());
+    };
+    let fields: Array<FfiString> = fields.try_into()?;
+    if fields.len() != region.args.len() {
+        return unsupported("device_entry launch fields must describe every launch operand");
+    }
+    Ok(fields.iter().map(|field| ffi_text(&field)).zip(region.args.iter()).collect())
+}
+
+/// A `tirx.device_entry` region's `cuda.kernel_attrs`.
+pub fn kernel_attrs(region: &RegionStmtObj) -> AResult<Vec<(String, i64)>> {
+    let Some(attrs) = region.attrs.dict.get(&FfiString::from("cuda.kernel_attrs"))? else {
+        return Ok(Vec::new());
+    };
+    let attrs: Map<FfiString, i64> = attrs.try_into()?;
+    Ok(attrs.iter().map(|(key, value)| (ffi_text(&key), value)).collect())
 }
 
 fn visit(
@@ -375,32 +454,54 @@ fn visit(
         }
         return Ok(());
     }
-    if let Some(attr) = node.as_node::<AttrStmtObj>() {
-        if ffi_text(&attr.attr_key) == "thread_extent" {
-            let thread_tag = match iter_var_of(&attr.node) {
-                Some(iter_var) => ffi_text(&iter_var.thread_tag()?),
-                None => String::new(),
-            };
-            let extent = static_int(ctx, &oref(attr.value.clone()), environment)?;
-            let constraint = match thread_tag.as_str() {
-                "blockIdx.x" => "global CTAs",
-                "clusterCtaIdx.x" => "CTAs per cluster",
-                "threadIdx.x" => "threads per CTA",
-                _ => {
+    if let Some(region) = node.as_node::<RegionStmtObj>() {
+        match ffi_text(&region.op.name).as_str() {
+            DEVICE_ENTRY | DEVICE_SCOPE => {
+                for (field, value) in launch_values(region)? {
+                    let constraint = match field.as_str() {
+                        "grid.x" => "global CTAs",
+                        "grid.y" => "grid y",
+                        "grid.z" => "grid z",
+                        "block.x" => "threads per CTA",
+                        "cluster.x" => "CTAs per cluster",
+                        "cluster.y" => "cluster y",
+                        "cluster.z" => "cluster z",
+                        "block.y" | "block.z" => {
+                            let extent = static_int(ctx, &oref(value), environment)?;
+                            if extent != 1 {
+                                return unsupported(format!(
+                                    "NumSim CTAs are one-dimensional, but {field} is {extent}"
+                                ));
+                            }
+                            continue;
+                        }
+                        _ => continue,
+                    };
+                    let extent = static_int(ctx, &oref(value), environment)?;
+                    constraints.constrain(constraint, i64::try_from(extent).unwrap_or(i64::MAX))?;
+                }
+                for (key, value) in kernel_attrs(region)? {
+                    if key == "min_blocks_per_sm" {
+                        constraints.constrain("min blocks per sm", value)?;
+                    }
+                }
+            }
+            LAUNCH_THREAD => {
+                let tag = static_string(&oref(region.args.get(0)?), "launch_thread tag")?;
+                let Some((_, constraint)) = LAUNCH_THREAD_TAGS.iter().find(|(name, _)| *name == tag) else {
                     return unsupported(format!(
                         "NumSim does not support direct launch thread tag {:?}",
-                        &thread_tag
-                    ))
-                }
-            };
-            constraints.constrain(constraint, i64::try_from(extent).unwrap_or(i64::MAX))?;
-        } else if ffi_text(&attr.attr_key) == "tirx.launch_bounds_min_blocks_per_sm" {
-            let blocks = static_int(ctx, &oref(attr.value.clone()), environment)?;
-            constraints.constrain("min blocks per sm", i64::try_from(blocks).unwrap_or(i64::MAX))?;
+                        &tag
+                    ));
+                };
+                let extent = static_int(ctx, &oref(region.args.get(1)?), environment)?;
+                constraints.constrain(constraint, i64::try_from(extent).unwrap_or(i64::MAX))?;
+            }
+            _ => {}
         }
-        return visit(ctx, &attr.body, constraints, environment);
+        return visit(ctx, &Stmt::from(region.body.clone()), constraints, environment);
     }
-    if let Some(bind) = node.as_node::<BindObj>() {
+    if let Some(bind) = scalar_bind(node) {
         match static_value(ctx, &oref(bind.value.clone()), environment) {
             Ok(value) => {
                 let key = oref(bind.var.clone());
@@ -413,45 +514,6 @@ fn visit(
             Err(super::util::Failure::Unsupported { .. }) => {}
             Err(error) => return Err(error),
         }
-        return Ok(());
-    }
-    let Some(definition_stmt) = node.as_node::<ScopeIdDefStmtObj>() else {
-        return Ok(());
-    };
-    let definition = &definition_stmt.def;
-    let scope = i64::from(definition.scope.as_raw());
-    if !(0..10).contains(&scope) {
-        return unsupported(format!("unsupported launch scope id {scope}"));
-    }
-    let Some(extents) = &definition.extents else {
-        return Ok(());
-    };
-    if extents.is_empty() {
-        return Ok(());
-    }
-    let mut product: i128 = 1;
-    for extent in extents.iter() {
-        product *= static_int(ctx, &oref(extent), environment)?;
-    }
-    let extent = i64::try_from(product).unwrap_or(i64::MAX);
-    match scope {
-        0 => constraints.constrain("clusters", extent)?,
-        1 => constraints.constrain("global CTAs", extent)?,
-        2 => constraints.constrain("CTAs per cluster", extent)?,
-        9 => {
-            if extent != 2 {
-                return unsupported(format!(
-                    "cluster CTA-pair result extent must be 2, got {extent}"
-                ));
-            }
-        }
-        3 => constraints.constrain("warpgroups per CTA", extent)?,
-        4 => constraints.constrain("warps per CTA", extent)?,
-        5 => constraints.constrain("warps per warpgroup", extent)?,
-        7 => constraints.constrain("threads per CTA", extent)?,
-        8 => constraints.constrain("threads per warpgroup", extent)?,
-        6 => constraints.constrain("threads per warp", extent)?,
-        _ => {}
     }
     Ok(())
 }
@@ -467,218 +529,181 @@ pub(crate) fn extract_topology(
         entries: Vec::new(),
     };
     visit(ctx, body, &mut constraints, &mut environment)?;
-    let threads_per_warp = constraints.get("threads per warp").unwrap_or(WARP_SIZE);
-    if threads_per_warp != WARP_SIZE {
+    let grid = [
+        constraints.get("global CTAs").unwrap_or(1),
+        constraints.get("grid y").unwrap_or(1),
+        constraints.get("grid z").unwrap_or(1),
+    ];
+    let cluster = [
+        constraints.get("CTAs per cluster").unwrap_or(1),
+        constraints.get("cluster y").unwrap_or(1),
+        constraints.get("cluster z").unwrap_or(1),
+    ];
+    if grid[0] % cluster[0] != 0 {
         return unsupported(format!(
-            "warp thread extent must be {WARP_SIZE}, got {threads_per_warp}"
+            "global CTA count {} is not divisible by cluster size {}",
+            grid[0], cluster[0]
         ));
     }
-    let warps_per_warpgroup = constraints
-        .get("warps per warpgroup")
-        .unwrap_or(WARPS_PER_WARPGROUP);
-    if warps_per_warpgroup != WARPS_PER_WARPGROUP {
-        return unsupported(format!(
-            "warpgroup warp extent must be {WARPS_PER_WARPGROUP}, got {warps_per_warpgroup}"
-        ));
-    }
-    let threads_per_warpgroup = constraints
-        .get("threads per warpgroup")
-        .unwrap_or(THREADS_PER_WARPGROUP);
-    if threads_per_warpgroup != THREADS_PER_WARPGROUP {
-        return unsupported(format!(
-            "warpgroup thread extent must be {THREADS_PER_WARPGROUP}, got {threads_per_warpgroup}"
-        ));
-    }
-    let explicit_clusters = constraints.get("clusters");
-    let global_ctas = constraints.get("global CTAs");
-    let explicit_ctas_per_cluster = constraints.get("CTAs per cluster");
-    let (clusters, ctas_per_cluster) = match (
-        explicit_clusters,
-        global_ctas,
-        explicit_ctas_per_cluster,
-    ) {
-        (Some(clusters), global, Some(per_cluster)) => {
-            let derived = clusters * per_cluster;
-            if let Some(global) = global {
-                if global != derived {
-                    return unsupported(format!(
-                        "global CTA count {global} disagrees with clusters {clusters} * CTAs per cluster {per_cluster}"
-                    ));
-                }
-            }
-            (clusters, per_cluster)
-        }
-        (Some(clusters), Some(global), None) => {
-            if global % clusters != 0 {
-                return unsupported(format!(
-                    "global CTA count {global} is not divisible by cluster count {clusters}"
-                ));
-            }
-            (clusters, global / clusters)
-        }
-        (None, Some(global), Some(per_cluster)) => {
-            if global % per_cluster != 0 {
-                return unsupported(format!(
-                    "global CTA count {global} is not divisible by cluster size {per_cluster}"
-                ));
-            }
-            (global / per_cluster, per_cluster)
-        }
-        (Some(clusters), None, None) => (clusters, 1),
-        (None, Some(global), None) => (global, 1),
-        (None, None, Some(per_cluster)) => (1, per_cluster),
-        (None, None, None) => (1, 1),
-    };
-    let mut warp_candidates: Vec<(&str, i64)> = Vec::new();
-    if let Some(direct_warps) = constraints.get("warps per CTA") {
-        warp_candidates.push(("CTA warp extent", direct_warps));
-    }
-    if let Some(direct_threads) = constraints.get("threads per CTA") {
-        if direct_threads % WARP_SIZE != 0 {
+    for (axis, name) in [(1, "y"), (2, "z")] {
+        if grid[axis] % cluster[axis] != 0 {
             return unsupported(format!(
-                "CTA thread extent {direct_threads} is not a whole number of warps"
+                "grid.{name} {} is not divisible by cluster.{name} {}",
+                grid[axis], cluster[axis]
             ));
         }
-        warp_candidates.push(("CTA thread extent", direct_threads / WARP_SIZE));
     }
-    if let Some(warpgroup_count) = constraints.get("warpgroups per CTA") {
-        warp_candidates.push(("warpgroup extent", warpgroup_count * warps_per_warpgroup));
-    } else if warp_candidates.is_empty()
-        && (constraints.get("warps per warpgroup").is_some()
-            || constraints.get("threads per warpgroup").is_some())
-    {
-        warp_candidates.push(("implicit warpgroup extent", warps_per_warpgroup));
-    }
-    let warps_per_cta = if let Some((source, warps)) = warp_candidates.first().copied() {
-        for (candidate_source, candidate_value) in warp_candidates.iter().skip(1) {
-            if *candidate_value != warps {
-                return unsupported(format!(
-                    "{source} implies {warps} warps per CTA, but {candidate_source} implies {candidate_value}"
-                ));
-            }
+    let ctas_per_cluster = cluster.iter().product::<i64>();
+    let clusters = grid.iter().product::<i64>() / ctas_per_cluster;
+    let warps_per_cta = match constraints.get("threads per CTA") {
+        Some(threads) if threads % WARP_SIZE != 0 => {
+            return unsupported(format!(
+                "CTA thread extent {threads} is not a whole number of warps"
+            ))
         }
-        warps
-    } else {
-        1
+        Some(threads) => threads / WARP_SIZE,
+        None => 1,
     };
     Ok(LaunchTopology {
         clusters,
         ctas_per_cluster,
         warps_per_cta,
-        warps_per_warpgroup,
+        warps_per_warpgroup: WARPS_PER_WARPGROUP,
         min_blocks_per_sm: constraints.get("min blocks per sm").unwrap_or(1),
+        grid,
+        cluster,
     })
 }
 
-/// `None` when the attribute is acceptable.
-pub fn validate_attr_stmt(ctx: &Ctx, attr: &AttrStmtObj) -> AResult<Option<String>> {
-    let attr_key = ffi_text(&attr.attr_key);
-    if !ctx.schema.numerically_irrelevant_attrs.contains(&attr_key)
-        && !ctx.schema.semantic_attrs.contains(&attr_key)
-    {
+/// `tirx.device_entry` attributes: the launch operand names, the kernel
+/// attributes, the shared-memory pool requirement and the compile settings.
+const DEVICE_ENTRY_ATTRS: &[&str] = &[
+    "cuda.launch_fields",
+    "cuda.kernel_attrs",
+    "cuda.smem_required",
+    "backend_config",
+];
+/// Launch operands besides the grid, block and cluster shapes. The stream and
+/// priority only schedule the launch. Programmatic stream serialization lets
+/// the launch begin before the preceding kernel in its stream completes; NumSim
+/// runs one launch whose inputs are complete before it starts, and orders work
+/// after `griddepcontrol.wait` through its external-grid-dependency model.
+const SCALAR_LAUNCH_FIELDS: &[&str] = &[
+    "dynamic_smem_bytes",
+    "stream",
+    "priority",
+    "programmatic_stream_serialization",
+];
+/// Kernel attributes constrain occupancy and launch validity only; NumSim
+/// executes the launch shape directly.
+const KERNEL_ATTRS: &[&str] = &[
+    "min_blocks_per_sm",
+    "max_blocks_per_cluster",
+    "max_registers_per_thread",
+    "required_block_size",
+    "required_block_x",
+    "required_block_y",
+    "required_block_z",
+    "required_cluster_x",
+    "required_cluster_y",
+    "required_cluster_z",
+];
+
+/// `None` when the launch region is acceptable.
+pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
+    let op_name = ffi_text(&region.op.name);
+    if op_name == LAUNCH_THREAD {
+        let tag = region.args.get(0).ok().and_then(|tag| static_string(&oref(tag), "tag").ok());
+        if !tag.as_deref().is_some_and(|tag| LAUNCH_THREAD_TAGS.iter().any(|(name, _)| *name == tag)) {
+            return Ok(Some(format!(
+                "RegionStmt(tirx.launch_thread) has unsupported thread tag {:?}",
+                tag.unwrap_or_default()
+            )));
+        }
+        let extent = region.args.get(1).ok().and_then(|extent| int_imm(&oref(extent)));
+        let int32_var = region.body_params.len() == 1
+            && dtype_of(&oref(region.body_params.get(0)?))? == "int32";
+        if extent.is_none_or(|value| value <= 0) || !int32_var {
+            return Ok(Some(
+                "RegionStmt(tirx.launch_thread) must bind an int32 variable to a positive IntImm"
+                    .to_owned(),
+            ));
+        }
+        return Ok(None);
+    }
+    if !is_launch_entry(region) {
+        return Ok(Some(format!("RegionStmt(op={op_name:?}) is unsupported")));
+    }
+    for (key, _) in region.attrs.dict.iter() {
+        if !DEVICE_ENTRY_ATTRS.contains(&key.as_str()) {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) attribute {:?} has unsupported numerical semantics",
+                key.as_str()
+            )));
+        }
+    }
+    let launch = launch_values(region)?;
+    for (field, value) in &launch {
+        let shape = ["grid.", "block.", "cluster.", "preferred_cluster."]
+            .iter()
+            .any(|prefix| field.starts_with(prefix));
+        if !shape && !SCALAR_LAUNCH_FIELDS.contains(&field.as_str()) {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) launch field {field:?} has unsupported numerical semantics"
+            )));
+        }
+        if field == "programmatic_stream_serialization" && int_imm(&oref(value.clone())).is_none() {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) programmatic_stream_serialization must be a constant"
+            )));
+        }
+        if field == "dynamic_smem_bytes" && int_imm(&oref(value.clone())).is_none_or(|bytes| bytes < 0) {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) dynamic_smem_bytes must be a non-negative IntImm"
+            )));
+        }
+    }
+    let shape = |prefix: &str| -> Vec<Option<i64>> {
+        ["x", "y", "z"]
+            .iter()
+            .map(|axis| {
+                launch
+                    .iter()
+                    .find(|(field, _)| *field == format!("{prefix}.{axis}"))
+                    .map_or(Some(1), |(_, value)| int_imm(&oref(value.clone())))
+            })
+            .collect()
+    };
+    let preferred = launch.iter().any(|(field, _)| field.starts_with("preferred_cluster."));
+    if preferred && shape("preferred_cluster") != shape("cluster") {
         return Ok(Some(format!(
-            "AttrStmt(attr_key={:?}) has unsupported numerical semantics",
-            &attr_key
+            "RegionStmt({op_name}) preferred_cluster must equal cluster"
         )));
     }
-    let value_node = oref(attr.value.clone());
-    let value_int = value_node
-        .as_node::<IntImmObj>()
-        .and_then(|imm| int_value(imm).ok());
-    let node_object = ObjectRef::try_from(attr.node.clone()).ok();
-    let zero_node = match &node_object {
-        None => i64::try_from(attr.node.clone()).ok() == Some(0),
-        Some(object) => object
-            .as_node::<IntImmObj>()
-            .is_some_and(|imm| int_value(imm).ok() == Some(0)),
-    };
-    let message = match attr_key.as_str() {
-        "tirx.device_entry" => {
-            if !zero_node
-                || value_int.is_none()
-                || dtype_of(&value_node)? != "bool"
-                || value_int != Some(1)
-            {
-                Some(
-                    "AttrStmt(tirx.device_entry) must carry the canonical zero/true markers"
-                        .to_owned(),
-                )
-            } else {
-                None
-            }
+    for (key, value) in kernel_attrs(region)? {
+        let valid = match key.as_str() {
+            // A bool flag: tvm-tirx records the unset default as 0.
+            "required_block_size" => value == 0 || value == 1,
+            other => KERNEL_ATTRS.contains(&other) && value > 0,
+        };
+        if !valid {
+            return Ok(Some(format!(
+                "RegionStmt({op_name}) kernel attribute {key}={value} is unsupported"
+            )));
         }
-        "tirx.max_registers" => {
-            if !zero_node || value_int.is_none_or(|value| value <= 0) {
-                Some("AttrStmt(tirx.max_registers) must be a positive IntImm".to_owned())
-            } else {
-                None
-            }
-        }
-        "thread_extent" => {
-            let iter_var = node_object.as_ref().and_then(|_| iter_var_of(&attr.node));
-            let thread_tag = match &iter_var {
-                Some(iter_var) => ffi_text(&iter_var.thread_tag()?),
-                None => String::new(),
-            };
-            if !["blockIdx.x", "clusterCtaIdx.x", "threadIdx.x"].contains(&thread_tag.as_str()) {
-                Some(format!(
-                    "AttrStmt(thread_extent) has unsupported thread tag {:?}",
-                    &thread_tag
-                ))
-            } else {
-                let var_dtype = match &iter_var {
-                    Some(iter_var) => super::util::dtype_text(iter_var.var()?.dtype()),
-                    None => String::new(),
-                };
-                if iter_var.is_none()
-                    || value_int.is_none_or(|value| value <= 0)
-                    || var_dtype != "int32"
-                {
-                    Some(
-                        "AttrStmt(thread_extent) must bind an int32 IterVar to a positive IntImm"
-                            .to_owned(),
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-        "tirx.launch_bounds_min_blocks_per_sm" | "tirx.launch_bounds_max_blocks_per_cluster" => {
-            if !zero_node || value_int.is_none_or(|value| value <= 0) {
-                Some(format!("AttrStmt({attr_key}) must be a positive IntImm"))
-            } else {
-                None
-            }
-        }
-        "tirx.dyn_smem_bytes" => {
-            if !zero_node || value_int.is_none_or(|value| value < 0) {
-                Some(
-                    "AttrStmt(tirx.dyn_smem_bytes) must carry zero and a non-negative IntImm"
-                        .to_owned(),
-                )
-            } else {
-                None
-            }
-        }
-        // Memory planning validates pool capacity and resolves its buffer root.
-        _ => None,
-    };
-    Ok(message)
+    }
+    Ok(None)
 }
 
 pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
-    let kind_value = loop_stmt.kind.as_raw();
-    if kind_value != ForKind::kSerial.as_raw() && kind_value != ForKind::kUnrolled.as_raw() {
+    let kind_value = loop_stmt.kind;
+    if kind_value != ForKind::Default as i32 && kind_value != ForKind::Unrolled as i32 {
         let kind_name = match kind_value {
             1 => "PARALLEL".to_owned(),
             2 => "VECTORIZED".to_owned(),
-            4 => "THREAD_BINDING".to_owned(),
             other => other.to_string(),
         };
         return Ok(Some(format!("For(kind={kind_name}) is unsupported")));
-    }
-    if loop_stmt.thread_binding.is_some() {
-        return Ok(Some("For(thread_binding=...) is unsupported".to_owned()));
     }
     let mut annotations: Vec<(String, Any)> = loop_stmt
         .annotations
@@ -690,7 +715,7 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
         .iter()
         .map(|(key, _)| (key).to_string())
         .collect();
-    if kind_value == ForKind::kUnrolled.as_raw() {
+    if kind_value == ForKind::Unrolled as i32 {
         if !annotations.is_empty() {
             return Ok(Some(format!(
                 "For(kind=UNROLLED) has unsupported annotations {:?}",
@@ -720,12 +745,12 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
     for (key, value) in &annotations {
         let is_true = value.type_index() == TypeIndex::kTVMFFIBool as i32
             && bool::try_from(value.clone()).unwrap_or(false);
-        if key == "pragma_unroll" {
+        if key == "tirx.pragma_unroll" {
             let positive_int = value.type_index() == TypeIndex::kTVMFFIInt as i32
                 && i64::try_from(value.clone()).is_ok_and(|factor| factor > 0);
             if !(is_true || positive_int) {
                 return Ok(Some(
-                    "For(kind=SERIAL) annotation 'pragma_unroll' must be true or a positive integer factor".to_owned(),
+                    "For(kind=SERIAL) annotation 'tirx.pragma_unroll' must be true or a positive integer factor".to_owned(),
                 ));
             }
         } else if !is_true {

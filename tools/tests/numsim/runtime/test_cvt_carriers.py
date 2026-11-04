@@ -2,11 +2,12 @@
 
 import numpy as np
 import pytest
+import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
-from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_dtypes, tokens_for
+from tvm_tirx.script import tirx as T
 
 
 def cvt_carrier_case(ptx_type):
@@ -19,7 +20,7 @@ def cvt_carrier_case(ptx_type):
     # against the canonical carrier instead of multiplying their combinations.
     forms = [(dst, source_carriers[0]) for dst in destination_carriers]
     forms += [(destination_carriers[0], src) for src in source_carriers[1:]]
-    bits = tvm.DataType(source_carriers[0]).bits
+    bits = tvm_ffi.dtype(source_carriers[0]).bits
     patterns = [
         0,
         1,
@@ -48,8 +49,8 @@ def cvt_carrier_case(ptx_type):
     lines = []
     for form_index, (destination_dtype, source_dtype) in enumerate(forms):
         dst, src = f"dst_{form_index}", f"src_{form_index}"
-        dbytes = tvm.DataType(destination_dtype).bits // 8
-        sbytes = tvm.DataType(source_dtype).bits // 8
+        dbytes = tvm_ffi.dtype(destination_dtype).bits // 8
+        sbytes = tvm_ffi.dtype(source_dtype).bits // 8
         lines += [
             f'    storage_{form_index} = T.alloc_local((1,), "{destination_dtype}")',
             f'    {dst} = storage_{form_index}.view("{destination_dtype}")',
@@ -100,12 +101,11 @@ def cvt_carrier_case(ptx_type):
                     expected[row, lane, :dbytes] = list(value.to_bytes(dbytes, "little"))
                 elif mode == 1:
                     expected[row, lane, :dbytes] = 0
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer((32, 16), "uint8"), output: T.Buffer(({len(expected)}, 32, 16), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor((32, 16), "uint8"), output: T.Tensor(({len(expected)}, 32, 16), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 {chr(10).join(lines)}
 """,
         {"T": T},

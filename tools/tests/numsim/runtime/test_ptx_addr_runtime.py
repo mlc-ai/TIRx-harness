@@ -3,17 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def ptx_addr_global_load(source: T.Buffer((33,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def ptx_addr_global_load(source: T.Tensor((33,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.evaluate(T.ptx.ld.global_.s32(output[lane], T.ptx.addr(source.ptr_to([lane]), 4)))
 
 
@@ -30,61 +29,56 @@ def test_ptx_addr_applies_a_signed_byte_offset(tmp_path):
 
 def test_ptx_addr_rejects_signed_int32_overflow():
     source = """
-@T.prim_func
-def overflow(source: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def overflow(source: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.evaluate(T.ptx.ld.global_.s32(
         output[lane], T.ptx.addr(source.ptr_to([lane]), 2147483648)
     ))
 """
 
-    with pytest.raises(tvm.error.DiagnosticError, match="outside signed int32 range"):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match="outside signed int32 range"):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_ptx_addr_rejects_recursive_wrapper():
     source = """
-@T.prim_func
-def recursive(source: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def recursive(source: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.evaluate(T.ptx.ld.global_.s32(
         output[lane], T.ptx.addr(T.ptx.addr(source.ptr_to([lane]), 4), 4)
     ))
 """
 
-    with pytest.raises(tvm.error.DiagnosticError, match="cannot be nested"):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match="cannot be nested"):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_ptx_addr_rejects_non_pointer_base():
     source = """
-@T.prim_func
-def non_pointer(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def non_pointer(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.evaluate(T.ptx.ld.global_.s32(
         output[lane], T.ptx.addr(T.int32(7), 4)
     ))
 """
 
-    with pytest.raises(tvm.error.DiagnosticError, match="must be a pointer"):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match="must be a pointer"):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_ptx_addr_rejects_disallowed_tmem_operand():
     source = """
-@T.prim_func
-def disallowed(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    _warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
+@T.function
+def disallowed(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
     value = T.alloc_local((1,), "uint32")
     T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](
         value[0], T.ptx.addr(T.address_of(shared[0]), 4)
@@ -93,5 +87,5 @@ def disallowed(output: T.Buffer((32,), "uint32")):
     output[lane] = value[0]
 """
 
-    with pytest.raises(tvm.error.DiagnosticError, match="does not support T.ptx.addr"):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match="does not support T.ptx.addr"):
+        tvm_tirx.script.from_source(source, {"T": T})

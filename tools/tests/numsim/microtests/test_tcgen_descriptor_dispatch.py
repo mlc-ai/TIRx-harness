@@ -6,13 +6,12 @@ from tvm_ffi import structural_map, structural_walk
 
 from tests.numsim.microtests.harness import require_numsim_gpu, run_gpu_primfunc
 from tests.numsim.runtime.test_tcgen_collectors import collector_case
-from tests.numsim.support.execution import assert_rejected, run_checked
+from tests.numsim.support.execution import assert_rejected, run_checked, with_cuda_arch
 from tests.numsim.support.tcgen_descriptor import INSTR_DESC, encode_dense_instr_descriptor_fields
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm import tirx
-from tvm.ir import Expr
-from tvm.script import tirx as T
-from tvm.tirx import Stmt
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import Expr, Stmt
+from tvm_tirx.script import tirx as T
 
 
 def dispatch_case(
@@ -25,35 +24,35 @@ def dispatch_case(
     tmem_a=False,
 ):
     kernel, inputs, expected = collector_case(("",), tmem_a=tmem_a)
-    kernel = kernel.with_attr("tirx.cuda_arch", "sm_100a")
-    metadata = next(parameter for parameter in kernel.params if str(parameter) == "metadata")
-    selector = tirx.BufferLoad(metadata, [0, 0, 0])
+    kernel = with_cuda_arch(kernel, "sm_100a")
+    metadata = next(parameter for parameter in kernel.params if parameter.name == "metadata")
+    selector = ir.TensorLoad(metadata, [0, 0, 0])
     if multiple_issuers:
         lanes = []
         structural_walk(
             kernel.body,
             lambda node: lanes.append(node)
-            if type(node).__name__ == "Var" and str(node) == "lane"
+            if type(node).__name__ == "Var" and node.name == "lane"
             else None,
         )
         # Distinct types must not split one invalid issue into valid calls.
         selector = (
-            tirx.BufferLoad(metadata, [0, lanes[0], 0])
+            ir.TensorLoad(metadata, [0, lanes[0], 0])
             if input_descriptor
             else T.Cast("uint32", lanes[0])
         )
-    predicate = tirx.NE(tirx.BufferLoad(metadata, [0, 0, 1]), T.uint32(0))
+    predicate = tirx.NE(ir.TensorLoad(metadata, [0, 0, 1]), T.uint32(0))
     descriptor_bits = 0
 
     def replace(node):
         nonlocal descriptor_bits
-        if isinstance(node, tirx.Evaluate) and type(node.value).__name__ == "Call":
+        if isinstance(node, ir.Evaluate) and type(node.value).__name__ == "Call":
             if not str(node.value.op.name).startswith("tirx.ptx.tcgen05_mma"):
                 return node
             decoded = decode_ptx_call(node.value)
             descriptor = int(decoded.scalar_operand("idesc").value)
             descriptor_bits = descriptor
-            return tirx.Evaluate(
+            return ir.Evaluate(
                 T.ptx["tcgen05.mma.cta_group::1.kind::f16"](
                     decoded.scalar_operand("d_tmem"),
                     decoded.scalar_operand("a_tmem" if tmem_a else "a_desc"),
@@ -70,7 +69,7 @@ def dispatch_case(
                     pred=predicate,
                 )
             )
-        if isinstance(node, tirx.IfThenElse):
+        if isinstance(node, ir.If):
             mma_sites = []
             structural_walk(
                 node.then_case,
@@ -92,7 +91,7 @@ def dispatch_case(
                 return expression
 
             condition = structural_map(node.condition, select_lane)
-            return tirx.IfThenElse(condition, node.then_case, node.else_case)
+            return ir.If(condition, node.then_case, node.else_case)
         return node
 
     kernel = kernel.with_body(structural_map(kernel.body, replace))
@@ -166,30 +165,28 @@ def _descriptor_values(kernel, descriptor):
     def collect(node):
         if type(node).__name__ != "Call" or str(node.op.name) != INSTR_DESC:
             return
-        destination, *fields = node.args
+        # tvm-tirx carries the descriptor fields as the call's attrs.
+        (destination,) = node.args
         if type(descriptor).__name__ != "TensorLoad" or not destination.args[0].source.same_as(
             descriptor.source
         ):
             return
-        d_dtype, a_dtype, b_dtype, m, n, k, trans_a, trans_b, cta_group, *flags = (
-            field.value for field in fields
-        )
-        neg_a, neg_b, sat_d, sparse = map(bool, flags)
+        fields = node.attrs
         values.add(
             encode_dense_instr_descriptor_fields(
-                d_dtype=d_dtype,
-                a_dtype=a_dtype,
-                b_dtype=b_dtype,
-                m=m,
-                n=n,
-                k=k,
-                trans_a=bool(trans_a),
-                trans_b=bool(trans_b),
-                cta_group=cta_group,
-                neg_a=neg_a,
-                neg_b=neg_b,
-                sat_d=sat_d,
-                sparse=sparse,
+                d_dtype=str(fields.d_dtype),
+                a_dtype=str(fields.a_dtype),
+                b_dtype=str(fields.b_dtype),
+                m=int(fields.M),
+                n=int(fields.N),
+                k=int(fields.K),
+                trans_a=bool(fields.trans_a),
+                trans_b=bool(fields.trans_b),
+                cta_group=int(fields.n_cta_groups),
+                neg_a=bool(fields.neg_a),
+                neg_b=bool(fields.neg_b),
+                sat_d=bool(fields.sat_d),
+                sparse=bool(fields.is_sparse),
             )
         )
 
@@ -215,14 +212,14 @@ def with_input_descriptor(kernel):
             [parameter if arg.same_as(descriptor) else arg for arg in node.args],
             attrs=node.attrs,
             ty_args=node.ty_args,
-            span=node.span,
-            ret_ty=node.ty,
+            loc=node.loc,
+            ty=node.ty,
         )
 
     body = structural_map(kernel.body, replace)
     assert len(values) == 1
     return (
-        tirx.PrimFunc([*kernel.params, parameter], body, kernel.ret_type, kernel.attrs),
+        tirx.Function([*kernel.params, parameter], body, kernel.ret_type, kernel.attrs),
         values.pop(),
     )
 

@@ -1,25 +1,24 @@
 //! Statement and buffer-access emission.
 
-use tvm::ir::{IntImmObj, PointerTypeObj, PrimExpr};
-use tvm::prim::RampObj;
-use tvm::tirx::{
-    AssertStmtObj, AttrStmtObj, BindObj, BreakObj, BufferStoreObj, BufferVar, ContinueObj,
-    DeclBufferObj, EvaluateObj, ForObj, IfThenElseObj, ReturnObj, ScopeIdDefStmtObj, SeqStmtObj,
-    Stmt, TilePrimitiveCallObj, WhileObj,
+use crate::decode::{projected_buffer, tensor_decl, TensorDecl};
+use tvm_tirx::ir::{Expr, IntImmObj, PtrTypeObj, Var};
+use tvm_tirx::ir::prim::{sub, RampObj};
+use tvm_tirx::ir::{
+    AssertStmtObj, BindObj, BreakObj, ContinueObj, EvaluateObj, ForObj, IfObj, RegionStmtObj,
+    ReturnObj, SeqStmtObj, Stmt, TensorStoreObj, WhileObj,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Any, ObjectRefCore};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Any, ObjectRefCore};
+use crate::analyze::util::static_string;
+use crate::analyze::util::tensor_var;
+use crate::analyze::util::prim_expr;
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
-use super::super::analyze::topology::iter_var_of;
-use super::super::analyze::util::{
-    buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, int_imm, kind_or_bail, not_covered,
-    oref, prim_dtype, repr_text, same, unsupported, AResult, Failure,
-};
+use super::super::analyze::topology::LAUNCH_THREAD;
+use super::super::analyze::util::{buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, int_imm, kind_or_bail, not_covered, oref, prim_dtype, repr_text, same, unsupported, AResult, Failure};
 use super::super::analyze::vector::classify_contiguous_ramp;
 use super::abi;
-use super::{ControlProvenance, Emitter, RustValue, Uniformity};
-use crate::decode::projected_buffer;
+use super::{ControlProvenance, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::{
     dtype_byte_len, is_integer_rust_type, json_string, stmt_rust_scalar_by_dtype,
     v2_memory_type_rust, vector_rust_type,
@@ -68,7 +67,7 @@ fn warp_load_plan(dtype: &str, space: MemorySpace) -> AResult<WarpLoadPlan> {
 /// The pointee dtype of an expression's declared type.
 pub(super) fn pointer_pointee_dtype(node: &ObjectRef) -> Option<String> {
     let ty = expr_type(node)?;
-    let pointer = ty.as_node::<PointerTypeObj>()?;
+    let pointer = ty.as_node::<PtrTypeObj>()?;
     prim_dtype(&pointer.element_type).map(dtype_text)
 }
 
@@ -87,9 +86,9 @@ impl<'a> Emitter<'a> {
     // Buffer references.
     // ------------------------------------------------------------------
 
-    pub fn buffer_ref(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn buffer_ref(&mut self, buffer: &Var) -> AResult<String> {
         for (candidate, reference) in self.dynamic_buffers.clone().iter().rev() {
-            if same(candidate.as_var(), buffer.as_var()) {
+            if same(candidate, buffer) {
                 self.record_dynamic_buffer_use(reference);
                 return Ok(reference.clone());
             }
@@ -98,7 +97,7 @@ impl<'a> Emitter<'a> {
         let plan = self.plan_of(code);
         if plan.dynamic_data_var.is_some() {
             return unsupported(format!(
-                "buffer:{}:dynamic DeclBuffer view is used before declaration",
+                "buffer:{}:dynamic tensor view is used before declaration",
                 plan.name
             ));
         }
@@ -126,12 +125,12 @@ impl<'a> Emitter<'a> {
         )
     }
 
-    fn ordinary_logical_view_root(&self, buffer: &BufferVar) -> AResult<BufferVar> {
+    fn ordinary_logical_view_root(&self, buffer: &Var) -> AResult<Var> {
         let mut current = buffer.clone();
-        let mut seen: Vec<BufferVar> = Vec::new();
+        let mut seen: Vec<Var> = Vec::new();
         while !seen
             .iter()
-            .any(|candidate| same(candidate.as_var(), current.as_var()))
+            .any(|candidate| same(candidate, &current))
         {
             seen.push(current.clone());
             let data = self.buffer_bindings.declared_data(&current);
@@ -152,11 +151,17 @@ impl<'a> Emitter<'a> {
                 }
                 (Err(error), _) | (_, Err(error)) => return Err(error),
             };
-            if child_plan.backing_index != parent_plan.backing_index
+            // A view that reinterprets the element type is a distinct logical
+            // name, as the pointer-based reinterpretations before tvm-tirx were.
+            // tvm-tirx names every `view`/`rearrange` result `v`; a view that
+            // keeps its parent's name is that parent, not a renamed alias.
+            if child_plan.layout.dtype != parent_plan.layout.dtype
+                || child_plan.backing_index != parent_plan.backing_index
                 || !Self::same_static_byte_interval(child_plan, parent_plan)?
                 || !(child_plan.view_geometry_changed(parent_plan)?
                     || child_plan.name.is_empty()
-                    || parent_plan.name.is_empty())
+                    || parent_plan.name.is_empty()
+                    || child_plan.name == parent_plan.name)
             {
                 break;
             }
@@ -166,9 +171,9 @@ impl<'a> Emitter<'a> {
     }
 
     /// `logical_buffer_name`: one checker identity for a physical view.
-    pub fn logical_buffer_name(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn logical_buffer_name(&mut self, buffer: &Var) -> AResult<String> {
         for (candidate, name) in &self.logical_buffer_name_cache {
-            if same(candidate.as_var(), buffer.as_var()) {
+            if same(candidate, buffer) {
                 return Ok(name.clone());
             }
         }
@@ -181,9 +186,36 @@ impl<'a> Emitter<'a> {
         if name.is_empty() {
             name = format!("anonymous_{}", self.buffer_code(buffer)?.field);
         }
+        let name = self.unique_root_name(&root, name);
         self.logical_buffer_name_cache
             .push((buffer.clone(), name.clone()));
         Ok(name)
+    }
+
+    /// `name` for the logical root `root`, made unique among distinct roots:
+    /// tvm-tirx names every `view`/`rearrange` result `v`, and two roots that
+    /// share a name must not share a checker identity.
+    fn unique_root_name(&mut self, root: &Var, name: String) -> String {
+        if let Some((_, existing)) = self
+            .logical_root_names
+            .iter()
+            .find(|(candidate, _)| same(candidate, root))
+        {
+            return existing.clone();
+        }
+        let base = name.clone();
+        let mut name = name;
+        let mut suffix = 1;
+        while self
+            .logical_root_names
+            .iter()
+            .any(|(_, taken)| *taken == name)
+        {
+            suffix += 1;
+            name = format!("{base}_{suffix}");
+        }
+        self.logical_root_names.push((root.clone(), name.clone()));
+        name
     }
 
     /// The runtime pointer behind a decoded buffer projection.
@@ -456,8 +488,8 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_index(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
     ) -> AResult<RustValue> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         if !info.physical_axes.iter().any(|axis| axis == "m") {
@@ -474,8 +506,8 @@ impl<'a> Emitter<'a> {
 
     pub fn physical_access_mask(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
         base_mask: &str,
     ) -> AResult<String> {
         let owners = self.physical_owner_coordinates(buffer, indices)?;
@@ -512,11 +544,23 @@ impl<'a> Emitter<'a> {
         Ok(name)
     }
 
+    /// Run `body` with the buffer loader swapped to `site`.
+    pub(super) fn with_load_site<R>(
+        &mut self,
+        site: Option<NestedLoadSite>,
+        body: impl FnOnce(&mut Self) -> AResult<R>,
+    ) -> AResult<R> {
+        let previous = std::mem::replace(&mut self.nested_load_site, site);
+        let result = body(self);
+        self.nested_load_site = previous;
+        result
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn emit_buffer_load(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
         access_mask: Option<String>,
         register_access_mask: Option<String>,
         zero_fill_invalid: bool,
@@ -715,8 +759,8 @@ impl<'a> Emitter<'a> {
 
     fn emit_contiguous_vector_load(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
         result_dtype: &str,
         access_mask: Option<String>,
         zero_fill_invalid: bool,
@@ -761,7 +805,7 @@ impl<'a> Emitter<'a> {
                 space.value()
             ));
         }
-        let base: PrimExpr = PrimExpr::try_from(Any::from(base))?;
+        let base: Expr = prim_expr(Any::from(base))?;
         let mut components = Vec::new();
         for component in 0..lanes {
             let component_index = if component == 0 {
@@ -773,7 +817,7 @@ impl<'a> Emitter<'a> {
                     super::super::analyze::layout::int_any(component),
                 )?
             };
-            let mut component_indices: Vec<PrimExpr> = indices[..indices.len() - 1].to_vec();
+            let mut component_indices: Vec<Expr> = indices[..indices.len() - 1].to_vec();
             component_indices.push(component_index);
             components.push(self.emit_buffer_load(
                 buffer,
@@ -829,14 +873,6 @@ impl<'a> Emitter<'a> {
             || stmt.as_node::<ContinueObj>().is_some()
         {
             true
-        } else if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
-            let value = oref(evaluate.value.clone());
-            if value.as_node::<tvm::ir::CallObj>().is_some() && projected_buffer(&value)?.is_none()
-            {
-                super::control::is_loop_transfer(&value)?
-            } else {
-                false
-            }
         } else if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
             let mut found = false;
             for child in sequence.seq.iter() {
@@ -846,25 +882,23 @@ impl<'a> Emitter<'a> {
                 }
             }
             found
-        } else if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
-            self.contains_current_loop_transfer(&attr.body)?
-        } else if let Some(branch) = stmt.as_node::<IfThenElseObj>() {
-            self.contains_current_loop_transfer(&branch.then_case)?
+        } else if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+            self.contains_current_loop_transfer(&Stmt::from(region.body.clone()))?
+        } else if let Some(branch) = stmt.as_node::<IfObj>() {
+            self.contains_current_loop_transfer(&Stmt::from(branch.then_case.clone()))?
                 || match &branch.else_case {
-                    Some(else_case) => self.contains_current_loop_transfer(else_case)?,
+                    Some(else_case) => self.contains_current_loop_transfer(&Stmt::from(else_case.clone()))?,
                     None => false,
                 }
         } else if matches!(
             kind,
             "For"
                 | "While"
+                | "Evaluate"
                 | "AssertStmt"
-                | "AllocBuffer"
-                | "DeclBuffer"
                 | "Bind"
                 | "BufferStore"
-                | "ScopeIdDefStmt"
-                | "TilePrimitiveCall"
+                | "Return" // ends the kernel; emit_return rejects one inside a loop
         ) {
             false
         } else {
@@ -908,11 +942,11 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         let node = oref(stmt.clone());
         let kind = kind_or_bail(&node)?;
-        if let Some(attr) = stmt.as_node::<AttrStmtObj>() {
-            if ffi_text(&attr.attr_key) == "thread_extent" {
-                return self.emit_thread_extent(attr, previous_sequence_stmt);
+        if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+            if ffi_text(&region.op.name) == LAUNCH_THREAD {
+                return self.emit_launch_thread(region, previous_sequence_stmt);
             }
-            return self.emit_stmt(&attr.body, previous_sequence_stmt);
+            return self.emit_stmt(&Stmt::from(region.body.clone()), previous_sequence_stmt);
         }
         if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
             let statements: Vec<Stmt> = sequence.seq.iter().collect();
@@ -941,6 +975,12 @@ impl<'a> Emitter<'a> {
             self.restore_scope(snapshot);
             return result;
         }
+        if let Some((tensor, decl)) = tensor_decl(stmt)? {
+            return match decl {
+                TensorDecl::View(data) => self.emit_decl_tensor(&tensor, &data),
+                TensorDecl::Alloc | TensorDecl::Tmem(_) => Ok(()),
+            };
+        }
         if let Some(bind) = stmt.as_node::<BindObj>() {
             let value = self.emit_expr(&oref(bind.value.clone()))?;
             let mut value = self.materialize(value, "bound")?;
@@ -965,25 +1005,12 @@ impl<'a> Emitter<'a> {
             self.variables.set(var_ref, value);
             return Ok(());
         }
-        if kind == "AllocBuffer" {
-            return Ok(());
-        }
-        if let Some(declaration) = stmt.as_node::<DeclBufferObj>() {
-            return self.emit_decl_buffer(declaration);
-        }
-        if let Some(definition) = stmt.as_node::<ScopeIdDefStmtObj>() {
-            return self.emit_scope_id(definition);
-        }
-        if stmt.as_node::<TilePrimitiveCallObj>().is_some() {
-            let source_op_id = self.static_op_id(&node)?;
-            return self.emit_tile_call(&node, source_op_id);
-        }
         if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
             let value = oref(evaluate.value.clone());
             if value.as_node::<IntImmObj>().is_some() {
                 return Ok(());
             }
-            if value.as_node::<tvm::ir::CallObj>().is_some() {
+            if value.as_node::<tvm_tirx::ir::CallObj>().is_some() {
                 if projected_buffer(&value)?.is_some() {
                     return Ok(());
                 }
@@ -1002,7 +1029,7 @@ impl<'a> Emitter<'a> {
             }
             return Ok(());
         }
-        if let Some(branch) = stmt.as_node::<IfThenElseObj>() {
+        if let Some(branch) = stmt.as_node::<IfObj>() {
             return self.emit_if(stmt, branch, previous_sequence_stmt);
         }
         if let Some(assertion) = stmt.as_node::<AssertStmtObj>() {
@@ -1027,7 +1054,7 @@ impl<'a> Emitter<'a> {
         if let Some(ret) = stmt.as_node::<ReturnObj>() {
             return self.emit_return(ret);
         }
-        if let Some(store) = stmt.as_node::<BufferStoreObj>() {
+        if let Some(store) = stmt.as_node::<TensorStoreObj>() {
             return self.emit_store(&node, store);
         }
         unsupported(format!(
@@ -1035,9 +1062,9 @@ impl<'a> Emitter<'a> {
         ))
     }
 
-    fn emit_decl_buffer(&mut self, stmt: &DeclBufferObj) -> AResult<()> {
-        let (name, dynamic_data_var, referenced, elem_offset, itemsize, element_count) = {
-            let plan = self.memory_plan.resolve(&stmt.buffer)?;
+    fn emit_decl_tensor(&mut self, tensor: &Var, data: &Expr) -> AResult<()> {
+        let (name, dynamic_data_var, referenced, elem_offset, itemsize, element_count, alignment) = {
+            let plan = self.memory_plan.resolve(tensor)?;
             (
                 plan.name.clone(),
                 plan.dynamic_data_var.clone(),
@@ -1045,8 +1072,18 @@ impl<'a> Emitter<'a> {
                 plan.layout.elem_offset,
                 plan.layout.itemsize,
                 plan.layout.element_count,
+                plan.layout.dynamic_elem_offset_alignment.clone(),
             )
         };
+        if let Some(aligned) = alignment {
+            self.emit_runtime_check(
+                &oref(aligned),
+                &format!(
+                    "buffer:{name}:runtime byte offset is not a multiple of the {itemsize}-byte element"
+                ),
+                "view alignment check",
+            )?;
+        }
         let Some(dynamic_data_var) = dynamic_data_var else {
             return Ok(());
         };
@@ -1081,11 +1118,13 @@ impl<'a> Emitter<'a> {
         let byte_offset = elem_offset * itemsize;
         let byte_len = element_count * itemsize;
         let mut pointer_code = pointer.code.clone();
-        let pointer_dtype = pointer_pointee_dtype(&oref(stmt.data.clone()));
-        let byte_typed = matches!(
-            pointer_dtype.as_deref(),
-            Some("") | Some("int8") | Some("uint8")
-        );
+        let pointer_dtype = pointer_pointee_dtype(&oref(data.clone()));
+        // The data pointer of a parent view lowers to a byte pointer.
+        let byte_typed = crate::decode::is_tensor_data_pointer(data)?
+            || matches!(
+                pointer_dtype.as_deref(),
+                Some("") | Some("int8") | Some("uint8")
+            );
         if numeric_address || (byte_typed && itemsize != 1) {
             pointer_code = format!("{}.with_pointee_itemsize({itemsize}_usize)", pointer.code);
         }
@@ -1096,16 +1135,31 @@ impl<'a> Emitter<'a> {
         self.emit_line(&format!(
             "let {reference} = {pointer_code}.runtime_view(&physical, {pointer_space}, {byte_offset}_usize, {byte_len}_usize, {itemsize}_usize, &ctx, ctx.active_mask())?;"
         ));
-        self.dynamic_buffers.push((stmt.buffer.clone(), reference));
+        self.dynamic_buffers.push((tensor.clone(), reference));
         Ok(())
     }
 
     fn emit_assert(&mut self, node: &ObjectRef, stmt: &AssertStmtObj) -> AResult<()> {
-        let condition = self.emit_expr(&oref(stmt.condition.clone()))?;
+        self.emit_runtime_check(
+            &oref(stmt.condition.clone()),
+            &repr_text(node)?,
+            "AssertStmt",
+        )
+    }
+
+    /// Fail the execution with `message` when `condition` is false on any
+    /// active lane.
+    fn emit_runtime_check(
+        &mut self,
+        condition: &ObjectRef,
+        message: &str,
+        what: &str,
+    ) -> AResult<()> {
+        let condition = self.emit_expr(condition)?;
         if condition.rust_type != "bool" {
-            return unsupported("AssertStmt condition must be boolean");
+            return unsupported(format!("{what} condition must be boolean"));
         }
-        let message = json_string(&repr_text(node)?);
+        let message = json_string(message);
         if condition.uniformity == Uniformity::Uniform {
             self.emit_line(&format!("if !({}) {{", condition.code));
             self.emit_line(&format!("    return Err(EngineError::message({message}));"));
@@ -1131,124 +1185,15 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    fn emit_scope_id(&mut self, stmt: &ScopeIdDefStmtObj) -> AResult<()> {
-        let definition = &stmt.def;
-        let variables: Vec<tvm::ir::Var> = definition
-            .def_ids
-            .iter()
-            .map(|variable| variable.as_var().clone())
-            .collect();
-        let mut extents: Vec<Option<i64>> = Vec::new();
-        if variables.len() == 1 {
-            extents.push(None);
-        } else if let Some(declared) = &definition.extents {
-            for extent in declared.iter() {
-                let Some(value) = int_imm(&oref(extent.clone())) else {
-                    return unsupported("Scope ID extents must be static integers");
-                };
-                extents.push(Some(value));
-            }
-        } else {
-            if variables.is_empty() {
-                return unsupported("Extent-free scope IDs require at least one coordinate");
-            }
-            return unsupported("Multi-coordinate scope IDs require explicit static extents");
-        }
-        if variables.len() != extents.len() || variables.is_empty() {
-            return unsupported("Scope ID variables/extents are inconsistent");
-        }
-        let scope = i64::from(definition.scope.as_raw());
-        let warps = self.warps_per_warpgroup;
-        let (flat_code, uniformity) = match scope {
-            0 => ("ctx.cluster_id() as i64".to_owned(), Uniformity::Uniform),
-            1 => ("ctx.global_cta_id() as i64".to_owned(), Uniformity::Uniform),
-            2 => (
-                "ctx.cta_id_in_cluster() as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            9 => (
-                "(ctx.cta_id_in_cluster() % 2) as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            3 => (
-                format!("(ctx.warp_id_in_cta() / {warps}) as i64"),
-                Uniformity::Uniform,
-            ),
-            4 => (
-                "ctx.warp_id_in_cta() as i64".to_owned(),
-                Uniformity::Uniform,
-            ),
-            5 => (
-                format!("(ctx.warp_id_in_cta() % {warps}) as i64"),
-                Uniformity::Uniform,
-            ),
-            6 => ("lane as i64".to_owned(), Uniformity::Varying),
-            7 => (
-                "(ctx.warp_id_in_cta() * WARP_SIZE + lane) as i64".to_owned(),
-                Uniformity::Varying,
-            ),
-            8 => (
-                format!("((ctx.warp_id_in_cta() % {warps}) * WARP_SIZE + lane) as i64"),
-                Uniformity::Varying,
-            ),
-            other => {
-                return unsupported(format!(
-                    "Bootstrap scope binding {other} is not implemented"
-                ))
-            }
-        };
-        let mut divisor: i64 = 1;
-        for (variable, extent) in variables.iter().zip(extents.iter()) {
-            let name = ffi_text(&variable.name);
-            let dtype = prim_dtype(&variable.ty).map(dtype_text).unwrap_or_default();
-            let rust_type = stmt_rust_scalar_by_dtype(&dtype);
-            if !rust_type.is_some_and(is_integer_rust_type) {
-                return unsupported(format!(
-                    "Scope ID variable {name} has unsupported dtype {dtype}"
-                ));
-            }
-            let rust_type = rust_type.unwrap();
-            let coordinate_i64 = match extent {
-                None => format!("({flat_code})"),
-                Some(extent) => format!("(({flat_code}) / {divisor}_i64) % {extent}_i64"),
-            };
-            let coordinate = if rust_type == "i64" {
-                coordinate_i64
-            } else {
-                format!("({coordinate_i64}) as {rust_type}")
-            };
-            let value = if uniformity == Uniformity::Uniform {
-                RustValue::new(coordinate, rust_type, Uniformity::Uniform)
-            } else {
-                let prefix = if name.is_empty() {
-                    "scope".to_owned()
-                } else {
-                    format!("scope_{name}")
-                };
-                let rust_name = self.control_name(&prefix);
-                self.emit_line(&format!(
-                    "let {rust_name} = WarpValue::from_fn(|lane| {coordinate});"
-                ));
-                RustValue::new(rust_name, rust_type, Uniformity::Varying)
-            };
-            self.variables.set(oref(variable.clone()), value);
-            if let Some(extent) = extent {
-                divisor *= extent;
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_thread_extent(
+    fn emit_launch_thread(
         &mut self,
-        stmt: &AttrStmtObj,
+        region: &RegionStmtObj,
         previous_sequence_stmt: Option<&Stmt>,
     ) -> AResult<()> {
-        let Some(iteration) = iter_var_of(&stmt.node) else {
-            return not_covered("thread_extent without an IterVar node");
+        let (Ok(tag), Ok(variable)) = (region.args.get(0), region.body_params.get(0)) else {
+            return not_covered("launch_thread without a tag and a thread variable");
         };
-        let thread_tag = ffi_text(&iteration.thread_tag()?);
-        let variable = iteration.var()?.as_var().clone();
+        let thread_tag = static_string(&oref(tag), "launch_thread tag")?;
         let dtype = prim_dtype(&variable.ty).map(dtype_text).unwrap_or_default();
         if dtype != "int32" {
             return unsupported(format!(
@@ -1256,7 +1201,26 @@ impl<'a> Emitter<'a> {
                 &thread_tag
             ));
         }
+        let topology = &self.plan.topology;
         let value = match thread_tag.as_str() {
+            "blockIdx.x" if topology.is_multidimensional() => RustValue::new(
+                format!(
+                    "({}) as i32",
+                    topology.cta_coordinate("ctaid.x").expect("ctaid.x")
+                ),
+                "i32",
+                Uniformity::Uniform,
+            ),
+            "clusterCtaIdx.x" if topology.is_multidimensional() => RustValue::new(
+                format!(
+                    "({}) as i32",
+                    topology
+                        .cta_coordinate("cluster_ctaid.x")
+                        .expect("cluster_ctaid.x")
+                ),
+                "i32",
+                Uniformity::Uniform,
+            ),
             "blockIdx.x" => {
                 RustValue::new("ctx.global_cta_id() as i32", "i32", Uniformity::Uniform)
             }
@@ -1279,7 +1243,7 @@ impl<'a> Emitter<'a> {
         };
         let snapshot = self.scope_snapshot();
         self.variables.set(oref(variable), value);
-        let result = self.emit_stmt(&stmt.body, previous_sequence_stmt);
+        let result = self.emit_stmt(&Stmt::from(region.body.clone()), previous_sequence_stmt);
         self.restore_scope(snapshot);
         result
     }
@@ -1287,7 +1251,7 @@ impl<'a> Emitter<'a> {
     fn emit_if(
         &mut self,
         stmt: &Stmt,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<()> {
         let mut condition = self.emit_expr(&oref(branch.condition.clone()))?;
@@ -1338,7 +1302,7 @@ impl<'a> Emitter<'a> {
             }
             self.emit_line(&format!("if {} {{", condition.code));
             self.indent += 1;
-            self.emit_scoped(&branch.then_case, initial_stmt)?;
+            self.emit_scoped(&Stmt::from(branch.then_case.clone()), initial_stmt)?;
             self.indent -= 1;
             let Some(else_case) = &branch.else_case else {
                 self.emit_line("}");
@@ -1346,7 +1310,7 @@ impl<'a> Emitter<'a> {
             };
             self.emit_line("} else {");
             self.indent += 1;
-            self.emit_scoped(else_case, initial_stmt)?;
+            self.emit_scoped(&Stmt::from(else_case.clone()), initial_stmt)?;
             self.indent -= 1;
             self.emit_line("}");
             return Ok(());
@@ -1404,7 +1368,7 @@ impl<'a> Emitter<'a> {
         };
         self.emit_line(&branch_context(&then_mask, branch_variant));
         match &split_helpers {
-            None => self.emit_scoped(&branch.then_case, initial_stmt)?,
+            None => self.emit_scoped(&Stmt::from(branch.then_case.clone()), initial_stmt)?,
             Some((then_helper, _)) => {
                 let codes = split_call_codes.as_ref().map(|codes| codes.0.clone());
                 self.emit_split_call(then_helper, codes);
@@ -1418,7 +1382,7 @@ impl<'a> Emitter<'a> {
             self.indent += 1;
             self.emit_line(&branch_context(&else_mask, branch_variant));
             match &split_helpers {
-                None => self.emit_scoped(else_case, initial_stmt)?,
+                None => self.emit_scoped(&Stmt::from(else_case.clone()), initial_stmt)?,
                 Some((_, else_helper)) => {
                     let helper = else_helper.as_ref().expect("else helper");
                     let codes = split_call_codes.as_ref().and_then(|codes| codes.1.clone());
@@ -1520,7 +1484,7 @@ impl<'a> Emitter<'a> {
                 self.emit_split_call(&helper, None);
                 return Ok(());
             }
-            self.emit_scoped(&loop_stmt.body, None)
+            self.emit_scoped(&Stmt::from(loop_stmt.body.clone()), None)
         })();
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
@@ -1529,12 +1493,13 @@ impl<'a> Emitter<'a> {
 
     fn emit_for(&mut self, stmt: &Stmt, loop_stmt: &ForObj) -> AResult<()> {
         let loop_site_id = self.static_op_id(&oref(stmt.clone()))?;
-        let extent_node = oref(loop_stmt.extent.clone());
+        // The loop runs begin + offset for offset = 0, step, ... below end - begin.
+        let extent_node = oref(sub(loop_stmt.end.clone(), loop_stmt.begin.clone())?);
         let static_extent = match int_imm(&extent_node) {
             Some(value) if value == 0 || value == 1 => Some(value),
             _ => None,
         };
-        let has_loop_transfer = self.contains_current_loop_transfer(&loop_stmt.body)?;
+        let has_loop_transfer = self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?;
         let bounded =
             super::scaffold::allows_bounded_transfer_split(loop_stmt, &self.split_thresholds);
         let allow_live_mutation = has_loop_transfer && bounded;
@@ -1546,16 +1511,13 @@ impl<'a> Emitter<'a> {
         self.emit_line(&format!("let {parent} = ctx.active_mask();"));
         self.emit_line(&format!("if !{parent}.is_empty() {{"));
         self.indent += 1;
-        let minimum = self.emit_expr(&oref(loop_stmt.min.clone()))?;
+        let minimum = self.emit_expr(&oref(loop_stmt.begin.clone()))?;
         let minimum = self.as_i64(minimum)?;
         let extent = self.emit_expr(&extent_node)?;
         let extent = self.as_i64(extent)?;
-        let mut step = RustValue::new("1_i64", "i64", Uniformity::Uniform);
-        if let Some(step_expr) = &loop_stmt.step {
-            let value = self.emit_expr(&oref(step_expr.clone()))?;
-            step = self.as_i64(value)?;
-        }
-        let loop_var = loop_stmt.loop_var.as_var().clone();
+        let step = self.emit_expr(&oref(loop_stmt.step.clone()))?;
+        let step = self.as_i64(step)?;
+        let loop_var = loop_stmt.var.clone();
         let loop_var_ref = oref(loop_var.clone());
         let loop_dtype = prim_dtype(&loop_var.ty).map(dtype_text).unwrap_or_default();
         let loop_rust_type = stmt_rust_scalar_by_dtype(&loop_dtype);
@@ -1809,7 +1771,7 @@ impl<'a> Emitter<'a> {
         // continue is carried by the returned context's active mask.
         self.outer_loop_live_split_permissions.push(true);
         self.nested_for_statement_split_permissions.push(true);
-        let result = self.emit_scoped(&stmt.body, None);
+        let result = self.emit_scoped(&Stmt::from(stmt.body.clone()), None);
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
         self.loop_depth -= 1;
@@ -1826,12 +1788,13 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    fn emit_store(&mut self, node: &ObjectRef, stmt: &BufferStoreObj) -> AResult<()> {
-        self.record_global_write(&stmt.buffer)?;
+    fn emit_store(&mut self, node: &ObjectRef, stmt: &TensorStoreObj) -> AResult<()> {
+        let buffer = tensor_var(&oref(stmt.dest.clone()))?;
+        self.record_global_write(&buffer)?;
         let op_id = self.static_op_id(node)?;
-        let dtype = buffer_dtype(&stmt.buffer);
+        let dtype = buffer_dtype(&buffer);
         let (space, itemsize, dynamic) = {
-            let code = self.buffer_code(&stmt.buffer)?;
+            let code = self.buffer_code(&buffer)?;
             let plan = self.plan_of(code);
             (
                 plan.space,
@@ -1866,7 +1829,7 @@ impl<'a> Emitter<'a> {
                 value.rust_type
             ));
         }
-        let buffer_ref = self.buffer_ref(&stmt.buffer)?;
+        let buffer_ref = self.buffer_ref(&buffer)?;
         if space == MemorySpace::Tmem {
             return self.emit_tmem_store(stmt, op_id, &dtype, &value, &buffer_ref);
         }
@@ -1875,9 +1838,9 @@ impl<'a> Emitter<'a> {
                 "float4 BufferStore requires an explicit packed-byte frontend lowering",
             );
         }
-        let indices: Vec<PrimExpr> = stmt.indices.iter().collect();
-        let index = self.physical_index(&stmt.buffer, &indices)?;
-        let access_mask = self.physical_access_mask(&stmt.buffer, &indices, "ctx.active_mask()")?;
+        let indices: Vec<Expr> = stmt.indices.iter().collect();
+        let index = self.physical_index(&buffer, &indices)?;
+        let access_mask = self.physical_access_mask(&buffer, &indices, "ctx.active_mask()")?;
         let space_marker = if dynamic {
             Some("v2::Generic")
         } else {
@@ -1910,7 +1873,7 @@ impl<'a> Emitter<'a> {
             ));
         }
         let marker = v2_memory_type_rust(self.ctx.schema, &memory_dtype)?;
-        let logical_name = self.logical_buffer_name(&stmt.buffer)?;
+        let logical_name = self.logical_buffer_name(&buffer)?;
         let address = abi::buffer_address(
             space_marker,
             &buffer_ref,

@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def interleave_hint_case(operation="prefetch", *, raw=False, swizzle="32B"):
-    descriptor_type = 'T.Buffer((128,), "uint8")' if raw else "T.TensorMap()"
+    descriptor_type = 'T.Tensor((128,), "uint8")' if raw else "T.Ptr(T.TensorMap)"
     pointer = "descriptor.ptr_to([0])" if raw else "T.address_of(descriptor)"
     if operation == "prefetch":
         body = f"""T.ptx["cp.async.bulk.prefetch.tensor.3d.L2.global.tile"](
@@ -44,12 +44,11 @@ def interleave_hint_case(operation="prefetch", *, raw=False, swizzle="32B"):
         body = f"""if lane == 0:
         T.ptx.fence.proxy.tensormap__generic.acquire.gpu({pointer})
     {body}"""
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(descriptor: {descriptor_type}, enabled: T.int32, output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(descriptor: {descriptor_type}, enabled: T.int32, output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((256,), "uint32", align=1024)
     for row in T.serial(8):
         shared[row * 32 + lane] = T.uint32(0)

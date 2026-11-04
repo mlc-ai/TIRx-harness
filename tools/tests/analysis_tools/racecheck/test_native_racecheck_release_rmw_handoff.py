@@ -15,18 +15,17 @@ import numpy as np
 import pytest
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_lane_race_bridged_only_by_same_address_rmw(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     if lane == 0:
         data[0] = 37
@@ -39,15 +38,14 @@ def native_lane_race_bridged_only_by_same_address_rmw(
         output[0] = data[0] + observed
 
 
-@T.prim_func
+@T.function
 def native_lane_handoff_ordered_by_warp_sync(
-    data: T.Buffer((1,), "int32"),
-    flag: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    data: T.Tensor((1,), "int32"),
+    flag: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     observed = T.local_scalar("int32")
     if lane == 0:
         data[0] = 37

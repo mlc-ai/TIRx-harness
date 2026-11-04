@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _INTEGER_TYPES = ("u16", "u32", "u64", "s16", "s32", "s64")
 _WIDE_TYPES = ("u16", "s16", "u32", "s32")
@@ -101,7 +101,7 @@ _BUFFER_ROLES = ("a", "b", "c", "output")
 
 def _all_forms_kernel():
     parameters = ",\n".join(
-        f'    {role}_{dtype}: T.Buffer(({len(_FORMS)}, 32), "{dtype}")'
+        f'    {role}_{dtype}: T.Tensor(({len(_FORMS)}, 32), "{dtype}")'
         for role in _BUFFER_ROLES
         for dtype in _DTYPES
     )
@@ -114,15 +114,14 @@ def _all_forms_kernel():
         )
         calls.append(f'    T.ptx["{form.spelling}"]({", ".join(operands)})')
     calls_text = "\n".join(calls)
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
+@T.function
 def kernel(
 {parameters}
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 {calls_text}
 """,
         {"T": T},
@@ -355,27 +354,25 @@ def test_ptx_neg_int_all_legal_forms_match_wrapping_negation_oracle(integer_arit
     _assert_operation(integer_arithmetic_results, "neg_int")
 
 
-@T.prim_func
+@T.function
 def ptx_div_s32_error_path(
-    lhs: T.Buffer((32,), "int32"),
-    rhs: T.Buffer((32,), "int32"),
-    output: T.Buffer((32,), "int32"),
+    lhs: T.Tensor((32,), "int32"),
+    rhs: T.Tensor((32,), "int32"),
+    output: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.div.s32(output[lane], lhs[lane], rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_rem_s32_error_path(
-    lhs: T.Buffer((32,), "int32"),
-    rhs: T.Buffer((32,), "int32"),
-    output: T.Buffer((32,), "int32"),
+    lhs: T.Tensor((32,), "int32"),
+    rhs: T.Tensor((32,), "int32"),
+    output: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.rem.s32(output[lane], lhs[lane], rhs[lane])
 
 

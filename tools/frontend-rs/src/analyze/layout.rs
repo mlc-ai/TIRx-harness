@@ -1,30 +1,32 @@
 //! Static buffer layout inspection.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{IntImm, PrimExpr, Var};
-use tvm::tirx::{Axis, BufferVar, ComposeLayout, Iter, Layout, TileLayout};
-use tvm::tvm_ffi::{
+use tvm_tirx::ir::prim::{eq, floordiv, floormod};
+use tvm_tirx::sym::{Analyzer, ProofStrength};
+use tvm_tirx::ir::{Expr, Var};
+use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TileLayout};
+use tvm_tirx::tvm_ffi::{
     self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
 };
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, ffi_text, int_imm_expr, not_covered, oref, repr_of,
-    simplify, static_int as shared_static_int, unsupported, AResult, Failure,
+    buffer_dtype, buffer_name, buffer_scope, dtype_text, enum_name, ffi_text, int_const, int_imm_expr,
+    not_covered, oref, prim, prim_expr, repr_of, simplify, static_int as shared_static_int,
+    unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
 };
 use crate::schema::Schema;
 
 const MAX_PARTIAL_ATOM_ENUMERATION: i64 = 1_000_000;
 
 /// Shared primitive operators used by the Python expression constructors.
-pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<PrimExpr> {
+pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<Expr> {
     let operator = name.strip_prefix("_Op").expect("primitive constructor prefix");
     let full = format!("prim._Op{operator}");
     let function = tvm_ffi::Function::get_global(&full)?;
-    let result: Any = function.call_tuple((lhs, rhs, Any::new()))?;
-    Ok(PrimExpr::try_from(result)?)
+    let result: Any = function.call_tuple((lhs, rhs, tvm_tirx::ir::Location::unknown()))?;
+    Ok(prim_expr(result)?)
 }
 
-pub fn expr_any(expr: &PrimExpr) -> Any {
+pub fn expr_any(expr: &Expr) -> Any {
     Any::from(expr.clone())
 }
 
@@ -34,35 +36,74 @@ pub fn int_any(value: i64) -> Any {
 
 /// Physical buffers have compact memory coordinates, with no thread mapping.
 /// Explicit strides and element offsets are handled by the ordinary buffer rules.
-pub fn buffer_layout(buffer: &BufferVar) -> AResult<Layout> {
-    let ty = buffer.buffer_type();
+pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
+    let ty = buffer.tensor_type();
     if let Some(layout) = &ty.layout {
         return Ok(layout.clone());
     }
-    let one: PrimExpr = IntImm::new("int64", 1)?.into();
+    let one: Expr = int_const("int64", 1)?.into();
     let mut size = one.clone();
     for extent in ty.shape.iter() {
         size = op_binary("_OpMul", expr_any(&size), expr_any(&extent))?;
     }
     Ok(TileLayout::new(
-        vec![Iter::new(size, one, Axis::get("m")?)?],
-        Vec::new(),
-        Map::new(),
-    )?
+        vec![Iter::new(size, one, Axis::get("m")?)],
+        Vec::<Iter>::new(),
+        &Map::new(),
+    )
     .into())
 }
 
-/// Query the target TIRx layout contract shared by validation and emission.
-pub fn tile_layout_is_trivial(layout: &TileLayout) -> AResult<bool> {
-    let result: Any =
-        tvm_ffi::cached_global_func!("tirx.TileLayoutIsTrivial").call_tuple((layout.clone(),))?;
-    Ok(bool::try_from(result)?)
+/// The element strides of a strided shared tensor, if `buffer` is one.
+///
+/// A tvm-tirx tensor has no strides field: a strided tensor carries a
+/// TileLayout with one memory shard per logical dimension. Like an explicitly
+/// strided buffer, it is addressed through its strides and bounds-checked at
+/// its executed addresses, so it may span past its allocation. A contiguous
+/// layout is not strided and keeps the element-span check.
+fn strided_view_strides(
+    analyzer: &Analyzer,
+    buffer: &Var,
+    shape: &[Extent],
+    scope: &str,
+    packed_nibble: bool,
+) -> AResult<Option<Vec<i64>>> {
+    if packed_nibble || (scope != "shared" && scope != "shared.dyn") {
+        return Ok(None);
+    }
+    let Some(layout) = buffer.tensor_type().layout.clone() else {
+        return Ok(None);
+    };
+    let Ok(tile) = layout.try_cast::<TileLayout>() else {
+        return Ok(None);
+    };
+    let shard: Vec<Iter> = tile.shard()?.iter().collect();
+    if shard.len() != shape.len() || !tile.replica()?.is_empty() || !tile.offset()?.is_empty() {
+        return Ok(None);
+    }
+    let mut strides = Vec::with_capacity(shard.len());
+    for (iter, extent) in shard.iter().zip(shape) {
+        let Extent::Static(extent) = extent else {
+            return Ok(None);
+        };
+        if axis_name(&iter.axis)? != "m" || int_imm_expr(&iter.extent) != Some(*extent) {
+            return Ok(None);
+        }
+        match int_imm_expr(&iter.stride) {
+            Some(stride) if stride >= 0 => strides.push(stride),
+            _ => return Ok(None),
+        }
+    }
+    if tile.is_contiguous(Some(analyzer))? {
+        return Ok(None);
+    }
+    Ok(Some(strides))
 }
 
 #[derive(Clone)]
 pub enum Extent {
     Static(i64),
-    Dynamic(PrimExpr),
+    Dynamic(Expr),
 }
 
 #[derive(Clone)]
@@ -71,14 +112,17 @@ pub struct LayoutInfo {
     pub dtype: String,
     pub itemsize: i64,
     pub elem_offset: i64,
-    pub dynamic_elem_offset: Option<PrimExpr>,
+    pub dynamic_elem_offset: Option<Expr>,
+    /// `floormod(byte_offset, itemsize) == 0` for a runtime byte offset the
+    /// analyzer could not prove element-aligned, checked at the declaration.
+    pub dynamic_elem_offset_alignment: Option<Expr>,
     pub element_count: Option<i64>,
     pub signature: String,
     pub physical_axes: Vec<String>,
     pub explicit_strides: Option<Vec<i64>>,
-    pub dynamic_layout_elem_offset: Option<PrimExpr>,
+    pub dynamic_layout_elem_offset: Option<Expr>,
     pub packed_nibble_offset: i64,
-    pub allocated_addr: Option<PrimExpr>,
+    pub allocated_addr: Option<Expr>,
     pub allocated_addr_static: Option<i64>,
     pub tmem_lane_span: Option<i64>,
     pub tmem_tcol_span_elements: Option<i64>,
@@ -101,7 +145,7 @@ impl LayoutInfo {
     }
 }
 
-fn static_int(analyzer: &Analyzer, value: &PrimExpr, field: &str) -> AResult<i64> {
+fn static_int(analyzer: &Analyzer, value: &Expr, field: &str) -> AResult<i64> {
     shared_static_int(
         analyzer,
         value,
@@ -112,15 +156,15 @@ fn static_int(analyzer: &Analyzer, value: &PrimExpr, field: &str) -> AResult<i64
 
 fn shape_extent(
     analyzer: &Analyzer,
-    value: &PrimExpr,
+    value: &Expr,
     field: &str,
-    shape_bindings: &Map<Var, tvm::ir::Expr>,
+    shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
 ) -> AResult<Extent> {
     let value = if shape_bindings.is_empty() {
         value.clone()
     } else {
         let substituted = crate::substitute(oref(value.clone()), shape_bindings.clone())?;
-        PrimExpr::try_from(Any::from(substituted))?
+        prim_expr(Any::from(substituted))?
     };
     let simplified = simplify(analyzer, &value)?;
     if let Some(extent) = int_imm_expr(&simplified) {
@@ -136,7 +180,7 @@ fn shape_extent(
     ))
 }
 
-fn prove_equal(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr, field: &str) -> AResult<()> {
+fn prove_equal(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr, field: &str) -> AResult<()> {
     let difference = op_binary("_OpSub", expr_any(lhs), expr_any(rhs))?;
     let simplified = simplify(analyzer, &difference)?;
     if int_imm_expr(&simplified) != Some(0) {
@@ -149,11 +193,11 @@ fn prove_equal(analyzer: &Analyzer, lhs: &PrimExpr, rhs: &PrimExpr, field: &str)
     Ok(())
 }
 
-pub fn axis_name(axis: &tvm::tirx::Axis) -> AResult<String> {
-    Ok(ffi_text(&axis.name()?))
+pub fn axis_name(axis: &tvm_tirx::tirx::Axis) -> AResult<String> {
+    Ok(enum_name(&**axis))
 }
 
-fn iter_signature(items: &Array<tvm::tirx::Iter>) -> AResult<String> {
+fn iter_signature(items: &Array<tvm_tirx::tirx::Iter>) -> AResult<String> {
     let mut parts = Vec::new();
     for item in items.iter() {
         parts.push(format!(
@@ -194,7 +238,7 @@ fn validate_static_tile_mapping(
     layout: &TileLayout,
     name: &str,
 ) -> AResult<()> {
-    let shard: Vec<tvm::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
     for index in (1..shard.len()).rev() {
         let extent = static_int(
             analyzer,
@@ -224,7 +268,7 @@ fn validate_static_tile_mapping(
     }
     for (axis, offset) in layout.offset()?.iter() {
         if axis_name(&axis)? == "m" {
-            let offset = PrimExpr::try_from(offset)?;
+            let offset = prim_expr(offset)?;
             static_int(analyzer, &offset, &format!("{name}:layout m offset"))?;
         }
     }
@@ -232,7 +276,7 @@ fn validate_static_tile_mapping(
 }
 
 fn tile_repeat_stride(analyzer: &Analyzer, layout: &TileLayout, name: &str) -> AResult<i64> {
-    let shard: Vec<tvm::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
     if shard.is_empty() || axis_name(&shard[0].axis)? != "m" {
         return Ok(0);
     }
@@ -272,12 +316,12 @@ fn full_domain_physical_span(
     if let Ok(tile_layout) = layout.clone().try_cast::<TileLayout>() {
         atom_size = static_int(
             analyzer,
-            &layout.get_size(None)?,
+            &layout.size(None)?,
             &format!("{name}:layout atom size"),
         )?;
         atom_span = static_int(
             analyzer,
-            &layout.get_span(Some("m"))?,
+            &layout.span(Some("m"))?,
             &format!("{name}:layout atom span"),
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
@@ -288,12 +332,12 @@ fn full_domain_physical_span(
             .try_cast::<TileLayout>()?;
         atom_size = static_int(
             analyzer,
-            &tile_layout.get_size(None)?,
+            &Layout::from(tile_layout.clone()).size(None)?,
             &format!("{name}:layout atom size"),
         )?;
         atom_span = static_int(
             analyzer,
-            &layout.get_span(None)?,
+            &layout.span(None)?,
             &format!("{name}:layout atom span"),
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
@@ -352,18 +396,20 @@ fn full_domain_physical_span(
     Ok(maximum + 1)
 }
 
-fn map_get(map: &Map<FfiString, PrimExpr>, key: &str) -> AResult<Option<PrimExpr>> {
+fn map_get(map: &Map<FfiString, Expr>, key: &str) -> AResult<Option<Expr>> {
     Ok(map.get(&FfiString::from(key))?)
 }
 
 pub fn inspect_buffer_layout(
     schema: &Schema,
     analyzer: &Analyzer,
-    buffer: &BufferVar,
-    shape_bindings: &Map<Var, tvm::ir::Expr>,
+    buffer: &Var,
+    shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
+    tmem_address: Option<tvm_tirx::ir::Expr>,
+    byte_offset: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     let name = buffer_name(buffer);
-    let buffer_type = buffer.buffer_type();
+    let buffer_type = buffer.tensor_type();
     let mut shape = Vec::new();
     for (axis, extent) in buffer_type.shape.iter().enumerate() {
         shape.push(shape_extent(
@@ -408,46 +454,50 @@ pub fn inspect_buffer_layout(
         i64::from(data_type.bits) / 8
     };
     let scope = buffer_scope(buffer);
-    let simplified_elem_offset = simplify(analyzer, &buffer_type.elem_offset)?;
-    let (logical_elem_offset, dynamic_elem_offset) = match int_imm_expr(&simplified_elem_offset) {
-        Some(value) => (value, None),
-        None => {
-            if packed_nibble {
-                return unsupported(format!(
-                    "buffer:{name}:runtime elem_offset for packed float4 storage is unsupported"
-                ));
+    // A declared view starts `byte_offset` bytes into its storage root, a whole
+    // number of storage elements (bytes for packed float4); a TensorType has no
+    // strides, which belong to its layout.
+    // A runtime byte offset the analyzer cannot prove element-aligned is
+    // checked at runtime, when the view is declared, instead of rejected.
+    let mut dynamic_elem_offset_alignment: Option<Expr> = None;
+    let (elem_offset, dynamic_elem_offset): (i64, Option<Expr>) = match byte_offset {
+        None => (0, None),
+        Some(bytes) => {
+            let bytes = simplify(analyzer, &bytes)?;
+            match int_imm_expr(&bytes) {
+                Some(value) if value < 0 => {
+                    return unsupported(format!(
+                        "buffer:{name}:negative byte offset {value} is not implemented"
+                    ))
+                }
+                Some(value) if value % itemsize == 0 => (value / itemsize, None),
+                Some(value) => {
+                    return unsupported(format!(
+                        "buffer:{name}:byte offset {value} is not a multiple of the {itemsize}-byte element"
+                    ))
+                }
+                None if packed_nibble => {
+                    return unsupported(format!(
+                        "buffer:{name}:runtime elem_offset for packed float4 storage is unsupported"
+                    ))
+                }
+                None => {
+                    let dtype = dtype_text(bytes.dtype());
+                    let element = Expr::from(int_const(&dtype, itemsize)?);
+                    let aligned = eq(
+                        floormod(bytes.clone(), element.clone())?,
+                        Expr::from(int_const(&dtype, 0)?),
+                    )?;
+                    if !analyzer.can_prove(&aligned, ProofStrength::Default)? {
+                        dynamic_elem_offset_alignment = Some(aligned);
+                    }
+                    (0, Some(simplify(analyzer, &floordiv(bytes, element)?)?))
+                }
             }
-            (0, Some(simplified_elem_offset.clone()))
         }
     };
-    if logical_elem_offset < 0 {
-        return unsupported(format!(
-            "buffer:{name}:negative elem_offset {logical_elem_offset} is not implemented"
-        ));
-    }
-    let packed_nibble_offset = if packed_nibble {
-        logical_elem_offset % 2
-    } else {
-        0
-    };
-    let elem_offset = if packed_nibble {
-        logical_elem_offset / 2
-    } else {
-        logical_elem_offset
-    };
-    let explicit_strides: Option<Vec<i64>> = if buffer_type.strides.is_empty() {
-        None
-    } else {
-        let mut strides = Vec::new();
-        for (axis, stride) in buffer_type.strides.iter().enumerate() {
-            strides.push(static_int(
-                analyzer,
-                &stride,
-                &format!("{name}:strides[{axis}]"),
-            )?);
-        }
-        Some(strides)
-    };
+    let packed_nibble_offset: i64 = 0;
+    let explicit_strides = strided_view_strides(analyzer, buffer, &shape, &scope, packed_nibble)?;
     let static_shape = shape
         .iter()
         .all(|extent| matches!(extent, Extent::Static(_)));
@@ -502,16 +552,16 @@ pub fn inspect_buffer_layout(
             expr_any(&extent),
         )?);
     }
-    let expected_elements_expr = PrimExpr::try_from(expected_elements_expr)?;
-    let zero_indices: Vec<PrimExpr> = shape
+    let expected_elements_expr = prim_expr(expected_elements_expr)?;
+    let zero_indices: Vec<Expr> = shape
         .iter()
-        .map(|_| IntImm::new("int32", 0).map(Into::into))
+        .map(|_| int_const("int32", 0).map(Into::into))
         .collect::<tvm_ffi::Result<_>>()?;
     let zero_indices = Array::new(zero_indices);
     let zero_extent_shared_placeholder = static_shape
         && expected_elements == Some(0)
         && (scope == "shared" || scope == "shared.dyn");
-    let apply_zero = |candidate: &Layout| -> AResult<Map<FfiString, PrimExpr>> {
+    let apply_zero = |candidate: &Layout| -> AResult<Map<FfiString, Expr>> {
         if zero_extent_shared_placeholder {
             Ok(candidate.apply(&zero_indices)?)
         } else {
@@ -519,13 +569,13 @@ pub fn inspect_buffer_layout(
         }
     };
     let mapped_zero = apply_zero(&canonical)?;
-    let mut mapped: Vec<(String, PrimExpr)> = mapped_zero
+    let mut mapped: Vec<(String, Expr)> = mapped_zero
         .iter()
         .map(|(axis, value)| (ffi_text(&axis), value))
         .collect();
     mapped.sort_by(|left, right| left.0.cmp(&right.0));
     let zero_axes: Vec<String> = mapped.iter().map(|(axis, _)| axis.clone()).collect();
-    let mut dynamic_layout_elem_offset: Option<PrimExpr> = None;
+    let mut dynamic_layout_elem_offset: Option<Expr> = None;
     let is_compose = canonical.clone().try_cast::<ComposeLayout>().is_ok();
     if let Some(mapped_m_zero) = map_get(&mapped_zero, "m")? {
         let simplified_m_zero = simplify(analyzer, &mapped_m_zero)?;
@@ -558,7 +608,7 @@ pub fn inspect_buffer_layout(
                 set_axis(
                     &mut mapped,
                     "m",
-                    IntImm::new("int64", static_m_zero)?.into(),
+                    int_const("int64", static_m_zero)?.into(),
                 );
             } else {
                 dynamic_layout_elem_offset = Some(base_m_zero);
@@ -571,9 +621,14 @@ pub fn inspect_buffer_layout(
             &scope));
     }
     if scope == "tmem" || scope.starts_with("tmem.") {
+        if let Some(aligned) = &dynamic_elem_offset_alignment {
+            return unsupported(format!(
+                "buffer:{name}:runtime TMEM offset is not provably element-aligned: {}",
+                repr_of(aligned)?
+            ));
+        }
         return inspect_tmem(
             analyzer,
-            buffer,
             &name,
             shape,
             dtype,
@@ -588,13 +643,8 @@ pub fn inspect_buffer_layout(
             &zero_axes,
             dynamic_layout_elem_offset,
             packed_nibble,
+            tmem_address,
         );
-    }
-    if !buffer_type.allocated_addr.is_empty() {
-        return unsupported(format!(
-            "buffer:{name}:allocated_addr {} is unsupported",
-            repr_of(&buffer_type.allocated_addr)?
-        ));
     }
     let zero_m = get_axis(&mapped, "m");
     let owner_axes: Vec<String> = zero_axes
@@ -643,8 +693,8 @@ pub fn inspect_buffer_layout(
     let physical_elements: Option<i64>;
     if let Ok(_tile) = layout.clone().try_cast::<TileLayout>() {
         let canonical_tile = canonical.clone().try_cast::<TileLayout>()?;
-        let shard: Vec<tvm::tirx::Iter> = canonical_tile.shard()?.iter().collect();
-        let replica: Vec<tvm::tirx::Iter> = canonical_tile.replica()?.iter().collect();
+        let shard: Vec<tvm_tirx::tirx::Iter> = canonical_tile.shard()?.iter().collect();
+        let replica: Vec<tvm_tirx::tirx::Iter> = canonical_tile.replica()?.iter().collect();
         if !owner_axes.is_empty() {
             if explicit_strides.is_some() {
                 return unsupported(format!(
@@ -667,7 +717,7 @@ pub fn inspect_buffer_layout(
                 };
                 let span = static_int(
                     analyzer,
-                    &canonical.get_span(Some(axis))?,
+                    &canonical.span(Some(axis))?,
                     &format!("{name}:{axis} span"),
                 )?;
                 if span <= 0 || span > limit {
@@ -678,7 +728,7 @@ pub fn inspect_buffer_layout(
             }
             prove_equal(
                 analyzer,
-                &canonical.get_size(None)?,
+                &canonical.size(None)?,
                 &expected_elements_expr,
                 &format!("{name}:layout size"),
             )?;
@@ -687,7 +737,7 @@ pub fn inspect_buffer_layout(
             } else {
                 static_int(
                     analyzer,
-                    &canonical.get_span(Some("m"))?,
+                    &canonical.span(Some("m"))?,
                     &format!("{name}:m span"),
                 )?
             };
@@ -702,42 +752,35 @@ pub fn inspect_buffer_layout(
                 && replica.is_empty()
                 && axis_name(&shard[0].axis)? == "m"
                 && static_int(analyzer, &shard[0].stride, &format!("{name}:layout stride"))? == 1;
-            if is_default {
+            if let Some(strides) = &explicit_strides {
+                let extents: Vec<i64> = shape
+                    .iter()
+                    .map(|extent| match extent {
+                        Extent::Static(value) => *value,
+                        Extent::Dynamic(_) => 0,
+                    })
+                    .collect();
+                physical_elements =
+                    if extents.is_empty() || extents.iter().any(|extent| *extent == 0) {
+                        Some(0)
+                    } else {
+                        Some(
+                            1 + extents
+                                .iter()
+                                .zip(strides.iter())
+                                .map(|(extent, stride)| (extent - 1) * stride)
+                                .sum::<i64>(),
+                        )
+                    };
+            } else if is_default {
                 prove_equal(
                     analyzer,
                     &shard[0].extent,
                     &expected_elements_expr,
                     &format!("{name}:layout extent"),
                 )?;
-                physical_elements = match &explicit_strides {
-                    None => expected_elements,
-                    Some(strides) => {
-                        let extents: Vec<i64> = shape
-                            .iter()
-                            .map(|extent| match extent {
-                                Extent::Static(value) => *value,
-                                Extent::Dynamic(_) => 0,
-                            })
-                            .collect();
-                        if extents.is_empty() || extents.iter().any(|extent| *extent == 0) {
-                            Some(0)
-                        } else {
-                            Some(
-                                1 + extents
-                                    .iter()
-                                    .zip(strides.iter())
-                                    .map(|(extent, stride)| (extent - 1) * stride)
-                                    .sum::<i64>(),
-                            )
-                        }
-                    }
-                };
+                physical_elements = expected_elements;
             } else {
-                if explicit_strides.is_some() {
-                    return unsupported(format!(
-                        "buffer:{name}:explicit strides require the default logical layout, got {signature}"
-                    ));
-                }
                 let Some(expected) = expected_elements else {
                     return unsupported(format!(
                         "buffer:{name}:non-default layout requires a static logical shape"
@@ -748,7 +791,7 @@ pub fn inspect_buffer_layout(
                     Some(offset) => {
                         let relative = op_binary(
                             "_OpSub",
-                            expr_any(&canonical.get_span(Some("m"))?),
+                            expr_any(&canonical.span(Some("m"))?),
                             expr_any(offset),
                         )?;
                         static_int(
@@ -783,7 +826,7 @@ pub fn inspect_buffer_layout(
             Some(offset) => {
                 let relative = op_binary(
                     "_OpSub",
-                    expr_any(&canonical.get_span(None)?),
+                    expr_any(&canonical.span(None)?),
                     expr_any(offset),
                 )?;
                 static_int(
@@ -820,6 +863,7 @@ pub fn inspect_buffer_layout(
         itemsize,
         elem_offset,
         dynamic_elem_offset,
+        dynamic_elem_offset_alignment,
         element_count: physical_elements,
         signature,
         physical_axes,
@@ -834,14 +878,14 @@ pub fn inspect_buffer_layout(
     })
 }
 
-fn get_axis(mapped: &[(String, PrimExpr)], axis: &str) -> Option<PrimExpr> {
+fn get_axis(mapped: &[(String, Expr)], axis: &str) -> Option<Expr> {
     mapped
         .iter()
         .find(|(name, _)| name == axis)
         .map(|(_, value)| value.clone())
 }
 
-fn set_axis(mapped: &mut Vec<(String, PrimExpr)>, axis: &str, value: PrimExpr) {
+fn set_axis(mapped: &mut Vec<(String, Expr)>, axis: &str, value: Expr) {
     if let Some(entry) = mapped.iter_mut().find(|(name, _)| name == axis) {
         entry.1 = value;
     } else {
@@ -853,21 +897,21 @@ fn set_axis(mapped: &mut Vec<(String, PrimExpr)>, axis: &str, value: PrimExpr) {
 #[allow(clippy::too_many_arguments)]
 fn inspect_tmem(
     analyzer: &Analyzer,
-    buffer: &BufferVar,
     name: &str,
     shape: Vec<Extent>,
     dtype: String,
     itemsize: i64,
     elem_offset: i64,
-    dynamic_elem_offset: Option<PrimExpr>,
+    dynamic_elem_offset: Option<Expr>,
     expected_elements: Option<i64>,
     signature: String,
     layout: &Layout,
     canonical: &Layout,
-    mapped: &[(String, PrimExpr)],
+    mapped: &[(String, Expr)],
     zero_axes: &[String],
-    dynamic_layout_elem_offset: Option<PrimExpr>,
+    dynamic_layout_elem_offset: Option<Expr>,
     packed_nibble: bool,
+    tmem_address: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     if dynamic_elem_offset.is_some() {
         return unsupported(format!(
@@ -879,14 +923,14 @@ fn inspect_tmem(
             "buffer:{name}:float4 TMEM views are not implemented"
         ));
     }
-    let buffer_type = buffer.buffer_type();
-    let allocated_addr: Vec<PrimExpr> = buffer_type.allocated_addr.iter().collect();
-    if allocated_addr.len() != 1 {
+    // The column address is an operand of the producing tirx.alloc_tensor or
+    // tirx.cuda.decl_tmem, not part of the tensor type.
+    let Some(tmem_address) = tmem_address else {
         return unsupported(format!(
-            "buffer:{name}:TMEM requires exactly one allocated_addr, got {}",
-            repr_of(&buffer_type.allocated_addr)?
+            "buffer:{name}:TMEM requires the column address of its allocation"
         ));
-    }
+    };
+    let allocated_addr = prim(&oref(tmem_address))?;
     let Ok(_) = layout.clone().try_cast::<TileLayout>() else {
         return unsupported(format!(
             "buffer:{name}:TMEM requires a TileLayout, got {signature}"
@@ -943,7 +987,7 @@ fn inspect_tmem(
     }
     let addr_static: Option<i64> = match static_int(
         analyzer,
-        &allocated_addr[0],
+        &allocated_addr,
         &format!("{name}:allocated_addr"),
     ) {
         Ok(value) => Some(value),
@@ -958,7 +1002,7 @@ fn inspect_tmem(
     }
     let lane_span = static_int(
         analyzer,
-        &canonical.get_span(Some("TLane"))?,
+        &canonical.span(Some("TLane"))?,
         &format!("{name}:TLane span"),
     )?;
     if lane_span <= 0 || lane_span > 128 {
@@ -968,7 +1012,7 @@ fn inspect_tmem(
     }
     let tcol_capacity = match static_int(
         analyzer,
-        &canonical.get_span(Some("TCol"))?,
+        &canonical.span(Some("TCol"))?,
         &format!("{name}:TCol span"),
     ) {
         Ok(value) => value,
@@ -1007,13 +1051,14 @@ fn inspect_tmem(
         itemsize,
         elem_offset,
         dynamic_elem_offset,
+        dynamic_elem_offset_alignment: None,
         element_count: expected_elements,
         signature,
         physical_axes: vec!["TCol".to_owned(), "TLane".to_owned()],
         explicit_strides: None,
         dynamic_layout_elem_offset,
         packed_nibble_offset: 0,
-        allocated_addr: Some(allocated_addr[0].clone()),
+        allocated_addr: Some(allocated_addr),
         allocated_addr_static: addr_static,
         tmem_lane_span: Some(lane_span),
         tmem_tcol_span_elements: Some(tcol_capacity),

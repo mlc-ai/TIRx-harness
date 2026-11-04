@@ -12,9 +12,9 @@ from dataclasses import field as dataclass_field
 from typing import Any, Literal
 
 import numpy as np
+import tvm_ffi
 
-from tvm import tirx
-from tvm.ir.type import PointerType
+from tvm_tirx import ir, tirx
 
 from .bindings import PreparedBindings, prepare_bindings
 from .errors import NumSimExecutionError, UnsupportedTIRxError
@@ -219,6 +219,17 @@ def prepare_native_bindings(
     )
 
 
+def _specialize(func: Any, bindings: dict[Any, Any]) -> Any:
+    """Drop the bound parameters and substitute each bound value everywhere,
+    including tensor types and layouts, as TVM's Function.specialize did."""
+
+    params = [parameter for parameter in func.params if parameter not in bindings]
+    return tvm_ffi.structural_map(
+        tirx.Function(params, func.body, func.ret_type, func.attrs, func.loc),
+        [(tirx.Var, lambda var: bindings.get(var, var))],
+    )
+
+
 def _concretize_checker_shapes(
     func: Any,
     inputs: dict[str, Any] | None,
@@ -230,7 +241,7 @@ def _concretize_checker_shapes(
     buffers = {
         str(parameter.name): parameter
         for parameter in func.params
-        if tirx.is_buffer_var(parameter)
+        if tirx.is_tensor_var(parameter)
         and str(parameter.name) in inputs
         and any(isinstance(extent, tirx.Var) for extent in parameter.ty.shape)
     }
@@ -241,7 +252,7 @@ def _concretize_checker_shapes(
         {name: inputs[name] for name in buffers},
         expected_buffer_dtypes={name: str(param.ty.dtype) for name, param in buffers.items()},
     )
-    constraints = {}
+    bindings: dict[Any, Any] = {}
     for name, parameter in buffers.items():
         ty = parameter.ty
         shape = prepared.buffers[name].shape
@@ -249,39 +260,30 @@ def _concretize_checker_shapes(
             raise NumSimExecutionError(
                 f"native analysis buffer {name!r} has rank {len(shape)}, expected {len(ty.shape)}"
             )
-        # Keep non-variable dimensions and all non-shape metadata intact. TVM's
-        # specializer checks shared dimensions and remaps layouts with the shape.
-        dimensions = [
-            tirx.IntImm(str(extent.ty.dtype), size) if isinstance(extent, tirx.Var) else extent
-            for extent, size in zip(ty.shape, shape, strict=True)
-        ]
-        constraints[parameter] = tirx.decl_buffer(
-            dimensions,
-            str(ty.dtype),
-            strides=list(ty.strides),
-            elem_offset=ty.elem_offset,
-            scope=ty.storage_scope,
-            data_alignment=ty.data_alignment,
-            offset_factor=ty.offset_factor,
-        )
+        # Non-variable dimensions and all non-shape metadata stay intact.
+        for extent, size in zip(ty.shape, shape, strict=True):
+            if not isinstance(extent, tirx.Var):
+                continue
+            bound = bindings.setdefault(extent, ir.IntImm(str(extent.ty.dtype), size))
+            if bound.value != size:
+                raise NumSimExecutionError(
+                    f"native analysis input shapes disagree: {str(extent.name)!r} is "
+                    f"{bound.value} and {size}"
+                )
     # An explicit scalar may also be a buffer dimension. Keep its supplied value
     # as a constraint so a conflicting scalar/array pair cannot be specialized away.
     scalar_dtypes = {
         str(parameter.name): str(parameter.ty.dtype)
         for parameter in func.params
-        if not tirx.is_buffer_var(parameter)
-        and not isinstance(parameter.ty, PointerType)
+        if not tirx.is_tensor_var(parameter)
+        and not isinstance(parameter.ty, ir.PtrType)
         and any(parameter.same_as(extent) for buf in buffers.values() for extent in buf.ty.shape)
         and str(parameter.name) in inputs
     }
     scalar_values = prepare_bindings(
         {name: inputs[name] for name in scalar_dtypes}, expected_scalar_dtypes=scalar_dtypes
     ).scalars
-    # Specialize buffers together so conflicting shared shape variables are rejected.
-    try:
-        specialized = func.specialize(constraints)
-    except (TypeError, ValueError) as error:
-        raise NumSimExecutionError(f"native analysis input shapes disagree: {error}") from error
+    specialized = _specialize(func, bindings)
     for name, parameter in buffers.items():
         for extent, size in zip(parameter.ty.shape, prepared.buffers[name].shape, strict=True):
             if isinstance(extent, tirx.Var) and str(extent.name) in scalar_values:
@@ -307,7 +309,7 @@ def _concretize_checker_launch(
     scalar_parameters = {
         str(parameter.name): parameter
         for parameter in func.params
-        if not tirx.is_buffer_var(parameter) and not isinstance(parameter.ty, PointerType)
+        if not tirx.is_tensor_var(parameter) and not isinstance(parameter.ty, ir.PtrType)
     }
     provided: dict[Any, int | float | bool] = {}
     for name, parameter in scalar_parameters.items():
@@ -343,7 +345,13 @@ def _concretize_checker_launch(
     if not required:
         return func, inputs, {}
 
-    specialized = func.specialize(required)
+    specialized = _specialize(
+        func,
+        {
+            parameter: tirx.const(value, str(parameter.ty.dtype))
+            for parameter, value in required.items()
+        },
+    )
     execution_inputs = dict(inputs)
     supplemental_scalar_dtypes: dict[str, str] = {}
     for parameter in required:
@@ -561,10 +569,29 @@ def _native_diagnostic_records(payload: dict[str, Any]):
         yield "execution_error", execution_error
 
 
+def _outermost_source_span(body: Any) -> dict[str, Any] | None:
+    """The first located node of ``body`` in reverse post-order.
+
+    tvm-tirx records locations on statements, not on a function or its root
+    sequence. Reverse post-order visits the root and then its last child first,
+    so this is the last located top-level statement -- for a kernel, its
+    ``device_entry`` -- the same choice ``_kernel_source_anchor`` makes from the
+    post-order source map.
+    """
+
+    from .transpiler.native_frontend import post_order_nodes
+
+    for node in reversed(list(post_order_nodes(body))):
+        span = serialize_source_span(source_span_from_node(node))
+        if _serialized_source_span_has_line(span):
+            return span
+    return None
+
+
 def _primfunc_source_anchor(func: Any, *, kernel_index: int = 0) -> dict[str, Any] | None:
     body = getattr(func, "body", None)
     if body is not None:
-        span = serialize_source_span(source_span_from_node(body))
+        span = _outermost_source_span(body)
         if _serialized_source_span_has_line(span):
             name = getattr(func, "__name__", None)
             attrs = getattr(func, "attrs", None)

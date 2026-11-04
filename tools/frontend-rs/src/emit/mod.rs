@@ -3,10 +3,12 @@
 //! The text snapshots pin the emitted text, so temp-name counters, capture
 //! attempts and restore points keep their order.
 
-use tvm::ir::{Expr, Var};
-use tvm::tirx::{BufferVar, PrimFunc};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use tvm_tirx::ir::{Expr, Var};
+use tvm_tirx::tirx::Function;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use crate::analyze::util::function_body;
+use crate::analyze::util::TensorVarExt;
 
 pub mod abi;
 pub mod async_copy;
@@ -54,11 +56,6 @@ pub mod stmt;
 pub mod sync;
 pub mod tcgen05;
 pub mod tcgen_descriptor;
-pub mod tile;
-pub mod tile_async_copy;
-pub mod tile_common;
-pub mod tile_gemm_async;
-pub mod tile_tcgen05;
 pub mod tmem;
 pub mod wait_until;
 
@@ -247,7 +244,7 @@ pub struct Emitter<'a> {
     pub diagnostics: diagnostics::State,
     pub ctx: &'a Ctx<'a>,
     pub plan: &'a KernelPlan,
-    pub func: &'a PrimFunc,
+    pub func: &'a Function,
     pub params: Vec<Var>,
     pub consumed_address_wrappers: IdSet,
     /// Sources whose lowering may await.
@@ -271,7 +268,7 @@ pub struct Emitter<'a> {
     pub threads_per_warpgroup: i64,
     pub scalars: Vec<ScalarCode>,
     pub pointers: Vec<PointerCode>,
-    pub buffers: Vec<(BufferVar, BufferCode)>,
+    pub buffers: Vec<(Var, BufferCode)>,
     pub shape_vars: Vec<ShapeVarCode>,
     pub lines: Vec<String>,
     pub indent: usize,
@@ -300,8 +297,10 @@ pub struct Emitter<'a> {
     pub outer_loop_live_split_permissions: Vec<bool>,
     pub nested_for_statement_split_permissions: Vec<bool>,
     pub capturing_for_statements: IdSet,
-    pub dynamic_buffers: Vec<(BufferVar, String)>,
-    pub logical_buffer_name_cache: Vec<(BufferVar, String)>,
+    pub dynamic_buffers: Vec<(Var, String)>,
+    pub logical_buffer_name_cache: Vec<(Var, String)>,
+    /// The checker identity of each ordinary logical root, unique per root.
+    pub logical_root_names: Vec<(Var, String)>,
     pub loop_transfer_cache: IdMap<bool>,
     pub subtree_may_suspend_cache: IdMap<bool>,
     pub failed_inner_uniform_if_splits: IdSet,
@@ -405,7 +404,7 @@ impl<'a> Emitter<'a> {
                 dtype: entry.dtype.clone(),
             });
         }
-        let mut buffers: Vec<(BufferVar, BufferCode)> = Vec::new();
+        let mut buffers: Vec<(Var, BufferCode)> = Vec::new();
         let mut next_buffer_storage_index = 0;
         for (index, plan) in memory_plan.buffers.iter().enumerate() {
             let mut shape = Vec::new();
@@ -455,7 +454,7 @@ impl<'a> Emitter<'a> {
                 let Some(variable) = super::analyze::util::as_var(&extent_ref) else {
                     continue;
                 };
-                let axis_extent = buffer.buffer_type().shape.get(axis)?;
+                let axis_extent = buffer.tensor_type().shape.get(axis)?;
                 let dtype = prim_dtype(&axis_extent.ty)
                     .map(dtype_text)
                     .unwrap_or_default();
@@ -592,6 +591,7 @@ impl<'a> Emitter<'a> {
             capturing_for_statements: IdSet::default(),
             dynamic_buffers: Vec::new(),
             logical_buffer_name_cache: Vec::new(),
+            logical_root_names: Vec::new(),
             loop_transfer_cache: IdMap::default(),
             subtree_may_suspend_cache: IdMap::default(),
             failed_inner_uniform_if_splits: IdSet::default(),
@@ -609,7 +609,7 @@ impl<'a> Emitter<'a> {
     }
 
     pub fn emit(&mut self) -> AResult<String> {
-        let body = self.func.body().clone();
+        let body = function_body(&self.func)?;
         self.emit_stmt(&body, None)?;
         Ok(self.lines.join("\n"))
     }
@@ -697,9 +697,9 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    pub fn buffer_code(&self, buffer: &BufferVar) -> AResult<&BufferCode> {
+    pub fn buffer_code(&self, buffer: &Var) -> AResult<&BufferCode> {
         for (candidate, code) in &self.buffers {
-            if super::analyze::util::same(candidate.as_var(), buffer.as_var()) {
+            if super::analyze::util::same(candidate, buffer) {
                 return Ok(code);
             }
         }
@@ -726,11 +726,11 @@ impl<'a> Emitter<'a> {
     }
 
     /// The variable scope state restored on exit.
-    pub fn scope_snapshot(&self) -> (Variables, Vec<(BufferVar, String)>) {
+    pub fn scope_snapshot(&self) -> (Variables, Vec<(Var, String)>) {
         (self.variables.clone(), self.dynamic_buffers.clone())
     }
 
-    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(BufferVar, String)>)) {
+    pub fn restore_scope(&mut self, snapshot: (Variables, Vec<(Var, String)>)) {
         self.variables = snapshot.0;
         self.dynamic_buffers = snapshot.1;
     }
@@ -802,7 +802,7 @@ fn validate_integer_expression(
         }
         return Ok(());
     }
-    if let Some(cast) = expression.as_node::<tvm::prim::CastObj>() {
+    if let Some(cast) = expression.as_node::<tvm_tirx::ir::prim::CastObj>() {
         return validate_integer_expression(&oref(cast.value.clone()), variable_allowed, field);
     }
     if !crate::schema::INTEGER_BINARY_NODE_KINDS.contains(&kind) {
@@ -816,15 +816,5 @@ fn validate_integer_expression(
 /// The buffer loader swapped in around one emission.
 #[derive(Clone)]
 pub enum NestedLoadSite {
-    /// `emit_buffer_load`: the load's own source node (the default loader,
-    /// handed over explicitly).
-    Exact,
     Site(Option<i64>),
-    ByBuffer(i64),
-    /// `emit_buffer_load_at_lane(buffer, indices, lane, source_node=<load>)`.
-    AtLane(String),
-    /// `emit_(implicit_)buffer_load_at_lane(buffer, indices, lane, source_op_id=...)`.
-    AtLaneSite(String, Option<i64>),
-    /// Reject a runtime load while capturing a pure closure.
-    Reject(String),
 }

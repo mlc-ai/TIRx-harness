@@ -10,46 +10,42 @@ from tirx_harness import racecheck as facade_racecheck
 from tirx_harness import synccheck as facade_synccheck
 from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.checker_runner import transpile_native_checker_artifact
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _DESCRIPTOR_SOURCE = np.arange(4, dtype=np.float32)
 
 
-@T.prim_func
+@T.function
 def native_public_api_kernel():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane
 
 
-@T.prim_func
-def native_public_griddep_wait_kernel(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def native_public_griddep_wait_kernel(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.griddepcontrol.wait()
     if lane == 0:
         output[0] = 1
 
 
-@T.prim_func
+@T.function
 def native_public_descriptor_storage_kernel(
-    descriptor_storage: T.Buffer((128,), "uint8"), output: T.Buffer((1,), "int32")
+    descriptor_storage: T.Tensor((128,), "uint8"), output: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = T.cast(descriptor_storage[0], "int32")
 
 
-@T.prim_func
-def native_public_scalar_kernel(mode: T.int32, output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def native_public_scalar_kernel(mode: T.int32, output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[0] = mode
 

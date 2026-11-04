@@ -4,15 +4,14 @@ import numpy as np
 import pytest
 
 from tirx_harness.numsim import checkers
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def runtime_grid(num_ctas: T.int32, value: T.int32, output: T.Buffer((4,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([num_ctas])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def runtime_grid(num_ctas: T.int32, value: T.int32, output: T.Tensor((4,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=num_ctas, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         output[cta] = value
 

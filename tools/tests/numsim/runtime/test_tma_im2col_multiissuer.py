@@ -7,10 +7,10 @@ lane barriers may complete at different times.
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def im2col_multiissuer_case(rank, sparse=False, *, wait=True):
@@ -25,17 +25,15 @@ def im2col_multiissuer_case(rank, sparse=False, *, wait=True):
         f"cp.async.bulk.tensor.{rank}d.shared::{'cta' if rank == 3 else 'cluster'}"
         ".global.im2col.mbarrier::complete_tx::bytes" + (".multicast::cluster" if multicast else "")
     )
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), output: T.Buffer(({ctas}, 32, 32), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([{ctas}])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1024,), "uint32", scope="shared", align=128)
-    barriers = T.alloc_buffer((32,), "uint64", scope="shared")
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), output: T.Tensor(({ctas}, 32, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=(1) * {ctas}, block=32, cluster={ctas}))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1024,), "uint32", align=128)
+    barriers = T.alloc_shared((32,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     for i in T.serial(32):
         shared[lane * 32 + i] = T.uint32(7)
@@ -120,15 +118,14 @@ def wide_im2col_multiissuer_case(w128, sparse=False):
     max_rows = pixels + 2 * multiplier
     active = "lane < 4 and lane != 1" if sparse else "lane < 4"
     mode = "im2col::w::128" if w128 else "im2col::w"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(tmap: T.TensorMap(), output: T.Buffer((4, {max_rows}, 16), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer(({4 * stride},), "uint32", scope="shared", align=1024)
-    barriers = T.alloc_buffer((4,), "uint64", scope="shared")
+@T.function
+def kernel(tmap: T.Ptr(T.TensorMap), output: T.Tensor((4, {max_rows}, 16), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared(({4 * stride},), "uint32", align=1024)
+    barriers = T.alloc_shared((4,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     if lane < 4:
         for i in T.serial({stride}):

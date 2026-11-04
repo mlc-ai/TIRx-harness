@@ -1,11 +1,10 @@
 //! Artifact split of large regions into private helpers.  Capture attempts,
 //! thresholds and restore points decide the emitted text.
 
-use tvm::tirx::{
-    AttrStmtObj, BindObj, ForObj, IfThenElseObj, ScopeIdDefStmtObj, SeqStmtObj, Stmt, WhileObj,
-};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
+use tvm_tirx::ir::{ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, WhileObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
+use crate::analyze::util::scalar_bind;
 
 use super::super::analyze::util::{ffi_error, ffi_text, ident, int_imm, oref, AResult, Failure};
 use super::{Emitter, RustValue, SplitArgument, SplitEffects, SplitHelper, Uniformity, Variables};
@@ -30,7 +29,7 @@ macro_rules! split_thresholds {
             pub fn unsplit() -> Self { Self { $($field: $unsplit,)* } }
 
             /// One definition owns fields, defaults, and the Python override names.
-            pub fn defaults() -> tvm::tvm_ffi::Result<Map<FfiString, i64>> {
+            pub fn defaults() -> tvm_tirx::tvm_ffi::Result<Map<FfiString, i64>> {
                 Ok([$(
                     (FfiString::from(format!("_{}", stringify!($field).to_ascii_uppercase())), $default),
                 )*].into_iter().collect())
@@ -74,7 +73,9 @@ split_thresholds! {
 }
 
 fn static_positive_for_extent(loop_stmt: &ForObj) -> Option<i64> {
-    int_imm(&oref(loop_stmt.extent.clone())).filter(|extent| *extent > 0)
+    let begin = int_imm(&oref(loop_stmt.begin.clone()))?;
+    let end = int_imm(&oref(loop_stmt.end.clone()))?;
+    Some(end - begin).filter(|extent| *extent > 0)
 }
 
 pub fn allows_bounded_transfer_split(loop_stmt: &ForObj, thresholds: &SplitThresholds) -> bool {
@@ -98,10 +99,9 @@ fn is_rust_identifier(text: &str) -> bool {
 
 /// Statement kinds that never join a captured run.
 fn is_run_excluded(stmt: &Stmt) -> bool {
-    stmt.as_node::<AttrStmtObj>().is_some()
+    stmt.as_node::<RegionStmtObj>().is_some()
         || stmt.as_node::<SeqStmtObj>().is_some()
-        || stmt.as_node::<ScopeIdDefStmtObj>().is_some()
-        || stmt.as_node::<BindObj>().is_some()
+        || scalar_bind(stmt).is_some()
 }
 
 pub struct Checkpoint {
@@ -118,7 +118,7 @@ pub struct Checkpoint {
     raw_tcgen: super::raw_tcgen::State,
     variables: Variables,
     dynamic_buffers_len: usize,
-    dynamic_buffers: Vec<(tvm::tirx::BufferVar, String)>,
+    dynamic_buffers: Vec<(tvm_tirx::ir::Var, String)>,
     split_effects: Vec<SplitEffects>,
     recorded_store_count: usize,
 }
@@ -1018,7 +1018,7 @@ impl<'a> Emitter<'a> {
 
     fn try_capture_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         initial_stmt: Option<&Stmt>,
         kind: IfSplitKind,
     ) -> AResult<Option<(SplitHelper, Option<SplitHelper>)>> {
@@ -1035,9 +1035,9 @@ impl<'a> Emitter<'a> {
         };
         let checkpoint = self.partition_checkpoint();
         let mut bodies =
-            vec![self.capture_split_arm(&branch.then_case, initial_stmt, borrow_non_copy)?];
+            vec![self.capture_split_arm(&Stmt::from(branch.then_case.clone()), initial_stmt, borrow_non_copy)?];
         if let Some(else_case) = &branch.else_case {
-            bodies.push(self.capture_split_arm(else_case, initial_stmt, borrow_non_copy)?);
+            bodies.push(self.capture_split_arm(&Stmt::from(else_case.clone()), initial_stmt, borrow_non_copy)?);
         }
         let arguments: Option<Vec<_>> = bodies
             .iter()
@@ -1094,7 +1094,7 @@ impl<'a> Emitter<'a> {
 
     pub fn try_emit_root_uniform_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<bool> {
@@ -1113,7 +1113,7 @@ impl<'a> Emitter<'a> {
     pub fn try_emit_inner_uniform_if_split(
         &mut self,
         stmt: &Stmt,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<bool> {
@@ -1136,7 +1136,7 @@ impl<'a> Emitter<'a> {
 
     pub fn try_capture_inner_varying_if_split(
         &mut self,
-        branch: &IfThenElseObj,
+        branch: &IfObj,
         _condition: &RustValue,
         initial_stmt: Option<&Stmt>,
     ) -> AResult<Option<(SplitHelper, Option<SplitHelper>)>> {
@@ -1151,7 +1151,7 @@ impl<'a> Emitter<'a> {
         _stmt: &Stmt,
         loop_stmt: &ForObj,
     ) -> AResult<Option<SplitHelper>> {
-        let has_loop_transfer = self.contains_current_loop_transfer(&loop_stmt.body)?;
+        let has_loop_transfer = self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?;
         let allow_loop_transfer = self
             .outer_loop_live_split_permissions
             .last()
@@ -1175,7 +1175,7 @@ impl<'a> Emitter<'a> {
             .push(allow_loop_transfer || allow_large_transfer_body);
         self.nested_for_statement_split_permissions
             .push(allow_nested_for_split);
-        let body = self.capture_split_arm(&loop_stmt.body, None, true);
+        let body = self.capture_split_arm(&Stmt::from(loop_stmt.body.clone()), None, true);
         self.nested_for_statement_split_permissions.pop();
         self.outer_loop_live_split_permissions.pop();
         let body = body?;
@@ -1219,7 +1219,7 @@ impl<'a> Emitter<'a> {
                     .copied()
                     .unwrap_or(false))
             || self.capturing_for_statements.contains(&identity)
-            || !self.contains_current_loop_transfer(&loop_stmt.body)?
+            || !self.contains_current_loop_transfer(&Stmt::from(loop_stmt.body.clone()))?
         {
             return Ok(None);
         }

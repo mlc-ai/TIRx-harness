@@ -3,37 +3,34 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def distinct_same_named_vars(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def distinct_same_named_vars(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     first: T.let[T.Var(name="same", ty="int32")] = T.int32(1)
     _second: T.let[T.Var(name="same", ty="int32")] = T.int32(2)
     output[lane] = first
 
 
-@T.prim_func
-def parameter_and_inner_var_share_a_name(same: T.int32, output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def parameter_and_inner_var_share_a_name(same: T.int32, output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     _shadow: T.let[T.Var(name="same", ty="int32")] = T.int32(99)
     output[lane] = same
 
 
-@T.prim_func
+@T.function
 def runtime_shape_and_inner_var_share_a_name(
-    rows: T.int32, input_ptr: T.handle, output_ptr: T.handle
+    rows: T.int32,
+    input_buffer: T.Tensor((rows,), "int32"),
+    output_buffer: T.Tensor((rows,), "int32"),
 ):
-    input_buffer = T.match_buffer(input_ptr, (rows,), "int32")
-    output_buffer = T.match_buffer(output_ptr, (rows,), "int32")
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     _shadow: T.let[T.Var(name="rows", ty="int32")] = T.int32(1)
     if lane < rows:
         output_buffer[lane] = input_buffer[lane]

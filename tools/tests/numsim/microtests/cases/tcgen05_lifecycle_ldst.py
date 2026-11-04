@@ -6,16 +6,15 @@ from typing import Any
 
 import numpy as np
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def tcgen05_lifecycle_ldst(output: T.Buffer((4, 32), "uint32")):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def tcgen05_lifecycle_ldst(output: T.Tensor((4, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     value = T.alloc_local((1,), "uint32")
 
     if warp == 0:
@@ -38,15 +37,14 @@ def tcgen05_lifecycle_ldst(output: T.Buffer((4, 32), "uint32")):
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def tcgen05_cp_warpx4(source: T.Buffer((32, 4), "uint32"), output: T.Buffer((4, 32, 4), "uint32")):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared = T.alloc_buffer((32, 4), "uint32", scope="shared")
+@T.function
+def tcgen05_cp_warpx4(source: T.Tensor((32, 4), "uint32"), output: T.Tensor((4, 32, 4), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared = T.alloc_shared((32, 4), "uint32")
     registers = T.alloc_local((4,), "uint32")
     descriptor: T.uint64
 
@@ -84,16 +82,15 @@ def tcgen05_cp_warpx4(source: T.Buffer((32, 4), "uint32"), output: T.Buffer((4, 
         T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def tcgen05_bf16_mma(output: T.Buffer((4, 32, 4), "float32")):
-    T.device_entry()
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    shared_a = T.alloc_buffer((4096,), "uint8", scope="shared")
-    shared_b = T.alloc_buffer((1024,), "uint8", scope="shared")
+@T.function
+def tcgen05_bf16_mma(output: T.Tensor((4, 32, 4), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    shared_a = T.alloc_shared((4096,), "uint8")
+    shared_b = T.alloc_shared((1024,), "uint8")
     registers = T.alloc_local((4,), "uint32")
     instruction_descriptor: T.uint32
     descriptor_a: T.uint64
@@ -154,7 +151,7 @@ def tcgen05_bf16_mma(output: T.Buffer((4, 32, 4), "float32")):
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
-        output[warp, lane, register] = T.reinterpret("float32", registers[register])
+        output[warp, lane, register] = T.reinterpret(registers[register], ty="float32")
     T.cuda.cta_sync()
 
     if warp == 0:

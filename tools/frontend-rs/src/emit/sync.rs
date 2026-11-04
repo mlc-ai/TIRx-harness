@@ -1,17 +1,17 @@
 //! Validation and emission of the sync instruction family.
 
 use crate::analyze::util::{
-    dtype_of, expr_type, is_pointer_type, oref, prim, prim_dtype, unsupported, AResult,
+    dtype_of, expr_type, ffi_text, is_pointer_type, oref, prim, prim_dtype, unsupported, AResult,
 };
 use crate::analyze::Ctx;
 use crate::decode::ptx::DecodedPtx;
 use crate::decode::Decoded;
 use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
-use tvm::ir::StringImmObj;
-use tvm::ir::{CallObj, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{CallObj, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 #[derive(Default)]
 pub struct State {
@@ -284,7 +284,7 @@ impl RawSyncCall {
             "tirx.cuda.warp_sync" => Self::WarpSync,
             "tirx.cuda.warpgroup_sync" => Self::WarpgroupSync,
             "tirx.cuda.cta_sync" => Self::CtaSync,
-            "tirx.tvm_storage_sync" => Self::StorageSync,
+            "tirx.gpu_storage_sync" => Self::StorageSync,
             "tirx.cuda.cluster_sync" => Self::ClusterSync,
             "tirx.cuda.grid_sync" => Self::GridSync,
             "tirx.cuda.thread_fence" => Self::ThreadFence,
@@ -301,7 +301,7 @@ impl RawSyncCall {
             Self::WarpSync => (SyncCallKind::WarpSync, &[0]),
             Self::WarpgroupSync => (SyncCallKind::WarpgroupSync, &[1]),
             Self::CtaSync => (SyncCallKind::CtaSync, &[0]),
-            Self::StorageSync => (SyncCallKind::CtaSync, &[3]),
+            Self::StorageSync => (SyncCallKind::CtaSync, &[1]),
             Self::ClusterSync => (SyncCallKind::ClusterSync, &[0]),
             Self::GridSync => (SyncCallKind::GridSync, &[0]),
             Self::ThreadFence => (SyncCallKind::OrderingMarker, &[0]),
@@ -522,6 +522,22 @@ pub fn validate_raw_sync_call(node: &ObjectRef, op_name: &str) -> AResult<RawSyn
                 crate::dtypes::integer_dtypes(),
                 &format!("{op_name}.duration"),
             )?;
+        }
+        RawSyncCall::StorageSync => {
+            // A shared-memory storage sync is a CTA barrier; a global one
+            // synchronizes the grid and is not this lowering.
+            let scope = args[0]
+                .as_node::<StringImmObj>()
+                .map(|scope| ffi_text(&scope.value));
+            if !matches!(scope.as_deref(), Some("shared" | "shared.dyn")) {
+                return unsupported(format!(
+                    "{op_name} is modeled only for the shared storage scope, got {}",
+                    scope.map_or_else(
+                        || "a non-constant scope".to_owned(),
+                        |scope| format!("{scope:?}")
+                    )
+                ));
+            }
         }
         _ => {}
     }

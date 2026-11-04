@@ -64,19 +64,17 @@ from tests.numsim.runtime.test_sparse_mma_forms import (
     sparse_s8_u8_m16n8k64,
     sparse_tf32_m16n8k8,
 )
-from tests.numsim.support.kernels import tcgen_commit_runtime_multicast
 from tirx_harness import numsim
-from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.script import tirx as T
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ TLane, 1 @ TCol)])
+_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
-def additional_scalar_payload_ops(output: T.Buffer((32, 3), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def additional_scalar_payload_ops(output: T.Tensor((32, 3), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value: T.let = T.cast(lane + 1, "float32")
 
     T.ptx.max.f32(output[lane, 0], value, T.float32(17))
@@ -84,50 +82,45 @@ def additional_scalar_payload_ops(output: T.Buffer((32, 3), "float32")):
     T.ptx.neg.f32(output[lane, 2], value)
 
 
-@T.prim_func
+@T.function
 def direct_lg2_payload(
-    source: T.Buffer((32,), "float32"),
-    output: T.Buffer((32,), "float32"),
+    source: T.Tensor((32,), "float32"),
+    output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     result = T.alloc_local((1,), "float32")
     T.evaluate(T.ptx.lg2.approx.ftz.f32(result[0], source[lane]))
     output[lane] = result[0]
 
 
-@T.prim_func
+@T.function
 def direct_tensor_map_payload_ops(
-    source_map: T.TensorMap(),
-    replacement: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((128,), "uint8"),
+    source_map: T.Ptr(T.TensorMap),
+    replacement: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
-        payload = T.decl_buffer(
-            (8,),
-            "uint64",
-            data=T.reinterpret("handle", T.address_of(source_map)),
-            scope="param",
-            align=16,
+        payload = T.decl_tensor(
+            T.reinterpret(T.address_of(source_map), ty="handle"),
+            ty_args=[T.Tensor((8,), "uint64", scope="global", align=16)],
         )
         T.ptx.st.global_.v4.b64(descriptor, payload[0], payload[1], payload[2], payload[3])
         T.ptx.st.global_.v4.b64(
-            T.reinterpret("handle", T.reinterpret("uint64", descriptor) + T.uint64(32)),
+            T.reinterpret(T.reinterpret(descriptor, ty="uint64") + T.uint64(32), ty="handle"),
             payload[4],
             payload[5],
             payload[6],
             payload[7],
         )
         T.ptx.tensormap_replace.tile.global_address.global_.b1024.b64(
-            descriptor, T.reinterpret("uint64", replacement.data)
+            descriptor, T.reinterpret(replacement.data, ty="uint64")
         )
         T.ptx.tensormap_replace.tile.global_dim.global_.b1024.b32(descriptor, 0, T.uint32(4))
         T.ptx.tensormap_replace.tile.global_dim.global_.b1024.b32(descriptor, 1, T.uint32(3))
@@ -151,11 +144,10 @@ def direct_tensor_map_payload_ops(
                 output[row, column] = shared[row, column]
 
 
-@T.prim_func
-def mma_f16c_f32d_zero(output: T.Buffer((32, 8), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def mma_f16c_f32d_zero(output: T.Tensor((32, 8), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a_values = T.alloc_local((4,), "float16")
     b_values = T.alloc_local((4,), "float16")
     c_values = T.alloc_local((8,), "float16")
@@ -181,14 +173,13 @@ def mma_f16c_f32d_zero(output: T.Buffer((32, 8), "float32")):
         output[lane, index] = d_values[index]
 
 
-@T.prim_func
+@T.function
 def additional_sparse_mma_payload_ops(
-    output_f16: T.Buffer((2, 32, 4), "float16"),
-    output_i32: T.Buffer((32, 4), "int32"),
+    output_f16: T.Tensor((2, 32, 4), "float16"),
+    output_i32: T.Tensor((32, 4), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a_f16 = T.alloc_local((8,), "float16")
     b_f16 = T.alloc_local((8,), "float16")
     acc_f16 = T.alloc_local((4,), "float16")
@@ -254,24 +245,16 @@ def additional_sparse_mma_payload_ops(
         output_i32[lane, index] = acc_i32[index]
 
 
-@T.prim_func
+@T.function
 def tcgen05_st_split_roundtrip(
-    source: T.Buffer((4, 32, 2), "uint32"),
-    output: T.Buffer((128, 16), "uint32"),
+    source: T.Tensor((4, 32, 2), "uint32"),
+    output: T.Tensor((128, 16), "uint32"),
 ):
-    T.device_entry()
-    _cta = T.cta_id([1])
-    _warpgroup = T.warpgroup_id([1])
-    warp = T.warp_id_in_wg([4])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_in_warpgroup()
+    lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.decl_buffer(
-        (128, 16),
-        "uint32",
-        scope="tmem",
-        layout=_TMEM_D_16,
-        allocated_addr=0,
-    )
+    tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     registers = T.alloc_local((2,), "uint32")
     for column in T.unroll(16):
         tmem[physical_row, column] = T.uint32(0)
@@ -326,7 +309,6 @@ _KERNELS = (
     sparse_float8_m16n8k64_zero,
     sparse_s8_u8_m16n8k64,
     additional_sparse_mma_payload_ops,
-    tcgen_commit_runtime_multicast,
     raw_tcgen_ld_missing_shape_mappings,
     raw_tcgen_mma_tf32_ts_predicated,
     tcgen05_st_split_roundtrip,

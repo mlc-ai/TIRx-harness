@@ -3,34 +3,32 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_spdecompress_b8_b4_2_4_x2(
-    metadata: T.Buffer((32,), "uint32"),
-    compressed: T.Buffer((32,), "uint32"),
-    output: T.Buffer((2, 32), "uint32"),
+    metadata: T.Tensor((32,), "uint32"),
+    compressed: T.Tensor((32,), "uint32"),
+    output: T.Tensor((2, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["spdecompress.b8.b4.sp::2:4.x2"](
         output[0, lane], output[1, lane], metadata[lane], compressed[lane]
     )
 
 
-@T.prim_func
+@T.function
 def ptx_spdecompress_invalid_index(
-    metadata: T.Buffer((32,), "uint32"),
-    compressed: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint32"),
+    metadata: T.Tensor((32,), "uint32"),
+    compressed: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["spdecompress.b8.b4.sp::1:2.x2"](output[lane], metadata[lane], compressed[lane])
 
 
@@ -107,17 +105,16 @@ def _maximum_output_form():
     outputs = ", ".join(f"output[{index}, lane]" for index in range(128))
     metadata = ", ".join(f"metadata[{index}, lane]" for index in range(4))
     compressed = ", ".join(f"compressed[{index}, lane]" for index in range(16))
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
+@T.function
 def kernel(
-    metadata: T.Buffer((4, 32), "uint32"),
-    compressed: T.Buffer((16, 32), "uint32"),
-    output: T.Buffer((128, 32), "uint32"),
+    metadata: T.Tensor((4, 32), "uint32"),
+    compressed: T.Tensor((16, 32), "uint32"),
+    output: T.Tensor((128, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["spdecompress.b16.b4.sp::2:16.x16"]({outputs}, {metadata}, {compressed})
 """,
         {"T": T},

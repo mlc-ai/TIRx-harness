@@ -1,7 +1,7 @@
 """Handwritten correctness cases assigned to registered operations.
 
 This table is test evidence, not a second support policy. Production registries
-define accepted calls and tile ops; these entries only point at tests that
+define accepted calls; these entries only point at tests that
 exercise their observable numerical or state semantics.
 """
 
@@ -17,6 +17,27 @@ class RuntimeCase:
 
 
 RUNTIME_CASES = (
+    RuntimeCase(
+        target_ids=(
+            "call:tirx.cuda.block_dim",
+            "call:tirx.cuda.block_idx",
+            "call:tirx.cuda.cluster_cta_id",
+            "call:tirx.cuda.cluster_dim",
+            "call:tirx.cuda.cluster_id",
+            "call:tirx.cuda.cta_pair_id",
+            "call:tirx.cuda.grid_dim",
+            "call:tirx.cuda.lane_id",
+            "call:tirx.cuda.linear_thread_id",
+            "call:tirx.cuda.thread_idx",
+            "call:tirx.cuda.thread_in_warpgroup",
+            "call:tirx.cuda.warp_id",
+            "call:tirx.cuda.warp_in_warpgroup",
+            "call:tirx.cuda.warpgroup_id",
+        ),
+        tests=(
+            "runtime/test_launch_indices.py::test_launch_indices_follow_the_device_entry_launch",
+        ),
+    ),
     RuntimeCase(
         target_ids=("call:tirx.cuda.func_call",),
         tests=(
@@ -358,13 +379,6 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=("call:tirx.cuda.ldg",),
-        tests=(
-            "runtime/test_cuda_generic_scalar_forms.py::test_cuda_ldg_supports_cuda_scalar_overloads",
-            "runtime/test_cuda_ldg_overloads.py::test_cuda_ldg_packed_vectors_preserve_physical_bits",
-        ),
-    ),
-    RuntimeCase(
         target_ids=(
             "call:tirx.ptx.add",
             "call:tirx.ptx.fma",
@@ -630,7 +644,7 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=("call:tirx.tvm_storage_sync",),
+        target_ids=("call:tirx.gpu_storage_sync",),
         tests=(
             "runtime/test_sync_runtime_domain_oracle.py::test_tvm_storage_sync_roundtrip_preserves_shared_values",
         ),
@@ -830,98 +844,6 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=("tile:tirx.tile.add", "tile:tirx.tile.mul", "tile:tirx.tile.sub"),
-        tests=(
-            "runtime/test_tile_general_semantics.py::test_integer_add_sub_mul_use_wrapping_arithmetic",
-            "runtime/test_tile_codegen.py::test_contiguous_f32_uses_canonical_rn_without_ftz",
-            "runtime/test_tile_general_semantics.py::test_float64_elementwise_forms_use_native_double_semantics",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.fdiv", "tile:tirx.tile.fma"),
-        tests=(
-            "runtime/test_tile_general_semantics.py::test_fdiv_rounding_config_matches_current_cuda_scalar_fallback",
-            "runtime/test_tile_codegen.py::test_contiguous_f32_uses_canonical_rn_without_ftz",
-            "runtime/test_tile_general_semantics.py::test_float64_elementwise_forms_use_native_double_semantics",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.maximum",),
-        tests=(
-            "runtime/test_tile_general_semantics.py::test_elementwise_maximum_matches_pairwise_values",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=(
-            "tile:tirx.tile.exp",
-            "tile:tirx.tile.exp2",
-            "tile:tirx.tile.log2",
-            "tile:tirx.tile.reciprocal",
-            "tile:tirx.tile.silu",
-            "tile:tirx.tile.sqrt",
-        ),
-        tests=(
-            "runtime/test_tile_unary_codegen.py::test_unary_tile_ops_run_through_local_reg_lowering",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.fill", "tile:tirx.tile.zero"),
-        tests=(
-            "runtime/test_tile_unary_codegen.py::test_unary_tile_ops_run_through_local_reg_lowering",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.cast",),
-        tests=(
-            "runtime/test_tile_general_semantics.py::test_cast_uses_general_scalar_conversion_without_dispatch_semantics",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy",),
-        tests=(
-            "integration/test_block_scaled_gemm_artifact.py::test_fp8_scale_permute_and_sf_reuse_tmem_roundtrip",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.permute_layout",),
-        tests=(
-            "integration/test_permute_layout_artifact.py::test_shared_permute_layout_copies_logical_values_between_physical_layouts",
-            "integration/test_permute_layout_artifact.py::test_shared_permute_layout_zero_fills_fp8_padding",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.max", "tile:tirx.tile.min", "tile:tirx.tile.sum"),
-        tests=(
-            "runtime/test_tile_codegen.py::test_sum_max_min_and_accum_reduce_each_lane_local_tile",
-            "runtime/test_tile_reduction_variants.py::test_local_float64_reductions_match_b200_edge_bits",
-            "runtime/test_tile_reduction_variants.py::test_local_integer_reductions_wrap_and_preserve_order",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy_async",),
-        tests=(
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_cp_expands_tlane_replicas",
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_cp_bitcasts_uint8_scale_payload_into_float8_tmem",
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_cp_cta_group2_supports_float16_payloads",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.gemm_async",),
-        tests=(
-            "integration/test_gemm_async_artifact.py::test_dense_gemm_async_gathers_physical_operands_and_accumulates_tmem",
-            "integration/test_block_scaled_gemm_artifact.py::test_nvfp4_block_scaled_gemm_decodes_nibbles_and_e4m3_scales",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy_async",),
-        tests=(
-            "runtime/test_tile_codegen.py::test_tma_gmem_smem_roundtrip_delivers_physical_bytes_before_wait",
-            "runtime/test_tile_codegen.py::test_tma_global_boundary_uses_zero_fill_and_counts_full_delivery",
-            "runtime/test_tile_codegen.py::test_tma_global_boundary_uses_hardware_oob_nan_pattern",
-            "runtime/test_tile_codegen.py::test_typed_tma_reduce_reuses_raw_tensor_map_reduction_abi",
-        ),
-    ),
-    RuntimeCase(
         target_ids=(
             "call:tirx.ptx.cp_async_bulk_commit_group",
             "call:tirx.ptx.cp_async_bulk_wait_group",
@@ -930,7 +852,6 @@ RUNTIME_CASES = (
         ),
         tests=(
             "integration/test_direct_memory_artifact.py::test_raw_cp_async_issues_nonbulk_group_for_zero_fill_lanes",
-            "runtime/test_tile_codegen.py::test_dsmem_copy_writes_the_named_remote_cta",
         ),
     ),
     RuntimeCase(
@@ -999,7 +920,9 @@ RUNTIME_CASES = (
     ),
     RuntimeCase(
         target_ids=("call:tirx.ptx.tcgen05_commit_multicast_width",),
-        tests=("runtime/test_multicast16.py::test_tcgen_multicast16_preserves_commit_targets",),
+        tests=(
+            "runtime/test_copy_multicast32.py::test_multicast_high_bit_targets_and_bounds[commit]",
+        ),
     ),
     RuntimeCase(
         target_ids=("call:tirx.ptx.mbarrier_pending_count",),
@@ -1035,14 +958,6 @@ RUNTIME_CASES = (
         tests=(
             "runtime/test_sync_runtime_domain_oracle.py::test_ordering_and_cp_async_mbarrier_modifier_forms_preserve_values",
         ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy_async",),
-        tests=("runtime/test_tile_codegen.py::test_ldgsts_copy_keeps_cooperative_warp_lowering",),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy_async",),
-        tests=("runtime/test_tile_codegen.py::test_dsmem_copy_writes_the_named_remote_cta",),
     ),
     RuntimeCase(
         target_ids=(
@@ -1164,7 +1079,6 @@ RUNTIME_CASES = (
             "integration/test_artifact_build.py::test_physical_mbarrier_reuses_phase_and_completes_numeric_transactions_directly",
             "runtime/test_mbarrier_lane_semantics.py::test_current_mbarrier_arrival_and_completion_forms_advance_protocol",
             "runtime/test_mbarrier_lane_semantics.py::test_mbarrier_init_honors_elected_lane_predicate",
-            "runtime/test_tile_codegen.py::test_dsmem_copy_writes_the_named_remote_cta",
         ),
     ),
     RuntimeCase(
@@ -1198,21 +1112,15 @@ RUNTIME_CASES = (
             "call:tirx.cuda.__activemask",
             "call:tirx.cuda.clock64",
             "call:tirx.cuda.thread_rank",
-            "call:tirx.timer_end_cuda",
-            "call:tirx.timer_finalize_cuda",
-            "call:tirx.timer_init_cuda",
-            "call:tirx.timer_start_cuda",
-            "call:tirx.tvm_warp_activemask",
+            "call:tirx.cuda.timer_end",
+            "call:tirx.cuda.timer_finalize",
+            "call:tirx.cuda.timer_init",
+            "call:tirx.cuda.timer_start",
+            "call:tirx.gpu_warp_activemask",
         ),
         tests=(
             "runtime/test_scalar_control.py::test_scalar_and_warp_intrinsics_execute_with_native_semantics",
             "runtime/test_scalar_control.py::test_timer_finalize_is_a_numerical_noop",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.gemm",),
-        tests=(
-            "integration/test_warp_gemm_artifact.py::test_warp_gemm_gathers_and_scatters_register_fragments_by_layout",
         ),
     ),
     RuntimeCase(
@@ -1286,10 +1194,8 @@ RUNTIME_CASES = (
     ),
     RuntimeCase(
         target_ids=(
-            "call:tirx.mma_fill",
-            "call:tirx.mma_fill_legacy",
-            "call:tirx.mma_store",
-            "call:tirx.mma_store_legacy",
+            "call:tirx.cuda.mma_fill",
+            "call:tirx.cuda.mma_store",
         ),
         tests=(
             "runtime/test_matrix_instruction_codegen.py::test_mma_fragment_fill_and_store_observe_lane_register_layout",
@@ -1351,12 +1257,6 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=("call:tirx.tvm_access_ptr",),
-        tests=(
-            "integration/test_direct_memory_artifact.py::test_decl_buffer_views_preserve_permitted_accesses",
-        ),
-    ),
-    RuntimeCase(
         target_ids=("call:tirx.address_of", "call:tirx.cuda.smem_addr_from_uint64"),
         tests=(
             "integration/test_artifact_build.py::test_address_of_lowers_to_integer_bits_before_program_use",
@@ -1384,33 +1284,30 @@ RUNTIME_CASES = (
         target_ids=(
             "call:tirx.cuda.cvta_generic_to_shared",
             "call:tirx.ptr_byte_offset",
-            "call:tirx.s_tir.ldg32",
-            "call:tirx.type_annotation",
         ),
         tests=(
             "integration/test_raw_memory_artifact.py::test_pointer_derived_shared_views_raw_memory_and_cvta_preserve_aliasing",
             "integration/test_raw_memory_artifact.py::test_raw_global_load_store_modifiers_share_immediate_physical_memory",
             "integration/test_raw_memory_artifact.py::test_ordered_v2_destination_loads_keep_their_memory_semantics",
-            "runtime/test_memory_ops.py::test_legacy_acquire_and_guarded_ldg32_write_local_lvalues",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("call:tirx.break_loop", "call:tirx.continue_loop"),
-        tests=(
-            "integration/test_artifact_build.py::test_divergent_break_and_continue_use_loop_masks",
+            "runtime/test_memory_ops.py::test_legacy_acquire_writes_local_lvalues",
         ),
     ),
     RuntimeCase(
         target_ids=(
             "call:tirx.cuda.ffs_u32",
-            "call:tirx.popcount",
+            "call:prim.popcount",
         ),
         tests=(
             "integration/test_artifact_build.py::test_typed_raw_scalar_calls_execute_with_warp_semantics",
         ),
     ),
     RuntimeCase(
-        target_ids=("call:tirx.exp", "call:tirx.fma", "call:tirx.log", "call:tirx.rsqrt"),
+        target_ids=(
+            "call:prim.exp",
+            "call:prim.fma",
+            "call:prim.log",
+            "call:prim.rsqrt",
+        ),
         tests=(
             "integration/test_artifact_build.py::test_typed_raw_scalar_calls_execute_with_warp_semantics",
         ),
@@ -1442,7 +1339,11 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
-        target_ids=("call:tirx.fabs", "call:tirx.log1p", "call:tirx.sigmoid"),
+        target_ids=(
+            "call:prim.fabs",
+            "call:prim.log1p",
+            "call:prim.sigmoid",
+        ),
         tests=("runtime/test_gate_intrinsics.py::test_gate_intrinsics_match_float32_semantics",),
     ),
     RuntimeCase(
@@ -1559,24 +1460,16 @@ RUNTIME_CASES = (
     RuntimeCase(
         target_ids=(
             "call:tirx.cuda.elect_sync",
-            "call:tirx.tvm_warp_shuffle",
-            "call:tirx.tvm_warp_shuffle_up",
-            "call:tirx.tvm_warp_shuffle_down",
-            "call:tirx.tvm_warp_shuffle_xor",
+            "call:tirx.gpu_warp_shuffle",
+            "call:tirx.gpu_warp_shuffle_up",
+            "call:tirx.gpu_warp_shuffle_down",
+            "call:tirx.gpu_warp_shuffle_xor",
         ),
         tests=(
             "integration/test_artifact_build.py::test_typed_raw_scalar_calls_execute_with_warp_semantics",
             "integration/test_artifact_build.py::test_warp_local_raw_calls_execute_inside_one_warp_unit",
             "integration/test_warp_ops_artifact.py::test_warp_intrinsics_use_typed_engine_calls",
             "runtime/test_dynamic_pure_call_runtime_domains.py::test_complete_tvm_shuffle_payload_domain_executes",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("tile:tirx.tile.copy_async",),
-        tests=(
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_tmem_to_wg_local_uses_layout_owners",
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_wg_local_to_tmem_uses_one_physical_writer",
-            "integration/test_tcgen_transfer_artifact.py::test_tcgen_16xb_roundtrip_preserves_16bit_register_halves",
         ),
     ),
     RuntimeCase(
@@ -1678,15 +1571,8 @@ RUNTIME_CASES = (
         ),
         tests=(
             "runtime/test_tcgen_codegen.py::test_tcgen_commit_arrives_on_physical_mbarrier",
-            "runtime/test_tcgen_codegen.py::test_tcgen_commit_runtime_mask_multicasts_same_barrier_offset",
             "runtime/test_tcgen_codegen.py::test_tcgen_fence_forms_are_numerical_noops",
             "runtime/test_raw_tcgen_codegen.py::test_raw_tcgen_32x32b_ld_st_roundtrip",
-        ),
-    ),
-    RuntimeCase(
-        target_ids=("call:tirx.cuda.sm100_2sm_leader_smem_addr",),
-        tests=(
-            "runtime/test_scalar_control.py::test_scalar_and_warp_intrinsics_execute_with_native_semantics",
         ),
     ),
     RuntimeCase(

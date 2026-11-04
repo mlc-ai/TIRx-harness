@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _REGISTER_BUFFER_COUNT = 5_600
 
 
 def _many_register_buffer_kernel(count: int):
     lines = [
-        "@T.prim_func",
-        'def main(output: T.Buffer((1,), "int32")):',
-        "    T.device_entry()",
-        "    _warp = T.warp_id([1])",
-        "    lane = T.lane_id([32])",
+        "@T.function",
+        'def main(output: T.Tensor((1,), "int32")):',
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+        "    lane = T.cuda.lane_id()",
     ]
     lines.extend(f'    value_{index} = T.alloc_local((1,), "int32")' for index in range(count))
     # Unused register declarations remain part of the physical memory plan.
@@ -27,7 +26,7 @@ def _many_register_buffer_kernel(count: int):
             "        output[0] = value_0[0]",
         )
     )
-    return tvm.script.from_source("\n".join(lines), {"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), {"T": T})
 
 
 def test_large_register_buffer_table_is_heap_backed_and_executes(tmp_path):

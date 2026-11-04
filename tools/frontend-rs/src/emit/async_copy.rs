@@ -8,7 +8,7 @@ use crate::emit::atomic_bulk::ptx_atomic_signature;
 use crate::emit::register_call::require_register_call;
 use crate::emit::{abi, Emitter, RustValue};
 use crate::tables::is_integer_dtype;
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// The engine functions (below `v2::`) the lowerings call.
 pub const CP_ASYNC_COMMIT_GROUP: &str = "async_copy::cp_async_commit_group";

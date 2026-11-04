@@ -17,14 +17,13 @@ from __future__ import annotations
 import pytest
 
 from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_split_site_full_cta_bar_sync():
-    T.device_entry()
-    _bx = T.cta_id([1])
-    tx = T.thread_id([1024])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=1024))
+    tx = T.cuda.linear_thread_id()
 
     if tx < 512:
         T.ptx.bar.sync(3, 1024)
@@ -32,11 +31,10 @@ def native_split_site_full_cta_bar_sync():
         T.ptx.bar.sync(3, 1024)
 
 
-@T.prim_func
+@T.function
 def native_split_site_sub_cta_bar_sync():
-    T.device_entry()
-    warp = T.warp_id([3])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.bar.sync(3, 64)
@@ -44,10 +42,10 @@ def native_split_site_sub_cta_bar_sync():
         T.ptx.bar.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_same_warp_split_static_sites():
-    T.device_entry()
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     if lane < 16:
         T.ptx.bar.sync(3, 32)
@@ -55,11 +53,10 @@ def native_same_warp_split_static_sites():
         T.ptx.bar.sync(3, 32)
 
 
-@T.prim_func
+@T.function
 def native_split_site_full_cta_arrive_plus_sync():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.bar.arrive(3, 64)
@@ -67,11 +64,10 @@ def native_split_site_full_cta_arrive_plus_sync():
         T.ptx.bar.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_split_site_full_cta_unaligned_sync():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.barrier.sync(3, 64)
@@ -79,11 +75,10 @@ def native_split_site_full_cta_unaligned_sync():
         T.ptx.barrier.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_unaligned_plus_one_aligned_sync_site():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.barrier.sync(3, 64)
@@ -91,11 +86,10 @@ def native_unaligned_plus_one_aligned_sync_site():
         T.ptx.bar.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_aligned_plus_one_unaligned_sync_site():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.bar.sync(3, 64)
@@ -103,32 +97,27 @@ def native_aligned_plus_one_unaligned_sync_site():
         T.ptx.barrier.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_uniform_loop_full_cta_bar_sync():
-    T.device_entry()
-    _warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
 
     # Keep one backend instruction so this tests dynamic reuse, not unrolling.
     for _iteration in T.serial(2, unroll=False):
         T.ptx.bar.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_sequential_full_cta_bar_sync_sites():
-    T.device_entry()
-    _warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
 
     T.ptx.bar.sync(3, 64)
     T.ptx.bar.sync(3, 64)
 
 
-@T.prim_func
+@T.function
 def native_same_site_bar_sync_with_skewed_loop_iterations():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     # Complete generation zero with arrive+sync, then use an unaligned barrier
     # to offset the warps by one iteration at the same static bar.sync below.
@@ -144,11 +133,10 @@ def native_same_site_bar_sync_with_skewed_loop_iterations():
             T.ptx.barrier.sync(4, 64)
 
 
-@T.prim_func
+@T.function
 def native_arrive_plus_two_split_sync_sites():
-    T.device_entry()
-    warp = T.warp_id([3])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
 
     if warp == 0:
         T.ptx.bar.arrive(3, 96)
@@ -158,11 +146,10 @@ def native_arrive_plus_two_split_sync_sites():
         T.ptx.bar.sync(3, 96)
 
 
-@T.prim_func
+@T.function
 def native_split_site_cta_sync_wrapper_and_handwritten_bar_zero():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
 
     # ``T.cuda.cta_sync()`` lowers to the same aligned ``bar.sync(0, 64)``
     # instruction as the handwritten call, so one full-CTA generation on
@@ -173,7 +160,7 @@ def native_split_site_cta_sync_wrapper_and_handwritten_bar_zero():
         T.ptx.bar.sync(0, 64)
 
 
-@T.prim_func
+@T.function
 def native_repeated_warpgroup_sync_generations():
     # The engine-internal warpgroup rendezvous (`plan_internal_warpgroup_sync`
     # behind the kernel engine's "warpgroup" rendezvous scope) is not reachable
@@ -183,10 +170,8 @@ def native_repeated_warpgroup_sync_generations():
     # shape: each warpgroup repeatedly executes its own aligned warpgroup sync,
     # so per-barrier generations must advance independently without crosstalk
     # between the two groups.
-    T.device_entry()
-    wg = T.warpgroup_id([2])
-    _warp = T.warp_id_in_wg([4])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=256))
+    wg = T.cuda.warpgroup_id()
 
     # Keep one backend instruction per site so this tests dynamic generation
     # reuse, not unrolling.
@@ -197,16 +182,13 @@ def native_repeated_warpgroup_sync_generations():
             T.cuda.warpgroup_sync(7)
 
 
-@T.prim_func
+@T.function
 def native_setmaxnreg_between_warpgroup_syncs():
     # Two ``setmaxnreg`` in one warpgroup are legal only when a warpgroup sync
     # separates them. The engine now credits that sync from any aligned
     # ``bar.sync`` whose contract covers exactly the four warps of the group,
     # so this pins the alignment+contract keyed accounting end-to-end.
-    T.device_entry()
-    _wg = T.warpgroup_id([1])
-    _warp = T.warp_id_in_wg([4])
-    _lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
 
     T.ptx.setmaxnreg.dec.sync.aligned.u32(88)
     T.cuda.warpgroup_sync(7)

@@ -12,15 +12,15 @@ import numpy as np
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def barrier_ordered_sub_word_store_and_load(output: T.Buffer((64,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    bytes8 = T.alloc_buffer((64,), "uint8", scope="shared")
+@T.function
+def barrier_ordered_sub_word_store_and_load(output: T.Tensor((64,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    bytes8 = T.alloc_shared((64,), "uint8")
     loaded = T.local_scalar("uint8")
     if warp == 0:
         T.ptx.st.shared.b8(bytes8.ptr_to([lane]), T.cast(lane, "uint8"))
@@ -30,12 +30,12 @@ def barrier_ordered_sub_word_store_and_load(output: T.Buffer((64,), "uint32")):
         output[lane] = T.cast(loaded, "uint32")
 
 
-@T.prim_func
-def unordered_sub_word_store_and_load(output: T.Buffer((64,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    bytes8 = T.alloc_buffer((64,), "uint8", scope="shared")
+@T.function
+def unordered_sub_word_store_and_load(output: T.Tensor((64,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    bytes8 = T.alloc_shared((64,), "uint8")
     loaded = T.local_scalar("uint8")
     if warp == 0:
         T.ptx.st.shared.b8(bytes8.ptr_to([lane]), T.cast(lane, "uint8"))

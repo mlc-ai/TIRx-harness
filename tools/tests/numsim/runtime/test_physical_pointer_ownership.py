@@ -16,8 +16,8 @@ import numpy as np
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler import suspend_scaffold
-from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
-from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.lang.clc import query_cancel_first_ctaid_x
+from tvm_tirx.script import tirx as T
 
 _PREFETCH_L2_SOURCE = r"""
 __forceinline__ __device__ void tirx_prefetch_l2(const void* p) {
@@ -47,12 +47,11 @@ __forceinline__ __device__ void tvm_builtin_st_async_cluster_task_info(
 """
 
 
-@T.prim_func
-def reused_raw_ldmatrix_pointer(output: T.Buffer((32, 2), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
+@T.function
+def reused_raw_ldmatrix_pointer(output: T.Tensor((32, 2), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
     first = T.alloc_local((4,), "uint32")
     second = T.alloc_local((4,), "uint32")
     for byte in T.unroll(16):
@@ -78,13 +77,12 @@ def reused_raw_ldmatrix_pointer(output: T.Buffer((32, 2), "uint32")):
     output[lane, 1] = second[0]
 
 
-@T.prim_func
+@T.function
 def reused_stmatrix_pointer():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8, 8), "uint16", scope="shared")
-    source = T.alloc_buffer((1,), "uint32", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8, 8), "uint16")
+    source = T.alloc_local((1,), "uint32")
     source[0] = T.cast(lane, "uint32")
     destination_pointer = shared.ptr_to([lane % 8, 0])
 
@@ -98,11 +96,10 @@ def reused_stmatrix_pointer():
     )
 
 
-@T.prim_func
-def reused_runtime_descriptor_pointer(descriptor: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def reused_runtime_descriptor_pointer(descriptor: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     descriptor_pointer = descriptor.ptr_to([lane])
 
     T.cuda.runtime_instr_desc(descriptor_pointer, lane % 4)
@@ -110,16 +107,15 @@ def reused_runtime_descriptor_pointer(descriptor: T.Buffer((32,), "uint32")):
     T.cuda.runtime_instr_desc(descriptor_pointer, lane % 4)
 
 
-@T.prim_func
+@T.function
 def reused_legacy_mma_pointer_bindings(
-    a_words: T.Buffer((32, 4), "uint32"),
-    b_words: T.Buffer((32, 2), "uint32"),
-    c_values: T.Buffer((32, 4), "float32"),
-    output: T.Buffer((32, 4), "uint32"),
+    a_words: T.Tensor((32, 4), "uint32"),
+    b_words: T.Tensor((32, 2), "uint32"),
+    c_values: T.Tensor((32, 4), "float32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((2,), "uint32")
     c = T.alloc_local((4,), "float32")
@@ -153,7 +149,6 @@ def reused_legacy_mma_pointer_bindings(
         accumulator_pointer,
         0,
         False,
-        dtype="float32",
     )
     d[0] = c[0]
     d[1] = c[0]
@@ -173,17 +168,15 @@ def reused_legacy_mma_pointer_bindings(
         accumulator_pointer,
         0,
         False,
-        dtype="float32",
     )
     for register in T.unroll(4):
-        output[lane, register] = T.reinterpret("uint32", d[register])
+        output[lane, register] = T.reinterpret(d[register], ty="uint32")
 
 
-@T.prim_func
-def reused_mma_store_pointers(output: T.Buffer((16, 16), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def reused_mma_store_pointers(output: T.Tensor((16, 16), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     fragment = T.alloc_local((8,), "float32")
 
     for local_id in T.serial(8):
@@ -191,21 +184,16 @@ def reused_mma_store_pointers(output: T.Buffer((16, 16), "float32")):
 
     destination_pointer = output.ptr_to([0, 0])
     source_pointer = fragment.ptr_to([0])
-    T.evaluate(
-        T.cuda.mma_store(16, 16, destination_pointer, source_pointer, 0, 16, dtype="float32")
-    )
-    T.evaluate(
-        T.cuda.mma_store(16, 16, destination_pointer, source_pointer, 0, 16, dtype="float32")
-    )
+    T.evaluate(T.cuda.mma_store(16, 16, destination_pointer, source_pointer, 0, 16, ty="float32"))
+    T.evaluate(T.cuda.mma_store(16, 16, destination_pointer, source_pointer, 0, 16, ty="float32"))
 
 
-@T.prim_func
-def reused_tcgen05_pointers(output: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def reused_tcgen05_pointers(output: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
     address_pointer = address.ptr_to([0])
     barrier_pointer = barrier.ptr_to([0])
 
@@ -225,13 +213,13 @@ def reused_tcgen05_pointers(output: T.Buffer((2,), "uint32")):
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def reused_blocking_mbarrier_wait_pointer(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared", align=8)
-    payload = T.alloc_buffer((32,), "uint32", scope="shared")
+@T.function
+def reused_blocking_mbarrier_wait_pointer(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64", align=8)
+    payload = T.alloc_shared((32,), "uint32")
     produced_pointer = barriers.ptr_to([0])
     consumed_pointer = barriers.ptr_to([1])
 
@@ -256,15 +244,12 @@ def reused_blocking_mbarrier_wait_pointer(output: T.Buffer((32,), "uint32")):
         output[lane] = payload[lane]
 
 
-@T.prim_func
-def reused_scalar_wait_pointers(output: T.Buffer((32, 4), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    response = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
+@T.function
+def reused_scalar_wait_pointers(output: T.Tensor((32, 4), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
+    response = T.alloc_shared((4,), "uint32", align=16)
     first_cancel = T.local_scalar("uint32")
     second_cancel = T.local_scalar("uint32")
     barrier_pointer = barrier.ptr_to([0])
@@ -290,12 +275,11 @@ def reused_scalar_wait_pointers(output: T.Buffer((32, 4), "uint32")):
         output[0, 3] = second_cancel
 
 
-@T.prim_func
+@T.function
 def reused_pointer_across_generic_consumers():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
 
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 2)
@@ -305,11 +289,7 @@ def reused_pointer_across_generic_consumers():
     if lane == 0:
         pointer = barrier.ptr_to([0])
         selected: T.let[T.handle] = T.call_intrin(
-            "handle",
-            "prim.if_then_else",
-            T.bool(True),
-            pointer,
-            pointer,
+            "prim.if_then_else", T.bool(True), pointer, pointer, ty="handle"
         )
         alias: T.let[T.handle] = selected
         T.cuda.printf("mbar=%p", pointer)
@@ -319,39 +299,21 @@ def reused_pointer_across_generic_consumers():
         T.cuda.mbarrier_wait(pointer, 0)
 
 
-@T.prim_func
-def reused_prefetch_l2_pointer(source: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def reused_prefetch_l2_pointer(source: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     pointer = source.ptr_to([lane])
 
-    T.evaluate(
-        T.cuda.func_call(
-            "tirx_prefetch_l2",
-            pointer,
-            source_code=_PREFETCH_L2_SOURCE,
-            return_type="void",
-        )
-    )
-    T.evaluate(
-        T.cuda.func_call(
-            "tirx_prefetch_l2",
-            pointer,
-            source_code=_PREFETCH_L2_SOURCE,
-            return_type="void",
-        )
-    )
+    T.evaluate(T.cuda.func_call("tirx_prefetch_l2", pointer, _PREFETCH_L2_SOURCE))
+    T.evaluate(T.cuda.func_call("tirx_prefetch_l2", pointer, _PREFETCH_L2_SOURCE))
 
 
-@T.prim_func
+@T.function
 def reused_mapa_source_pointer():
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "uint32")
     first = T.alloc_local((1,), "uint64")
     second = T.alloc_local((1,), "uint64")
     source_pointer = shared.ptr_to([0])
@@ -361,15 +323,12 @@ def reused_mapa_source_pointer():
         T.ptx.mapa.u64(second[0], source_pointer, T.uint32(0))
 
 
-@T.prim_func
+@T.function
 def reused_st_async_cluster_task_info_pointers():
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    destination = T.alloc_buffer((8,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    destination = T.alloc_shared((8,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64", align=8)
     destination_pointer = destination.ptr_to([0])
     barrier_pointer = barrier.ptr_to([0])
 
@@ -389,18 +348,16 @@ def reused_st_async_cluster_task_info_pointers():
                     T.uint32(6),
                     T.uint32(7),
                     T.uint32(8),
-                    source_code=_ST_ASYNC_CLUSTER_TASK_INFO_SOURCE,
-                    return_type="void",
+                    _ST_ASYNC_CLUSTER_TASK_INFO_SOURCE,
                 )
             )
 
 
-@T.prim_func
-def one_shot_temporary_pointer_operand(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
+@T.function
+def one_shot_temporary_pointer_operand(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
     shared[lane] = T.cast(lane * 3 + 1, "uint32")
     T.ptx.ld.shared.u32(output[lane], shared.ptr_to([lane]))
 

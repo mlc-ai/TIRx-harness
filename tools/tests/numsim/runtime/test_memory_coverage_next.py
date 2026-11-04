@@ -3,17 +3,16 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def uniform_loads(source: T.Buffer((32,), "uint32"), out: T.Buffer((32, 7), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def uniform_loads(source: T.Tensor((32,), "uint32"), out: T.Tensor((32, 7), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     values = T.alloc_local((7,), "uint32")
     T.ptx.ldu.global_.u32(values[0], source.ptr_to([3]))
     T.ptx.ldu.v2.u32(values[1], values[2], T.ptx.addr(source.ptr_to([0]), 8))
@@ -22,12 +21,11 @@ def uniform_loads(source: T.Buffer((32,), "uint32"), out: T.Buffer((32, 7), "uin
         out[lane, i] = values[i]
 
 
-@T.prim_func
-def no_complete(count: T.uint32, out: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def no_complete(count: T.uint32, out: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     state = T.alloc_local((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     if lane == 0:
@@ -47,17 +45,16 @@ def no_complete(count: T.uint32, out: T.Buffer((2,), "uint32")):
 
 
 def descriptor_update_kernel(elemtype=11, release=True):
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def descriptor_update(source_map: T.TensorMap(), descriptor_storage: T.Buffer((16,), "uint64"),
-                      out: T.Buffer((8, 8), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8, 8), "float32", scope="shared", align=256)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    payload = T.decl_buffer((16,), "uint64", data=T.reinterpret("handle", T.address_of(source_map)), scope="param")
+@T.function
+def descriptor_update(source_map: T.Ptr(T.TensorMap), descriptor_storage: T.Tensor((16,), "uint64"),
+                      out: T.Tensor((8, 8), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8, 8), "float32", align=256)
+    barrier = T.alloc_shared((1,), "uint64")
+    payload = T.decl_tensor(T.reinterpret(T.address_of(source_map), ty="handle"), ty_args=[T.Tensor((16,), "uint64", scope="global")])
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
         for i in T.serial(16):
@@ -168,13 +165,12 @@ def test_no_complete_rejects_exhausted_arrivals(count, tmp_path):
 
 @pytest.mark.parametrize("address", ["source.ptr_to([lane])", "source.ptr_to([1])"])
 def test_ldu_rejects_nonuniform_or_misaligned_vector(address, tmp_path):
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def invalid(source: T.Buffer((64,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def invalid(source: T.Tensor((64,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     out = T.alloc_local((2,), "uint32")
     T.ptx.ldu.global_.v2.u32(out[0], out[1], {address})
 """,

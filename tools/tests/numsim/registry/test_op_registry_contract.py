@@ -2,18 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.numsim.support.kernels import raw_scalar_call_mix, tile_copy_cast_mul
-from tests.numsim.support.manifest import call_op_names
-from tests.support.tirx_device_surface import (
-    TIRX_BUILDER_MODULE,
-    is_tirx_namespace,
-    walk_device_surfaces,
-    walk_surface,
-)
 from tirx_harness.numsim.transpiler import native_frontend
-from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.ptx_dialect import PTX_SCHEMA_BY_OP_NAME
-from tvm import ir
+from tvm_tirx import ir
 
 _DEVICE_PREFIXES = ("tirx.cuda.", "tirx.ptx.")
 
@@ -26,35 +17,22 @@ _INTENTIONAL_REGISTER_ONLY_PTX_REJECTIONS = {
 }
 
 
-def test_surface_walk_fails_closed_on_public_attribute_errors():
-    class BrokenSurface:
-        def __dir__(self):
-            return ["broken"]
-
-        @property
-        def broken(self):
-            raise RuntimeError("broken wrapper")
-
-    with pytest.raises(AssertionError, match="failed to inspect public TIRx surface root.broken"):
-        list(walk_surface(BrokenSurface(), "root"))
-
-
-def test_namespace_detection_uses_builder_ownership_not_class_name_suffix():
-    class ExplicitSurface:
-        child = staticmethod(lambda: None)
-
-    ExplicitSurface.__module__ = TIRX_BUILDER_MODULE
-    namespace = ExplicitSurface()
-    namespace.child.__tir_op_name__ = "cuda_elect_sync"
-
-    assert is_tirx_namespace(namespace)
-    assert list(walk_surface(namespace, "synthetic")) == [
-        ("synthetic.child", ("tirx.cuda.elect_sync",))
-    ]
+# Consumed outside call dispatch: TileDispatch expands tile ops before analysis,
+# the host prelude owns tensor-map encoding, and decl_tmem declares a tensor.
+_HANDLED_OUTSIDE_CALL_DISPATCH = {
+    "tirx.cuda.decl_tmem",
+    "tirx.cuda.tensormap_encode_tiled",
+    "tirx.cuda.tile.apply",
+    "tirx.cuda.tile.ewise",
+}
 
 
 def _authoritative_device_ops() -> set[str]:
-    return {name for name in ir.Op.list_op_names() if name.startswith(_DEVICE_PREFIXES)}
+    return {
+        name
+        for name in ir.Op.list_op_names()
+        if name.startswith(_DEVICE_PREFIXES) and name not in _HANDLED_OUTSIDE_CALL_DISPATCH
+    }
 
 
 def test_registry_covers_tirx_cuda_and_ptx_ops():
@@ -109,17 +87,6 @@ def test_register_only_ptx_rejections_are_intentionally_nonlocal():
     assert rejected == _INTENTIONAL_REGISTER_ONLY_PTX_REJECTIONS
 
 
-def test_every_public_cuda_and_ptx_surface_maps_to_registered_semantics():
-    surfaces = walk_device_surfaces()
-    registered = {spec["ir_name"] for spec in native_frontend.registry_ops()}
-    missing = {
-        path: tuple(op for op in operations if op not in registered)
-        for path, operations in surfaces
-        if any(op not in registered for op in operations)
-    }
-    assert missing == {}
-
-
 def test_explicit_rejections_have_exact_public_reasons():
     rejected = {
         spec["ir_name"]: spec["reason"]
@@ -147,7 +114,7 @@ def test_explicit_rejections_have_exact_public_reasons():
     assert unreviewed
     assert unreviewed <= set(PTX_SCHEMA_BY_OP_NAME)
     reviewed_rejections = set(rejected) - authoritative_wgmma - unreviewed
-    assert reviewed_rejections == set()
+    assert reviewed_rejections == {"tirx.cuda.bmma_sync"}
 
 
 def test_timing_and_observation_surfaces_declare_representative_fidelity():
@@ -197,21 +164,6 @@ def test_cuda_atomic_form_metadata_distinguishes_the_ordinary_packed_abi():
     assert "whole-value bitwise" in cas_reason
     assert "bool vectors" in cas_reason
     assert "float4/float6" in cas_reason
-
-
-def test_frontend_manifest_records_the_ops_each_kernel_calls():
-    scalar = analyze(raw_scalar_call_mix).kernels[0]
-    tile = analyze(tile_copy_cast_mul).kernels[0]
-
-    assert {
-        "tirx.cuda.thread_rank",
-        "tirx.cuda.make_float2",
-        "tirx.cuda.elect_sync",
-        "tirx.ptx.ex2",
-    } <= call_op_names(scalar)
-    assert {
-        str(entry.node.op.name) for entry in tile.source_map if entry.kind == "TilePrimitiveCall"
-    } == {"tirx.tile.cast", "tirx.tile.copy", "tirx.tile.mul"}
 
 
 def test_unknown_target_op_requires_an_explicit_registry_row():

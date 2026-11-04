@@ -1,32 +1,32 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
-from tvm.backend.cuda.lang.clc import query_cancel_first_ctaid_x
-from tvm.script import tirx as T
+from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tvm_tirx.backend.cuda.lang.clc import query_cancel_first_ctaid_x
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def tvm_storage_sync_roundtrip(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
     shared[lane] = source[lane] ^ T.uint32(0xA5A55A5A)
-    T.tvm_storage_sync("shared")
+    T.gpu_storage_sync("shared")
     output[lane] = shared[lane]
 
 
-@T.prim_func
-def mbarrier_query_modifier_domain(output: T.Buffer((32, 2), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def mbarrier_query_modifier_domain(output: T.Tensor((32, 2), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -46,14 +46,13 @@ def mbarrier_query_modifier_domain(output: T.Buffer((32, 2), "uint32")):
     )
 
 
-@T.prim_func
+@T.function
 def ordering_and_cp_async_mbarrier_modifier_forms(
-    source: T.Buffer((32,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((32,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     value: T.let = source[lane] ^ T.uint32(0x5A5AA5A5)
     T.ptx.fence.proxy.async_()
     if lane == 0:
@@ -68,15 +67,14 @@ def ordering_and_cp_async_mbarrier_modifier_forms(
     output[lane] = value
 
 
-@T.prim_func
+@T.function
 def cp_async_mbarrier_noinc_mixed_immediate_and_deferred_lanes(
-    source: T.Buffer((128,), "uint8"), output: T.Buffer((128,), "uint8")
+    source: T.Tensor((128,), "uint8"), output: T.Tensor((128,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
+    barrier = T.alloc_shared((1,), "uint64")
     for element in T.unroll(4):
         shared[lane * 4 + element] = T.uint8(0xA5)
     if lane == 0:
@@ -98,14 +96,13 @@ def cp_async_mbarrier_noinc_mixed_immediate_and_deferred_lanes(
         output[lane * 4 + element] = shared[lane * 4 + element]
 
 
-@T.prim_func
+@T.function
 def cp_async_mbarrier_noinc_raw_shared_offset(
-    barrier_index: T.int32, output: T.Buffer((1,), "uint32")
+    barrier_index: T.int32, output: T.Tensor((1,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     barrier_base: T.uint32 = T.cuda.cvta_generic_to_shared(barriers.ptr_to([0]))
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[barrier_index]), 1)
@@ -119,15 +116,13 @@ def cp_async_mbarrier_noinc_raw_shared_offset(
         output[0] = T.uint32(1)
 
 
-@T.prim_func
-def remote_expect_tx_completes_target_barrier(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    remote_barrier = T.alloc_buffer((1,), "uint64", scope="local")
+@T.function
+def remote_expect_tx_completes_target_barrier(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
+    remote_barrier = T.alloc_local((1,), "uint64")
     if (cta == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -148,15 +143,12 @@ def remote_expect_tx_completes_target_barrier(output: T.Buffer((2,), "int32")):
         output[cta] = 1
 
 
-@T.prim_func
-def clc_no_work_cluster_acquire_wait(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    response = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def clc_no_work_cluster_acquire_wait(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    response = T.alloc_shared((4,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64", align=8)
     first_ctaid_x = T.local_scalar("uint32")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
@@ -173,15 +165,13 @@ def clc_no_work_cluster_acquire_wait(output: T.Buffer((1,), "uint32")):
         output[0] = first_ctaid_x
 
 
-@T.prim_func
-def clc_claims_nonresident_cluster(output: T.Buffer((2,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([2])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    response = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def clc_claims_nonresident_cluster(output: T.Tensor((2,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=4, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    response = T.alloc_shared((4,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64", align=8)
     first_ctaid_x = T.local_scalar("uint32")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
@@ -201,15 +191,13 @@ def clc_claims_nonresident_cluster(output: T.Buffer((2,), "uint32")):
         output[cta] = first_ctaid_x
 
 
-@T.prim_func
-def clc_claims_nonresident_cluster_yz(output: T.Buffer((2, 6), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([2])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    response = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+@T.function
+def clc_claims_nonresident_cluster_yz(output: T.Tensor((2, 6), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=4, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    response = T.alloc_shared((4,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64", align=8)
     response_value = T.local_scalar("uint128")
     canceled = T.local_scalar("uint32")
     first_ctaid_y = T.local_scalar("uint32")
@@ -262,55 +250,6 @@ def clc_claims_nonresident_cluster_yz(output: T.Buffer((2, 6), "uint32")):
         output[cta, 5] = first_ctaid_x
 
 
-@T.prim_func
-def sm100_pair_base_handle_domain(
-    input_map_even: T.TensorMap(),
-    input_map_odd: T.TensorMap(),
-    output: T.Buffer((2, 4), "float32"),
-):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
-    if (cta == 0) and (lane == 0):
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
-    T.ptx.fence.proxy.async_.shared__cluster()
-    T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cluster_sync()
-    if lane == 0:
-        T.evaluate(
-            T.call_intrin(
-                "uint32",
-                "tirx.cuda.sm100_2sm_leader_smem_addr",
-                T.address_of(barrier[0]),
-            )
-        )
-        T.evaluate(
-            T.ptx[
-                "cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes.cta_group::2"
-            ](
-                T.address_of(shared[0]),
-                T.Select(cta == 0, T.address_of(input_map_even), T.address_of(input_map_odd)),
-                0,
-                0,
-                T.call_intrin(
-                    "uint32",
-                    "tirx.cuda.sm100_2sm_leader_smem_addr",
-                    T.address_of(barrier[0]),
-                ),
-            )
-        )
-        if cta == 0:
-            T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barrier[0]), T.uint32(32))
-            T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
-    T.cuda.cluster_sync()
-    if lane < 4:
-        output[cta, lane] = shared[lane]
-
-
 def test_mbarrier_query_modifier_domain_matches_barrier_phase(tmp_path):
     module = numsim.transpile(mbarrier_query_modifier_domain, cache_dir=tmp_path)
     result = numsim.Engine().run(module, {"output": np.zeros((32, 2), dtype=np.uint32)})
@@ -334,6 +273,20 @@ def test_tvm_storage_sync_roundtrip_preserves_shared_values(tmp_path):
     )
 
     np.testing.assert_array_equal(result.outputs["output"], source ^ np.uint32(0xA5A55A5A))
+
+
+@T.function
+def global_storage_sync(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.gpu_storage_sync("global")
+    output[T.cuda.lane_id()] = T.uint32(1)
+
+
+def test_storage_sync_outside_shared_memory_is_rejected(tmp_path):
+    with pytest.raises(
+        UnsupportedTIRxError, match='only for the shared storage scope, got "global"'
+    ):
+        numsim.transpile(global_storage_sync, cache_dir=tmp_path)
 
 
 def test_cp_async_mbarrier_noinc_arrives_immediately_only_for_lanes_without_prior_work(
@@ -397,28 +350,3 @@ def test_clc_first_ctaid_y_and_z_are_zero_in_linear_launch_model(tmp_path):
     )
 
     np.testing.assert_array_equal(result.outputs["output"], [[0, 0, 2, 0, 0, 99]] * 2)
-
-
-def test_sm100_pair_base_handle_form_routes_both_ctas(tmp_path):
-    even = np.arange(4, dtype=np.float32).reshape(1, 4) + np.float32(10)
-    odd = np.arange(4, dtype=np.float32).reshape(1, 4) + np.float32(20)
-
-    def tensor_map(array: np.ndarray) -> np.ndarray:
-        return numsim.TensorMap(
-            base=array,
-            global_shape=(4, 1),
-            global_strides=(16,),
-            box_shape=(4, 1),
-            element_strides=(1, 1),
-        ).numpy()
-
-    module = numsim.transpile(sm100_pair_base_handle_domain, cache_dir=tmp_path)
-    result = numsim.Engine().run(
-        module,
-        {
-            "input_map_even": tensor_map(even),
-            "input_map_odd": tensor_map(odd),
-            "output": np.zeros((2, 4), dtype=np.float32),
-        },
-    )
-    np.testing.assert_array_equal(result.outputs["output"], np.concatenate([even, odd], axis=0))

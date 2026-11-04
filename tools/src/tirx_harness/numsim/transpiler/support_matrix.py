@@ -9,13 +9,6 @@ from pathlib import Path
 from ..abi import NUMSIM_ABI_VERSION
 from . import native_frontend
 
-_TILE_SUPPORT_NOTES = {
-    "tirx.tile.copy_async": (
-        "the engine resolves each TMA shared payload component from concrete runtime addresses "
-        "and requires its start to be 128-byte aligned"
-    ),
-}
-
 
 def _cell(value: object) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
@@ -60,31 +53,15 @@ def render_engine_support_matrix() -> str:
     lines.extend(
         (
             "",
-            "## CUDA Tile Primitives",
+            "## CUDA Tile Operations",
             "",
             (
-                "Every warp-, warpgroup-, or CTA-scoped tile call validates complete dynamic "
-                "participation in its declared execution scope, including register-only "
-                "lowerings with no completion barrier."
+                "`tirx.cuda.tile.apply` and `tirx.cuda.tile.ewise` are expanded by TIRx's "
+                "TileDispatch before analysis; NumSim models the instructions and statements "
+                "it selects."
             ),
-            "",
-            "| Operation | Fidelity | Notes |",
-            "| --- | --- | --- |",
         )
     )
-    for ir_name in native_frontend.registry()["tile_ops"]:
-        lines.append(
-            "| "
-            + " | ".join(
-                _cell(value)
-                for value in (
-                    f"`{ir_name}`",
-                    "modeled",
-                    _TILE_SUPPORT_NOTES.get(ir_name, ""),
-                )
-            )
-            + " |"
-        )
     return "\n".join(lines) + "\n"
 
 

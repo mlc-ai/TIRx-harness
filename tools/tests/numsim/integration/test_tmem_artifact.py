@@ -12,21 +12,18 @@ from tests.numsim.support.kernels import (
     tmem_uninitialized_read,
 )
 from tirx_harness import numsim
-from tvm.script import tirx as T
-from tvm.tirx.layout import S, TCol, TileLayout, TLane
+from tvm_tirx.script import tirx as T
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_DYNAMIC_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ TLane, 1 @ TCol)])
+_DYNAMIC_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
-@T.prim_func
-def dynamic_tmem_live_lease(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    tmem = T.decl_buffer(
-        (128, 64), "uint32", scope="tmem", layout=_DYNAMIC_TMEM_LAYOUT, allocated_addr=address[0]
-    )
+@T.function
+def dynamic_tmem_live_lease(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 64)
     T.cuda.warp_sync()
     tmem[lane, 0] = T.cast(7000 + lane, "uint32")
@@ -35,15 +32,12 @@ def dynamic_tmem_live_lease(output: T.Buffer((32,), "uint32")):
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def dynamic_tmem_use_before_alloc(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    tmem = T.decl_buffer(
-        (128, 64), "uint32", scope="tmem", layout=_DYNAMIC_TMEM_LAYOUT, allocated_addr=address[0]
-    )
+@T.function
+def dynamic_tmem_use_before_alloc(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
     if lane == 0:
         address[0] = T.uint32(0)
     T.cuda.warp_sync()
@@ -51,30 +45,24 @@ def dynamic_tmem_use_before_alloc(output: T.Buffer((32,), "uint32")):
     output[lane] = tmem[lane, 0]
 
 
-@T.prim_func
-def dynamic_tmem_outside_live_lease(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    tmem = T.decl_buffer(
-        (128, 64), "uint32", scope="tmem", layout=_DYNAMIC_TMEM_LAYOUT, allocated_addr=address[0]
-    )
+@T.function
+def dynamic_tmem_outside_live_lease(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.cuda.warp_sync()
     tmem[lane, 32] = T.cast(lane, "uint32")
     output[lane] = T.uint32(1)
 
 
-@T.prim_func
-def dynamic_tmem_use_after_dealloc(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
-    tmem = T.decl_buffer(
-        (128, 64), "uint32", scope="tmem", layout=_DYNAMIC_TMEM_LAYOUT, allocated_addr=address[0]
-    )
+@T.function
+def dynamic_tmem_use_after_dealloc(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.cuda.warp_sync()
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
@@ -83,12 +71,11 @@ def dynamic_tmem_use_after_dealloc(output: T.Buffer((32,), "uint32")):
     output[lane] = T.uint32(1)
 
 
-@T.prim_func
-def dynamic_tmem_multiple_allocations(output: T.Buffer((3,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    addresses = T.alloc_buffer((3,), "uint32", scope="shared")
+@T.function
+def dynamic_tmem_multiple_allocations(output: T.Tensor((3,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    addresses = T.alloc_shared((3,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(addresses[0]), 128)
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(addresses[1]), 64)
     if lane == 0:
@@ -103,12 +90,11 @@ def dynamic_tmem_multiple_allocations(output: T.Buffer((3,), "uint32")):
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
-@T.prim_func
-def dynamic_tmem_leak(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def dynamic_tmem_leak(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     if lane == 0:
         output[0] = address[0]

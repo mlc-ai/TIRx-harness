@@ -6,7 +6,7 @@ import pytest
 from tests.numsim.support.manifest import call_op_names
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck, _run_synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 CACHE_HINT_OPS = frozenset(
     (
@@ -21,15 +21,14 @@ CACHE_HINT_OPS = frozenset(
 )
 
 
-@T.prim_func
+@T.function
 def raw_cache_hint_family(
-    source: T.Buffer((256,), "uint8"),
-    input_map: T.TensorMap(),
-    output: T.Buffer((32,), "uint8"),
+    source: T.Tensor((256,), "uint8"),
+    input_map: T.Ptr(T.TensorMap),
+    output: T.Tensor((32,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     issue = lane < 16
 
     T.ptx["prefetch.L1::32B.valid_addr"](source.ptr_to([0]), pred=issue)
@@ -52,24 +51,22 @@ def raw_cache_hint_family(
     output[lane] = source[lane + 32]
 
 
-@T.prim_func
-def predicated_valid_address(source: T.Buffer((256,), "uint8"), enabled: T.int32):
-    T.device_entry()
-    _warp = T.warp_id([1])
+@T.function
+def predicated_valid_address(source: T.Tensor((256,), "uint8"), enabled: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx["prefetch.L1::32B.valid_addr"](source.ptr_to([256]), pred=enabled)
 
 
-@T.prim_func
+@T.function
 def invalid_scalar_cache_hint_contracts(
-    source: T.Buffer((256,), "uint8"),
+    source: T.Tensor((256,), "uint8"),
     apply_offset: T.int32,
     prefetch_offset: T.int32,
     prefetch_size: T.uint32,
     bulk_apply_offset: T.int32,
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     issue = lane == 0
     T.ptx["applypriority.L2::evict_normal"](source.ptr_to([apply_offset]), pred=issue)
     T.ptx["cp.async.bulk.prefetch.L2.global.L2::evict_last"](
@@ -80,11 +77,10 @@ def invalid_scalar_cache_hint_contracts(
     )
 
 
-@T.prim_func
-def raw_gather4_cache_hint(descriptor: T.Buffer((128,), "uint8")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_gather4_cache_hint(descriptor: T.Tensor((128,), "uint8")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx["applypriority.async.bulk.tensor.2d.global.bulk_group.tile::gather4.L2::evict_normal"](
         descriptor.ptr_to([0]),
         T.int32(0),
@@ -105,13 +101,12 @@ def raw_gather4_cache_hint(descriptor: T.Buffer((128,), "uint8")):
     )
 
 
-@T.prim_func
+@T.function
 def varying_typed_tensor_map_hint(
-    first_map: T.TensorMap(), second_map: T.TensorMap(), single_lane: T.int32
+    first_map: T.Ptr(T.TensorMap), second_map: T.Ptr(T.TensorMap), single_lane: T.int32
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     issue = T.Select(single_lane != 0, lane == 0, T.bool(True))
     T.ptx["cp.async.bulk.prefetch.tensor.2d.L2.global.L2::evict_last"](
         T.Select(lane == 0, T.address_of(first_map), T.address_of(second_map)),

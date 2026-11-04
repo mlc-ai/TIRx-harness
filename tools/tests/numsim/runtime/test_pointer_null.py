@@ -3,27 +3,25 @@
 import numpy as np
 
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def backed_pointer_null_predicates(output: T.Buffer((32, 3), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+@T.function
+def backed_pointer_null_predicates(output: T.Tensor((32, 3), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     local = T.alloc_local((1,), "int32")
     output[lane, 0] = T.Cast("int32", T.isnullptr(output.data))
     output[lane, 1] = T.Cast("int32", T.isnullptr(shared.ptr_to([lane])))
     output[lane, 2] = T.Cast("int32", T.isnullptr(local.data))
 
 
-@T.prim_func
-def numeric_null_handle(addresses: T.Buffer((32,), "uint64"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    output[lane] = T.Cast("int32", T.isnullptr(T.reinterpret("handle", addresses[lane])))
+@T.function
+def numeric_null_handle(addresses: T.Tensor((32,), "uint64"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    output[lane] = T.Cast("int32", T.isnullptr(T.reinterpret(addresses[lane], ty="handle")))
 
 
 def test_isnullptr_on_backed_pointers(tmp_path):

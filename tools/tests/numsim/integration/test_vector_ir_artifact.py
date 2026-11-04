@@ -4,25 +4,24 @@ import numpy as np
 
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def vector_ir_roundtrip(
-    source_u32: T.Buffer((64,), "uint32"),
-    source_f32: T.Buffer((128,), "float32"),
-    output_u32: T.Buffer((64,), "uint32"),
-    output_f32: T.Buffer((128,), "float32"),
+    source_u32: T.Tensor((64,), "uint32"),
+    source_f32: T.Tensor((128,), "float32"),
+    output_u32: T.Tensor((64,), "uint32"),
+    output_f32: T.Tensor((128,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "float32")
     for slot in T.unroll(4):
         shared[lane * 4 + slot] = source_f32[lane * 4 + slot]
     T.cuda.warp_sync()
-    packed = source_u32.vload([lane * 2], dtype="uint32x2")
-    values = shared.vload([lane * 4], dtype="float32x4")
+    packed = source_u32[T.Ramp(lane * 2, 1, 2)]
+    values = shared[T.Ramp(lane * 4, 1, 4)]
     output_u32[lane * 2] = T.Shuffle([packed], [0])
     output_u32[lane * 2 + 1] = T.Shuffle([packed], [1])
     output_f32[lane * 4] = T.Shuffle([values], [0])
@@ -31,61 +30,56 @@ def vector_ir_roundtrip(
     output_f32[lane * 4 + 3] = T.Shuffle([values], [3])
 
 
-@T.prim_func
+@T.function
 def invalid_vector_shuffle_extract(
-    source: T.Buffer((64,), "uint32"), output: T.Buffer((32,), "uint32")
+    source: T.Tensor((64,), "uint32"), output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    packed = source.vload([lane * 2], dtype="uint32x2")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    packed = source[T.Ramp(lane * 2, 1, 2)]
     output[lane] = T.Shuffle([packed], [2])
 
 
-@T.prim_func
+@T.function
 def packed_vector_arithmetic_is_not_scalar_arithmetic(
-    lhs: T.Buffer((32,), "int8x4"),
-    rhs: T.Buffer((32,), "int8x4"),
-    output: T.Buffer((32,), "int8x4"),
+    lhs: T.Tensor((32,), "int8x4"),
+    rhs: T.Tensor((32,), "int8x4"),
+    output: T.Tensor((32,), "int8x4"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = lhs[lane] + rhs[lane]
 
 
-@T.prim_func
+@T.function
 def unsupported_generic_vector_extract(
-    source: T.Buffer((128,), "int8"), output: T.Buffer((32,), "int8")
+    source: T.Tensor((128,), "int8"), output: T.Tensor((32,), "int8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    packed = source.vload([lane * 4], dtype="int8x4")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    packed = source[T.Ramp(lane * 4, 1, 4)]
     output[lane] = T.Shuffle([packed], [0])
 
 
-@T.prim_func
+@T.function
 def reinterpret_128bit_vector_roundtrip(
-    source: T.Buffer((32,), "uint64x2"), output: T.Buffer((32,), "uint64x2")
+    source: T.Tensor((32,), "uint64x2"), output: T.Tensor((32,), "uint64x2")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    as_float: T.let = T.reinterpret("float32x4", source[lane])
-    output[lane] = T.reinterpret("uint64x2", as_float)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    as_float: T.let = T.reinterpret(source[lane], ty="float32x4")
+    output[lane] = T.reinterpret(as_float, ty="uint64x2")
 
 
-@T.prim_func
+@T.function
 def construct_uint32x2_bits(
-    low: T.Buffer((32,), "uint32"),
-    high: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32,), "uint64"),
+    low: T.Tensor((32,), "uint32"),
+    high: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    output[lane] = T.reinterpret("uint64", T.Shuffle([low[lane], high[lane]], [0, 1]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    output[lane] = T.reinterpret(T.Shuffle([low[lane], high[lane]], [0, 1]), ty="uint64")
 
 
 def test_vector_ir_roundtrip_executes_packed_and_f32x4_semantics(tmp_path):
@@ -109,7 +103,8 @@ def test_vector_ir_roundtrip_executes_packed_and_f32x4_semantics(tmp_path):
 
     np.testing.assert_array_equal(result.outputs["output_u32"], source_u32)
     np.testing.assert_array_equal(result.outputs["output_f32"], source_f32)
-    assert "F32x4" in module.rust_source
+    # A Bind keeps the float32x4 value as one four-lane register value.
+    assert "loaded_f32x4" in module.rust_source
     assert "packed_u32x2" in module.rust_source
 
 

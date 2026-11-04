@@ -3,19 +3,20 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.runtime.test_raw_tma_codegen import _tensor_map
 from tests.numsim.support.execution import run_checked
 from tirx_harness import numsim, racecheck, synccheck
+from tvm_tirx.script import tirx as T
 
 
 def high_bit_multicast_kernel(form, *, ctas=20, mask=None):
     mask = (1 << (ctas - 1)) | 1 if mask is None else mask
     transfer = form != "commit"
     parameter = (
-        "input_map: T.TensorMap()"
+        "input_map: T.Ptr(T.TensorMap)"
         if form in {"tensor", "im2col"}
-        else 'source: T.Buffer((4,), "float32")'
+        else 'source: T.Tensor((4,), "float32")'
     )
     instruction = {
         "bulk": f"""T.ptx["cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster::32b"](
@@ -25,19 +26,17 @@ def high_bit_multicast_kernel(form, *, ctas=20, mask=None):
         "im2col": f"""T.ptx["cp.async.bulk.tensor.3d.shared::cluster.global.im2col.mbarrier::complete_tx::bytes.multicast::cluster::32b.cta_group::1"](
             shared.ptr_to([0]), T.address_of(input_map), 0, 0, 0, barrier.ptr_to([0]), T.uint16(0), T.uint32({mask}))""",
         "commit": f"""T.ptx["tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster::32b.b64"](
-            T.reinterpret("handle", barrier.ptr_to([0])), T.uint32({mask}))""",
+            T.reinterpret(barrier.ptr_to([0]), ty="handle"), T.uint32({mask}))""",
     }[form]
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def multicast32({parameter}, output: T.Buffer(({ctas}, 4), "float32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([{ctas}])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def multicast32({parameter}, output: T.Tensor(({ctas}, 4), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=(1) * {ctas}, block=32, cluster={ctas}))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barrier = T.alloc_shared((1,), "uint64")
     if lane < 4 and cta != 0 and cta != {ctas - 1}:
         shared[lane] = T.float32(-7)
     if lane == 0:
@@ -55,7 +54,8 @@ def multicast32({parameter}, output: T.Buffer(({ctas}, 4), "float32")):
     if lane < 4:
         output[cta, lane] = {"shared[lane]" if transfer else "T.Cast('float32', (cta == 0) or (cta == " + str(ctas - 1) + "))"}
     T.cuda.cluster_sync()
-"""
+""",
+        {"T": T},
     )
 
 

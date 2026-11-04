@@ -5,17 +5,16 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness.numsim import Engine, transpile
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def cas_claim_shared(out: T.Buffer((4,), "uint32")):
+@T.function
+def cas_claim_shared(out: T.Tensor((4,), "uint32")):
     """One lane exercises successful and failed compare-and-swap operations."""
 
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    slot = T.alloc_buffer((1,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    slot = T.alloc_shared((1,), "uint32")
     if lane == 0:
         slot[0] = T.uint32(0)
     T.cuda.cta_sync()
@@ -29,14 +28,13 @@ def cas_claim_shared(out: T.Buffer((4,), "uint32")):
         out[3] = slot[0]
 
 
-@T.prim_func
-def cas_claim_shared_b16(out: T.Buffer((2,), "uint16")):
+@T.function
+def cas_claim_shared_b16(out: T.Tensor((2,), "uint16")):
     """Exercise the 16-bit PTX form with signed bit-carrier operands."""
 
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    slot = T.alloc_buffer((1,), "uint16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    slot = T.alloc_shared((1,), "uint16")
     if lane == 0:
         slot[0] = T.uint16(0xFFFF)
     T.cuda.cta_sync()
@@ -47,13 +45,12 @@ def cas_claim_shared_b16(out: T.Buffer((2,), "uint16")):
         out[1] = slot[0]
 
 
-@T.prim_func
-def cas_claim_global_b64(cell: T.Buffer((1,), "uint64"), out: T.Buffer((2,), "uint64")):
+@T.function
+def cas_claim_global_b64(cell: T.Tensor((1,), "uint64"), out: T.Tensor((2,), "uint64")):
     """Exercise the 64-bit PTX form on global memory."""
 
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "uint64")
         T.ptx.atom.relaxed.gpu.global_.cas.b64(old[0], cell.ptr_to([0]), T.uint64(7), T.uint64(9))

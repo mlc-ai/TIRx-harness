@@ -1,61 +1,51 @@
 import numpy as np
 import pytest
 
-import tirx_kernels.tirx_lite as txl
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import NumSimExecutionError
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
+
+_STORAGE_BYTES = T.dynamic("storage_bytes", "int64")
 
 
-@txl.kernel(warps=1, arch="sm_100a", grid=1, check_ir=False)
+@T.function
 def runtime_sized_global_alias(
-    storage: txl.gptr[txl.u8],
-    output: txl.gptr[txl.u32, (1,)],
+    storage: T.Tensor((_STORAGE_BYTES,), "uint8"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    lane = txl.lane_id()
-    words = txl.decl_buffer((8,), txl.u32, data=storage.data, scope="global")
-    with txl.If(lane == 0), txl.Then():
-        txl.buffer_store(output, words[7], [0])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    words = T.decl_tensor(storage.data, ty_args=[T.Tensor((8,), "uint32", scope="global")])
+    if lane == 0:
+        output[0] = words[7]
 
 
-@T.prim_func
+@T.function
 def runtime_sized_global_shifted_alias(
-    storage_ptr: T.handle,
+    storage: T.Tensor((_STORAGE_BYTES,), "uint8"),
     word_offset: T.int64,
-    output: T.Buffer((1,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    storage_dim0 = T.int64()
-    storage = T.match_buffer(storage_ptr, (storage_dim0,), "uint8")
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    words = T.decl_buffer(
-        (1,),
-        "uint32",
-        data=storage.data,
-        elem_offset=word_offset,
-        scope="global",
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    words = T.decl_tensor(
+        T.ptr_byte_offset(storage.data, word_offset * 4, ty=T.Ptr("uint32", "global")),
+        ty_args=[T.Tensor((1,), "uint32", scope="global")],
     )
     if lane == 0:
         output[0] = words[0]
 
 
-@T.prim_func
+@T.function
 def runtime_sized_global_dynamic_reinterpret_alias(
-    storage_ptr: T.handle,
+    storage: T.Tensor((_STORAGE_BYTES,), "uint8"),
     byte_count: T.int64,
-    output: T.Buffer((1,), "uint32"),
+    output: T.Tensor((1,), "uint32"),
 ):
-    storage_dim0 = T.int64()
-    storage = T.match_buffer(storage_ptr, (storage_dim0,), "uint8")
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    words = T.decl_buffer(
-        (byte_count // 4,),
-        "uint32",
-        data=storage.data,
-        scope="global",
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    words = T.decl_tensor(
+        storage.data, ty_args=[T.Tensor((byte_count // 4,), "uint32", scope="global")]
     )
     if lane == 0:
         output[0] = words[byte_count // 4 - 1]
@@ -64,7 +54,7 @@ def runtime_sized_global_dynamic_reinterpret_alias(
 def test_runtime_sized_global_owner_defers_static_alias_bound_to_launch(tmp_path):
     storage = np.arange(32, dtype=np.uint8)
     result = numsim.Engine().run(
-        numsim.transpile(runtime_sized_global_alias.func, cache_dir=tmp_path),
+        numsim.transpile(runtime_sized_global_alias, cache_dir=tmp_path),
         {
             "storage": storage,
             "output": np.zeros(1, dtype=np.uint32),
@@ -75,7 +65,7 @@ def test_runtime_sized_global_owner_defers_static_alias_bound_to_launch(tmp_path
 
 
 def test_runtime_sized_global_owner_rejects_alias_larger_than_launch_backing(tmp_path):
-    module = numsim.transpile(runtime_sized_global_alias.func, cache_dir=tmp_path)
+    module = numsim.transpile(runtime_sized_global_alias, cache_dir=tmp_path)
 
     with pytest.raises(NumSimExecutionError, match="view .* exceeds allocation"):
         numsim.Engine().run(

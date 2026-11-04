@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-import tvm
-from tests.numsim.support.execution import run_checked
+import tvm_tirx
+from tests.numsim.support.execution import run_checked, with_cuda_arch
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def compression_kernel(num=4, *, reduce=False, maximum=True, absolute=False, nan=False, wait=True):
@@ -19,14 +19,13 @@ def compression_kernel(num=4, *, reduce=False, maximum=True, absolute=False, nan
     outputs = ", ".join(f"result[{i}]" for i in range(count - int(reduce)))
     if reduce:
         outputs += ", reduced[0]"
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         f'''
-@T.prim_func
-def kernel(source: T.Buffer((32, {num}), "float32"), output: T.Buffer((32, {count}), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    address = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def kernel(source: T.Tensor((32, {num}), "float32"), output: T.Tensor((32, {count}), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
     r = T.alloc_local(({num},), "float32")
     result = T.alloc_local(({count},), "uint32")
     reduced = T.alloc_local((1,), "float32")
@@ -42,13 +41,13 @@ def kernel(source: T.Buffer((32, {num}), "float32"), output: T.Buffer((32, {coun
     for i in T.unroll({count - int(reduce)}):
         output[lane, i] = result[i]
     if {reduce}:
-        output[lane, {count - 1}] = T.reinterpret("uint32", reduced[0])
+        output[lane, {count - 1}] = T.reinterpret(reduced[0], ty="uint32")
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], {max(32, num)})
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 ''',
         {"T": T},
     )
-    return kernel.with_attr("tirx.cuda_arch", "sm_107a")
+    return with_cuda_arch(kernel, "sm_107a")
 
 
 @pytest.mark.parametrize(

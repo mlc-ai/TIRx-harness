@@ -11,9 +11,9 @@ use crate::emit::register_call::{marker, table_marker, PTX_TYPE_MARKERS};
 use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::is_integer_dtype;
 use crate::tables::{expr_rust_type, v2_memory_type_rust};
-use tvm::ir::{CallObj, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{CallObj, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 pub const BULK_G2S_CLUSTER_CALLS: [&str; 4] = [
     "tirx.ptx.cp_async_bulk_g2s_cluster",

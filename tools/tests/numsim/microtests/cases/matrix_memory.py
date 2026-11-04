@@ -10,7 +10,6 @@ from tests.numsim.integration.test_stmatrix_artifact import (
     raw_stmatrix_x2_forms,
 )
 from tests.numsim.runtime.test_matrix_memory_domain_oracle import (
-    legacy_ldmatrix_x1_domain,
     ptx_ldmatrix_x1_x2_domain,
     stmatrix_b8_x4_domain,
     stmatrix_b16_x1_domain,
@@ -26,16 +25,14 @@ class MatrixMemoryCase:
     outputs: tuple[str, ...] = ("output",)
 
 
+# No GPU case for tirx.ptx_legacy.ldmatrix: apache-tvm-tirx 0.1.0a5 registers it for
+# downstream emitters, and its CUDA codegen does not lower it. NumSim's fragment
+# mapping for it stays checked by test_matrix_memory_domain_oracle.
 MATRIX_MEMORY_CASES = (
     MatrixMemoryCase(
         "ptx_ldmatrix_b16_x1_trans_and_x2",
         ptx_ldmatrix_x1_x2_domain,
         lambda: {"output": np.zeros(96, dtype=np.uint32)},
-    ),
-    MatrixMemoryCase(
-        "legacy_ldmatrix_b16_x1",
-        legacy_ldmatrix_x1_domain,
-        lambda: {"output": np.zeros(64, dtype=np.uint16)},
     ),
     MatrixMemoryCase(
         "ptx_ldmatrix_b16_x4",

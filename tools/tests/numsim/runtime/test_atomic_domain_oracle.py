@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import tvm_ffi
 from ml_dtypes import bfloat16
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.runtime_domains import (
     CUDA_ATOMIC_ADD_PACKED_GLOBAL_DTYPES,
     CUDA_ATOMIC_ADD_PACKED_SHARED_DTYPES,
@@ -11,7 +12,7 @@ from tests.numsim.support.runtime_domains import (
     CUDA_ATOMIC_CAS_DTYPES,
 )
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _ADD_DTYPES = (
     *CUDA_ATOMIC_ADD_SCALAR_DTYPES,
@@ -44,8 +45,8 @@ def _make_atomic_full_domain():
         name = dtype.replace("_", "")
         parameters.extend(
             (
-                f'    add_global_{name}: T.Buffer((1,), "{dtype}"),',
-                f'    add_value_{name}: T.Buffer((1,), "{dtype}"),',
+                f'    add_global_{name}: T.Tensor((1,), "{dtype}"),',
+                f'    add_value_{name}: T.Tensor((1,), "{dtype}"),',
             )
         )
         statements.append(
@@ -55,9 +56,7 @@ def _make_atomic_full_domain():
             *CUDA_ATOMIC_ADD_SCALAR_DTYPES,
             *CUDA_ATOMIC_ADD_PACKED_SHARED_DTYPES,
         ):
-            declarations.append(
-                f'    add_shared_{name} = T.alloc_buffer((1,), "{dtype}", scope="shared")'
-            )
+            declarations.append(f'    add_shared_{name} = T.alloc_shared((1,), "{dtype}")')
             initialization.extend(
                 (
                     "    if lane == 0:",
@@ -72,9 +71,9 @@ def _make_atomic_full_domain():
         name = dtype.replace("_", "")
         parameters.extend(
             (
-                f'    cas_global_{name}: T.Buffer((1,), "{dtype}"),',
-                f'    cas_compare_{name}: T.Buffer((1,), "{dtype}"),',
-                f'    cas_value_{name}: T.Buffer((1,), "{dtype}"),',
+                f'    cas_global_{name}: T.Tensor((1,), "{dtype}"),',
+                f'    cas_compare_{name}: T.Tensor((1,), "{dtype}"),',
+                f'    cas_value_{name}: T.Tensor((1,), "{dtype}"),',
             )
         )
         statements.append(
@@ -83,27 +82,26 @@ def _make_atomic_full_domain():
         )
     source = "\n".join(
         (
-            "@T.prim_func",
+            "@T.function",
             "def atomic_full_domain(",
             *parameters,
             "):",
-            "    T.device_entry()",
-            "    _warp = T.warp_id([1])",
-            "    lane = T.lane_id([32])",
+            "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+            "    lane = T.cuda.lane_id()",
             *declarations,
             *initialization,
             "    T.cuda.warp_sync()",
             *statements,
         )
     )
-    return tvm.script.from_source(source, extra_vars={"T": T})
+    return tvm_tirx.script.from_source(source, extra_vars={"T": T})
 
 
 atomic_full_domain = _make_atomic_full_domain()
 
 
 def _packed_float_array(dtype: str, value: int) -> np.ndarray:
-    data_type = tvm.DataType(dtype)
+    data_type = tvm_ffi.dtype(dtype)
     logical = np.full(
         (1, data_type.lanes),
         value,
@@ -115,7 +113,7 @@ def _packed_float_array(dtype: str, value: int) -> np.ndarray:
 
 
 def _physical_array(dtype: str, value: int) -> np.ndarray:
-    data_type = tvm.DataType(dtype)
+    data_type = tvm_ffi.dtype(dtype)
     if data_type.lanes == 1:
         return np.full(1, value, dtype=_SCALAR_NUMPY_DTYPES[dtype])
     if dtype in _PACKED_FLOAT_BASE:

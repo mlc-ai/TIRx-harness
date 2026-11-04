@@ -19,7 +19,7 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # One warp per CTA: every participant becomes its own cluster, and therefore
 # its own executor worker thread.
@@ -33,21 +33,20 @@ _RELAY_ROUNDS = 60_000
 _RELAY_QUANTUM = 1
 
 
-@T.prim_func
+@T.function
 def native_lost_wake_relay_fanout(
     rounds: T.int32,
     participants: T.int32,
-    token: T.Buffer((1,), "int32"),
+    token: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    cta = T.cta_id([_RELAY_WARPS])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=_RELAY_WARPS, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     if lane == 0:
         for step in T.serial(rounds):
             # Participant `cta` owns relay step `step * participants + cta`.
             target: T.let = step * participants + cta
-            observed = T.int32(-1)
+            observed: T.int32 = T.int32(-1)
             while observed < target:
                 T.ptx.ld.volatile.global_.s32(observed, token.ptr_to([0]))
             T.ptx.st.volatile.global_.s32(token.ptr_to([0]), target + 1)

@@ -4,14 +4,13 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def scalar_atomic_sinks(cell: T.Buffer((1,), "uint32"), out: T.Buffer((3,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def scalar_atomic_sinks(cell: T.Tensor((1,), "uint32"), out: T.Tensor((3,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "uint32")
         T.ptx.atom.relaxed.gpu.global_.exch.b32(old[0], cell.ptr_to([0]), T.uint32(7))
@@ -24,11 +23,10 @@ def scalar_atomic_sinks(cell: T.Buffer((1,), "uint32"), out: T.Buffer((3,), "uin
         out[2] = cell[0]
 
 
-@T.prim_func
-def half_atomic_sinks(cell: T.Buffer((1,), "float16"), out: T.Buffer((1,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def half_atomic_sinks(cell: T.Tensor((1,), "float16"), out: T.Tensor((1,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((1,), "uint16")
         T.ptx.atom.relaxed.gpu.global_.add.noftz.f16(old[0], cell.ptr_to([0]), T.uint16(0x3800))
@@ -36,12 +34,11 @@ def half_atomic_sinks(cell: T.Buffer((1,), "float16"), out: T.Buffer((1,), "uint
         T.ptx.atom.relaxed.gpu.global_.add.noftz.f16(cell.ptr_to([0]), T.uint16(0x3400))
 
 
-@T.prim_func
-def copy_wait_all(source: T.Buffer((32,), "uint32"), out: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint32", scope="shared")
+@T.function
+def copy_wait_all(source: T.Tensor((32,), "uint32"), out: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint32")
     T.ptx.cp.async_.ca.shared.global_(shared.ptr_to([lane]), source.ptr_to([lane]), 4)
     # No explicit commit: wait_all must include these outstanding copies.
     T.ptx.cp.async_.wait_all()
@@ -49,13 +46,12 @@ def copy_wait_all(source: T.Buffer((32,), "uint32"), out: T.Buffer((32,), "uint3
     T.ptx.cp.async_.wait_all()
 
 
-@T.prim_func
-def barrier_state_queries(source: T.Buffer((4,), "uint32"), out: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    shared = T.alloc_buffer((4,), "uint32", scope="shared")
+@T.function
+def barrier_state_queries(source: T.Tensor((4,), "uint32"), out: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
+    shared = T.alloc_shared((4,), "uint32")
     state = T.alloc_local((1,), "uint64")
     ready = T.alloc_local((1,), "uint32")
     if lane == 0:
@@ -80,15 +76,14 @@ def barrier_state_queries(source: T.Buffer((4,), "uint32"), out: T.Buffer((4,), 
         out[3] = shared[0]
 
 
-@T.prim_func
+@T.function
 def vector_atomic_sinks(
-    half: T.Buffer((2,), "float16"),
-    floats: T.Buffer((2,), "float32"),
-    out: T.Buffer((2,), "uint16"),
+    half: T.Tensor((2,), "float16"),
+    floats: T.Tensor((2,), "float32"),
+    out: T.Tensor((2,), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old = T.alloc_local((2,), "uint16")
         T.ptx.atom.relaxed.gpu.global_.add.noftz.v2.f16(
@@ -110,14 +105,12 @@ def vector_atomic_sinks(
         )
 
 
-@T.prim_func
-def address_queries(out: T.Buffer((2, 10), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def address_queries(out: T.Tensor((2, 10), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "uint32")
     raw = T.alloc_local((1,), "uint64")
     mapped = T.alloc_local((1,), "uint64")
     generic = T.alloc_local((1,), "uint64")
@@ -127,7 +120,7 @@ def address_queries(out: T.Buffer((2, 10), "uint32")):
         T.ptx.mapa.shared__cluster.u64(mapped[0], raw[0], T.uint32(1 - cta))
         T.ptx.getctarank.shared__cluster.u64(result[0], mapped[0])
         out[cta, 0] = result[0]
-        generic[0] = T.reinterpret("uint64", shared.ptr_to([0]))
+        generic[0] = T.reinterpret(shared.ptr_to([0]), ty="uint64")
         T.ptx.mapa.u64(mapped[0], generic[0], T.uint32(1 - cta))
         T.ptx.getctarank.u64(result[0], mapped[0])
         out[cta, 1] = result[0]
@@ -135,31 +128,29 @@ def address_queries(out: T.Buffer((2, 10), "uint32")):
         out[cta, 2] = result[0]
         T.ptx.isspacep.global_(result[0], shared.ptr_to([0]))
         out[cta, 3] = result[0]
-        T.ptx.isspacep.shared__cluster(result[0], T.reinterpret("handle", mapped[0]))
+        T.ptx.isspacep.shared__cluster(result[0], T.reinterpret(mapped[0], ty="handle"))
         out[cta, 4] = result[0]
-        T.ptx.isspacep.shared__cta(result[0], T.reinterpret("handle", mapped[0]))
+        T.ptx.isspacep.shared__cta(result[0], T.reinterpret(mapped[0], ty="handle"))
         out[cta, 5] = result[0]
         T.ptx.mapa.u64(mapped[0], generic[0], T.uint32(cta))
-        T.ptx.isspacep.shared__cta(result[0], T.reinterpret("handle", mapped[0]))
+        T.ptx.isspacep.shared__cta(result[0], T.reinterpret(mapped[0], ty="handle"))
         out[cta, 6] = result[0]
         T.ptx.isspacep.global_(result[0], out.ptr_to([cta, 0]))
         out[cta, 7] = result[0]
         T.ptx.isspacep.local(result[0], result.ptr_to([0]))
         out[cta, 8] = result[0]
         T.ptx.cvta.shared__cluster.u64(generic[0], raw[0])
-        T.ptx.isspacep.shared__cluster(result[0], T.reinterpret("handle", generic[0]))
+        T.ptx.isspacep.shared__cluster(result[0], T.reinterpret(generic[0], ty="handle"))
         out[cta, 9] = result[0]
 
 
-@T.prim_func
-def scalar_async_store(out: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "uint32", scope="shared", align=16)
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def scalar_async_store(out: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "uint32", align=16)
+    barrier = T.alloc_shared((1,), "uint64")
     if cta == 1 and lane == 0:
         shared[1] = T.uint32(99)
         T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
@@ -251,11 +242,10 @@ def test_memory_sync_extensions(kernel, inputs, expected, tmp_path):
 
 
 def test_half_vector_predicate_alias_is_captured_before_either_result_store(tmp_path):
-    @T.prim_func
-    def kernel(enabled: T.uint16, cell: T.Buffer((2,), "float16"), out: T.Buffer((2,), "uint16")):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(enabled: T.uint16, cell: T.Tensor((2,), "float16"), out: T.Tensor((2,), "uint16")):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         if lane == 0:
             old = T.alloc_local((2,), "uint16")
             old[0] = enabled

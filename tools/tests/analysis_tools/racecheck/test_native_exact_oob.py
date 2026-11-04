@@ -8,32 +8,30 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_buffer_selected_lane_oob(
-    selected_lane: T.Buffer((32,), "int32"),
-    source: T.Buffer((1,), "int32"),
-    output: T.Buffer((1,), "int32"),
+    selected_lane: T.Tensor((32,), "int32"),
+    source: T.Tensor((1,), "int32"),
+    output: T.Tensor((1,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == selected_lane[lane]:
         output[0] = source[lane]
 
 
-@T.prim_func
+@T.function
 def native_concrete_lane_oob_variants(
-    mode: T.int32, bound: T.int32, data_bound: T.Buffer((1,), "int32")
+    mode: T.int32, bound: T.int32, data_bound: T.Tensor((1,), "int32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    direct = T.alloc_buffer((8,), "int32", scope="shared")
-    then_buffer = T.alloc_buffer((32,), "int32", scope="shared")
-    else_buffer = T.alloc_buffer((8,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    direct = T.alloc_shared((8,), "int32")
+    then_buffer = T.alloc_shared((32,), "int32")
+    else_buffer = T.alloc_shared((8,), "int32")
 
     if mode == 0:
         if lane < bound:
@@ -55,22 +53,21 @@ def native_concrete_lane_oob_variants(
             direct[lane] = 6
 
 
-@T.prim_func
+@T.function
 def native_warp_tiled_oob(warp_limit: T.int32):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((40,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((40,), "int32")
     if (warp < warp_limit) and (lane < 8):
         shared[warp * 16 + lane] = 7
 
 
-@T.prim_func
-def native_boolean_guard_oob(mode: T.int32, bound: T.int32, flag: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8,), "int32", scope="shared")
+@T.function
+def native_boolean_guard_oob(mode: T.int32, bound: T.int32, flag: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8,), "int32")
 
     if mode == 0:
         if (flag[0] != 0) and (lane < bound):
@@ -86,12 +83,11 @@ def native_boolean_guard_oob(mode: T.int32, bound: T.int32, flag: T.Buffer((1,),
             shared[lane] = 4
 
 
-@T.prim_func
-def native_data_guarded_oob(mode: T.int32, enabled: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8,), "int32", scope="shared")
+@T.function
+def native_data_guarded_oob(mode: T.int32, enabled: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8,), "int32")
 
     if mode == 0:
         if enabled[0] != 0:
@@ -101,15 +97,14 @@ def native_data_guarded_oob(mode: T.int32, enabled: T.Buffer((1,), "int32")):
             shared[50] = 2
 
 
-@T.prim_func
+@T.function
 def native_numeric_loop_relay_oob(
     limit: T.int32,
-    base: T.Buffer((1,), "int32"),
-    output: T.Buffer((2,), "int32"),
+    base: T.Tensor((1,), "int32"),
+    output: T.Tensor((2,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     index = T.local_scalar("int32")
 
     for iteration in T.serial(limit):
@@ -431,10 +426,14 @@ def test_public_native_racecheck_missing_required_binding_is_typed_incomplete(na
     source_span = source_anchor["source_span"]
     source_path = Path(source_span["source_name"]).resolve()
     assert source_path == Path(__file__).resolve()
-    assert (
-        "def native_concrete_lane_oob_variants("
-        in source_path.read_text().splitlines()[source_span["line"] - 1]
+    # tvm-tirx locates statements, not functions: the kernel anchor is the
+    # kernel's outermost located statement, its device entry.
+    lines = source_path.read_text().splitlines()
+    assert "T.device_entry(" in lines[source_span["line"] - 1]
+    enclosing = next(
+        line for line in reversed(lines[: source_span["line"]]) if line.startswith("def ")
     )
+    assert enclosing.startswith("def native_concrete_lane_oob_variants(")
     assert missing_native["access_count"] == 0
     assert missing_native["accesses"] == []
     assert missing_native["execution_error"] is None

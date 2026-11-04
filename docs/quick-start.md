@@ -27,7 +27,7 @@ python -m pip install tirx-harness
 Check that its packages resolve:
 
 ```bash
-python -c "import tvm.tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
+python -c "import tvm_tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print('Core imports OK')"
 ```
 
 This checks imports only. To develop the harness itself, use

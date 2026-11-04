@@ -6,23 +6,25 @@ from tvm_ffi.dataclasses import py_class
 
 from tirx_harness.numsim.errors import NumSimBuildError
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm import tirx
+from tvm_tirx import ir, tirx
 
 
 def test_frontend_rejects_unknown_native_nodes_in_a_known_parent():
     @py_class("numsim.testing.FutureStatement")
-    class FutureStatement(tirx.Stmt):
-        body: tirx.Stmt
+    class FutureStatement(ir.Stmt):
+        body: ir.Stmt
 
-    known = tirx.PrimFunc([], tirx.SeqStmt([tirx.Evaluate(0), tirx.Evaluate(1)]))
+    known = tirx.Function([], ir.SeqStmt([ir.Evaluate(0), ir.Evaluate(1)]))
     # Construct the extension through reflected fields: the current TVM
     # PrimFunc constructor's purity visitor cannot visit future node types.
     extended = structural_map(
         known,
         (
-            tirx.Evaluate,
+            ir.Evaluate,
             lambda stmt: (
-                FutureStatement(span=None, body=stmt) if int(stmt.value.value) == 1 else stmt
+                FutureStatement(loc=ir.UnknownLoc(), body=stmt)
+                if int(stmt.value.value) == 1
+                else stmt
             ),
         ),
     )

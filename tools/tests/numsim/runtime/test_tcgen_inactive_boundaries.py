@@ -7,8 +7,8 @@ from tvm_ffi import structural_map
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
 from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness.numsim.transpiler.ptx_dialect import decode_ptx_call
-from tvm import tirx
-from tvm.script import tirx as T
+from tvm_tirx import ir
+from tvm_tirx.script import tirx as T
 
 # Distinct instruction dispatch paths, not a Cartesian modifier matrix.
 BOUNDARY_CASES = (
@@ -50,18 +50,18 @@ def inactive_boundary_case(case):
                 T.uint32(int(arg.value) | (1 << transpose_bit)) if arg.same_as(descriptor) else arg
                 for arg in call.args
             ]
-            return tirx.Evaluate(
+            return ir.Evaluate(
                 type(call)(
                     call.op,
                     args,
                     attrs=call.attrs,
                     ty_args=call.ty_args,
-                    span=call.span,
-                    ret_ty=call.ty,
+                    loc=call.loc,
+                    ty=call.ty,
                 )
             )
 
-        kernel = kernel.with_body(structural_map(kernel.body, (tirx.Evaluate, set_transpose)))
+        kernel = kernel.with_body(structural_map(kernel.body, (ir.Evaluate, set_transpose)))
     columns = 64 if ws else 16
     inputs = {
         "a": np.zeros((4, 128, 16), np.uint16),

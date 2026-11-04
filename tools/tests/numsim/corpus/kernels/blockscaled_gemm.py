@@ -64,7 +64,9 @@ def prepare_fastcu_nvfp4_gemm_case(k: int = 16) -> NumSimCase:
         ).numpy()
 
     expected = (av @ bv.T).astype(np.float16).reshape(-1)
-    kernel = module.make_kernel().func.with_attr("tirx.cuda_arch", "sm_103a")
+    # The factory records the architecture on its device entry, which outranks a
+    # function attribute, so it is passed to the factory as the protocol says.
+    kernel = module.make_kernel(backend_config={"cuda": {"arch": "sm_103a"}}).func
     return NumSimCase(
         kernel=kernel,
         args={
@@ -97,8 +99,15 @@ def prepare_dense_blockscaled_rubin_case() -> NumSimCase:
     b, sfb, bv, _ = _nvfp4_operand(n, k, 621)
     alpha = np.array([0.75], dtype=np.float32)
     expected = ((av @ bv.T) * alpha[0]).astype(np.float16).view(np.uint8).reshape(-1)
-    kernel = module.get_kernel(m, n, k, "nvfp4", "float16", float(alpha[0]), 3).with_attr(
-        "tirx.cuda_arch", "sm_107a"
+    kernel = module.get_kernel(
+        m,
+        n,
+        k,
+        "nvfp4",
+        "float16",
+        float(alpha[0]),
+        3,
+        backend_config={"cuda": {"arch": "sm_107a"}},
     )
     return NumSimCase(
         kernel=kernel,
@@ -132,8 +141,16 @@ def prepare_grouped_masked_rubin_case() -> NumSimCase:
             aa[group][2][:written_rows] @ bb[group][2].T * alpha[group]
         ).astype(np.float16)
     kernel = module.get_kernel(
-        groups, m, n, k, out_dtype="float16", alpha=True, signals=False, tactic=0
-    ).with_attr("tirx.cuda_arch", "sm_107a")
+        groups,
+        m,
+        n,
+        k,
+        out_dtype="float16",
+        alpha=True,
+        signals=False,
+        tactic=0,
+        backend_config={"cuda": {"arch": "sm_107a"}},
+    )
     return NumSimCase(
         kernel=kernel,
         args={
@@ -180,8 +197,13 @@ def prepare_gather_swiglu_rubin_case(k: int = 256) -> NumSimCase:
     expected_c = _pack_e2m1(_float32_to_e2m1_bits(normalized.reshape(rows, n // 2)))
     expected_sfc = _pack_sf_128x4(scale_codes)
     kernel = module.get_kernel(
-        num_experts=groups, seq_len=seq_len, N=n, K=k, use_pdl=True
-    ).with_attr("tirx.cuda_arch", "sm_107a")
+        num_experts=groups,
+        seq_len=seq_len,
+        N=n,
+        K=k,
+        use_pdl=True,
+        backend_config={"cuda": {"arch": "sm_107a"}},
+    )
     return NumSimCase(
         kernel=kernel,
         args={

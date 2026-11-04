@@ -3,15 +3,15 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def native_unordered_atomic_plain(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_unordered_atomic_plain(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if (warp == 0) and (lane == 0):
         shared[0] = 0
     T.cuda.cta_sync()
@@ -22,12 +22,12 @@ def native_unordered_atomic_plain(output: T.Buffer((1,), "int32")):
         shared[0] = 7
 
 
-@T.prim_func
-def native_unordered_atomic_atomic(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_unordered_atomic_atomic(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if (warp == 0) and (lane == 0):
         shared[0] = 0
     T.cuda.cta_sync()
@@ -36,12 +36,11 @@ def native_unordered_atomic_atomic(output: T.Buffer((2,), "int32")):
         output[warp] = old
 
 
-@T.prim_func
-def native_ptx_atom_cas_shared(output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    slot = T.alloc_buffer((1,), "uint32", scope="shared")
+@T.function
+def native_ptx_atom_cas_shared(output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    slot = T.alloc_shared((1,), "uint32")
     if lane == 0:
         slot[0] = T.uint32(0)
     T.cuda.cta_sync()
@@ -51,12 +50,12 @@ def native_ptx_atom_cas_shared(output: T.Buffer((1,), "uint32")):
         output[0] = old[0]
 
 
-@T.prim_func
-def native_barrier_ordered_atomic_plain(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+@T.function
+def native_barrier_ordered_atomic_plain(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if (warp == 0) and (lane == 0):
         shared[0] = 0
     T.cuda.cta_sync()
@@ -68,14 +67,14 @@ def native_barrier_ordered_atomic_plain(output: T.Buffer((1,), "int32")):
         output[0] = shared[0]
 
 
-@T.prim_func
+@T.function
 def native_reusable_named_barrier_orders_last_arriver(
-    output: T.Buffer((64,), "int32"),
+    output: T.Tensor((64,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "int32")
     if (warp == 0) and (lane == 0):
         shared[0] = -1
     T.cuda.cta_sync()
@@ -89,12 +88,11 @@ def native_reusable_named_barrier_orders_last_arriver(
         T.ptx.bar.sync(T.uint32(6), T.uint32(64))
 
 
-@T.prim_func
+@T.function
 def native_long_loop_shadow_retirement():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((64,), "int32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((64,), "int32")
     if lane == 0:
         for step in T.serial(1_152):
             shared[step % 64] = step

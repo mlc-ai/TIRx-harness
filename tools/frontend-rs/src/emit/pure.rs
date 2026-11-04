@@ -7,7 +7,7 @@ use crate::analyze::util::{
     unsupported, AResult,
 };
 use crate::analyze::Ctx;
-use crate::decode::Decoded;
+use crate::decode::{projected_buffer, Decoded};
 use crate::emit::abi;
 use crate::emit::calls::call_args;
 use crate::emit::stmt::pointer_pointee_dtype;
@@ -17,10 +17,10 @@ use crate::tables::{
     stmt_rust_scalar_by_dtype,
 };
 use crate::tvm_compat::int_value;
-use tvm::ir::StringImmObj;
-use tvm::ir::{CallObj, IntImmObj, PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{CallObj, Expr, IntImmObj, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 const REDUCTION_FLOATS: [&str; 4] = ["float16", "bfloat16", "float32", "float64"];
 const FETCH_REGISTERS_32: [&str; 39] = [
@@ -724,7 +724,7 @@ impl<'a> Emitter<'a> {
         let Some(source) = as_buffer(&oref(load.source.clone())) else {
             return not_covered("address_of source is not a typed buffer");
         };
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let pointer = self.emit_buffer_address(&source, &indices)?;
         let scope = buffer_scope(&source);
         if matches!(
@@ -744,8 +744,8 @@ impl<'a> Emitter<'a> {
     /// `emit_buffer_address`.
     pub fn emit_buffer_address(
         &mut self,
-        buffer: &tvm::tirx::BufferVar,
-        indices: &[PrimExpr],
+        buffer: &tvm_tirx::ir::Var,
+        indices: &[Expr],
     ) -> AResult<RustValue> {
         if self.memory_plan.resolve(buffer)?.space == MemorySpace::Tmem {
             return unsupported(format!(
@@ -793,6 +793,16 @@ impl<'a> Emitter<'a> {
         signature: &CallSignature,
     ) -> AResult<RustValue> {
         let args = call_args(expr);
+        // A TMEM tensor's data pointer is its column address: a TMEM view declares
+        // its storage over `reinterpret(address)`.
+        if signature.result_dtype == "uint64" {
+            let tmem_address = projected_buffer(&args[0])?
+                .and_then(|tensor| self.ctx.tmem_address(&tensor));
+            if let Some(address) = tmem_address {
+                let value = self.emit_expr(&oref(address))?;
+                return self.coerce_value(value, "u64", "tmem_address");
+            }
+        }
         let has_handle = signature.result_dtype == "handle"
             || signature.arg_dtypes.iter().any(|dtype| dtype == "handle");
         if has_handle {
@@ -977,6 +987,15 @@ impl<'a> Emitter<'a> {
             "ntid.x" => Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned()),
             _ => None,
         };
+        if self.plan.topology.is_multidimensional() {
+            if let Some(code) = self.plan.topology.cta_coordinate(register_name) {
+                return Ok(RustValue::new(
+                    format!("({code}) as {result_type}"),
+                    result_type,
+                    Uniformity::Uniform,
+                ));
+            }
+        }
         if ZERO.contains(&register_name) || ONE.contains(&register_name) {
             let value = if ONE.contains(&register_name) { 1 } else { 0 };
             return Ok(RustValue::new(
@@ -2608,23 +2627,6 @@ pub fn cuda_reduce_min_sync_u32(
         })
         .map(Some)
 }
-pub fn cuda_sm100_2sm_leader_smem_addr(
-    emitter: &mut Emitter,
-    call: &Decoded,
-) -> AResult<Option<RustValue>> {
-    shared_address_signature(emitter.ctx, call.node, call.call)?;
-
-    emitter
-        .with_call_expr(call.node, |emitter| {
-            let expr = call.node;
-            emitter.emit_shared_address(
-                expr,
-                "sm100_mbar_addr",
-                "sm100_tma_2sm_mbarrier_address_from_u64",
-            )
-        })
-        .map(Some)
-}
 pub fn cuda_smem_addr_from_uint64(
     emitter: &mut Emitter,
     call: &Decoded,
@@ -2681,6 +2683,77 @@ pub fn cuda_thread_rank(emitter: &mut Emitter, call: &Decoded) -> AResult<Option
             emitter.emit_thread_rank(expr)
         })
         .map(Some)
+}
+/// The `tirx.cuda` launch coordinates and dimensions. Topology extraction
+/// admits only one-dimensional grids, clusters and blocks, so every `y`/`z`
+/// coordinate is 0 and every `y`/`z` dimension is 1.
+pub fn cuda_launch_index(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    let signature = signature(call.node, call.call)?;
+    let name = call.op_name.trim_start_matches("tirx.cuda.");
+    let per_axis = matches!(
+        name,
+        "block_idx" | "thread_idx" | "cluster_id" | "cluster_cta_id" | "grid_dim" | "block_dim"
+            | "cluster_dim"
+    );
+    let expected: &[&str] = if per_axis { &[""] } else { &[] };
+    check_signature(&signature, exact(&signature, "int32", expected))?;
+    let axis = match call.call.args.iter().next() {
+        Some(axis) => static_string(&oref(axis), &signature, "axis")?,
+        None => "x".to_owned(),
+    };
+    if !matches!(axis.as_str(), "x" | "y" | "z") {
+        return unsupported(format!(
+            "Call({}): axis must be x, y or z, got {axis:?}",
+            signature.render()
+        ));
+    }
+    let plan = emitter.plan;
+    let topology = &plan.topology;
+    let warps = emitter.warps_per_warpgroup;
+    let uniform = |code: String| RustValue::new(format!("({code}) as i32"), "i32", Uniformity::Uniform);
+    let register = match name {
+        "block_idx" => Some("ctaid"),
+        "cluster_id" => Some("clusterid"),
+        "cluster_cta_id" => Some("cluster_ctaid"),
+        "grid_dim" => Some("nctaid"),
+        "cluster_dim" => Some("cluster_nctaid"),
+        _ => None,
+    };
+    if let Some(register) = register.filter(|_| topology.is_multidimensional()) {
+        let code = topology
+            .cta_coordinate(&format!("{register}.{axis}"))
+            .expect("a CTA coordinate register");
+        return Ok(Some(uniform(code)));
+    }
+    let value = match (name, axis.as_str()) {
+        ("block_idx" | "thread_idx" | "cluster_id" | "cluster_cta_id", "y" | "z") => uniform("0".to_owned()),
+        (_, "y" | "z") => uniform("1".to_owned()),
+        ("block_idx", _) => uniform("ctx.global_cta_id()".to_owned()),
+        ("cluster_id", _) => uniform("ctx.cluster_id()".to_owned()),
+        ("cluster_cta_id", _) => uniform("ctx.cta_id_in_cluster()".to_owned()),
+        ("cta_pair_id", _) => uniform("ctx.cta_id_in_cluster() % 2".to_owned()),
+        ("grid_dim", _) => uniform((topology.clusters * topology.ctas_per_cluster).to_string()),
+        ("cluster_dim", _) => uniform(topology.ctas_per_cluster.to_string()),
+        ("block_dim", _) => uniform((topology.warps_per_cta * 32).to_string()),
+        ("warp_id", _) => uniform("ctx.warp_id_in_cta()".to_owned()),
+        ("warpgroup_id", _) => uniform(format!("ctx.warp_id_in_cta() / {warps}")),
+        ("warp_in_warpgroup", _) => uniform(format!("ctx.warp_id_in_cta() % {warps}")),
+        ("lane_id", _) => emitter.emit_varying_value("lane_id", "lane as i32", "i32", ControlProvenance::None),
+        ("thread_idx" | "linear_thread_id", _) => emitter.emit_varying_value(
+            "thread_id",
+            "(ctx.warp_id_in_cta() * WARP_SIZE + lane) as i32",
+            "i32",
+            ControlProvenance::None,
+        ),
+        ("thread_in_warpgroup", _) => emitter.emit_varying_value(
+            "thread_in_warpgroup",
+            &format!("((ctx.warp_id_in_cta() % {warps}) * WARP_SIZE + lane) as i32"),
+            "i32",
+            ControlProvenance::None,
+        ),
+        _ => return not_covered(format!("{} has no launch-index lowering", call.op_name)),
+    };
+    Ok(Some(value))
 }
 pub fn cuda_uint_as_float(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let signature = signature(call.node, call.call)?;

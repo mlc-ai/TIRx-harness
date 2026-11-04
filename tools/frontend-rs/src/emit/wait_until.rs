@@ -1,20 +1,20 @@
 //! A declared synchronization-word wait, using the raw load's decoded operands.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm::ir::{CallObj, IntImm, IntImmObj, PointerTypeObj, PrimExpr, TensorLoadObj};
-use tvm::prim::{
+use tvm_tirx::ir::{CallObj, Expr, IntImmObj, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::prim::{
     AndObj, CastObj, EQObj, GEObj, GTObj, LEObj, LTObj, NEObj, NotObj, OrObj, SelectObj,
 };
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{self, Any, Array, ObjectRefCore, String as FfiString};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{self, Any, Array, ObjectRefCore, String as FfiString};
 
 use super::memory_support::{v2_memory_space_rust, v2_memory_type_rust_ptx};
 use super::raw_memory::{decoded_load_parts, decoded_load_semantics};
 use super::{abi, Emitter, RustValue, Uniformity};
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
-    as_buffer, buffer_name, buffer_scope, dtype_of, dtype_text, expr_type, kind_or_bail, oref,
-    prim_dtype, same, static_int, static_string, unsupported, AResult,
+    as_buffer, buffer_name, buffer_scope, dtype_of, dtype_text, expr_type, int_const, kind_or_bail,
+    oref, prim_dtype, same, static_int, static_string, unsupported, AResult, TensorVarExt,
 };
 use crate::decode::ptx::{decode_call, DecodedPtx};
 use crate::decode::Decoded;
@@ -42,7 +42,7 @@ fn width(suffix: &str) -> Option<u32> {
 
 fn word_suffix(pointer: &ObjectRef, requested: &ObjectRef, name: &str) -> AResult<String> {
     let ty = expr_type(pointer);
-    let Some(pointer) = ty.as_ref().and_then(|ty| ty.as_node::<PointerTypeObj>()) else {
+    let Some(pointer) = ty.as_ref().and_then(|ty| ty.as_node::<PtrTypeObj>()) else {
         return unsupported(format!("{name} ptr must point at the synchronization word"));
     };
     let dtype = prim_dtype(&pointer.element_type)
@@ -84,7 +84,7 @@ fn raw_load(spelling: &str, operands: &[ObjectRef]) -> AResult<DecodedPtx> {
 }
 
 struct FrozenBuffer {
-    source: tvm::tirx::BufferVar,
+    source: tvm_tirx::ir::Var,
     shape: Vec<i64>,
     values: Vec<Option<String>>,
 }
@@ -158,12 +158,12 @@ impl<'a, 'b> Predicate<'a, 'b> {
         Ok(false)
     }
 
-    fn destination_coordinates(&self, source: &tvm::tirx::BufferVar) -> AResult<Option<Vec<i64>>> {
+    fn destination_coordinates(&self, source: &tvm_tirx::ir::Var) -> AResult<Option<Vec<i64>>> {
         let destination = self
             .destination
             .as_node::<TensorLoadObj>()
             .expect("wait destination was validated as TensorLoad");
-        if !same(source.as_var(), &destination.source) {
+        if !same(source, &destination.source) {
             return Ok(None);
         }
         let mut coordinates = Vec::new();
@@ -181,19 +181,19 @@ impl<'a, 'b> Predicate<'a, 'b> {
 
     fn capture_buffer(
         &mut self,
-        source: &tvm::tirx::BufferVar,
+        source: &tvm_tirx::ir::Var,
     ) -> AResult<(Vec<i64>, Vec<Option<String>>)> {
         if let Some(captured) = self
             .frozen_buffers
             .iter()
-            .find(|captured| same(captured.source.as_var(), source.as_var()))
+            .find(|captured| same(&captured.source, source))
         {
             return Ok((captured.shape.clone(), captured.values.clone()));
         }
 
         let mut shape = Vec::new();
         let mut element_count = 1_i64;
-        for dimension in source.buffer_type().shape.iter() {
+        for dimension in source.tensor_type().shape.iter() {
             let extent = static_int(
                 &self.emitter.ctx.analyzer,
                 &dimension,
@@ -234,9 +234,9 @@ impl<'a, 'b> Predicate<'a, 'b> {
                 values.push(None);
                 continue;
             }
-            let indices: Vec<PrimExpr> = coordinates
+            let indices: Vec<Expr> = coordinates
                 .iter()
-                .map(|coordinate| IntImm::new("int32", *coordinate).map(Into::into))
+                .map(|coordinate| int_const("int32", *coordinate).map(Into::into))
                 .collect::<tvm_ffi::Result<_>>()?;
             let value = self.emitter.emit_buffer_load(
                 source,
@@ -261,7 +261,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         Ok((shape, values))
     }
 
-    fn flat_index(&mut self, indices: &[PrimExpr], shape: &[i64]) -> AResult<String> {
+    fn flat_index(&mut self, indices: &[Expr], shape: &[i64]) -> AResult<String> {
         if indices.len() != shape.len() {
             return unsupported(
                 "a candidate-indexed wait predicate has an invalid local-buffer rank",
@@ -290,7 +290,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
             );
         }
         let (shape, values) = self.capture_buffer(&source)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let index = self.flat_index(&indices, &shape)?;
         let arms = values
             .iter()

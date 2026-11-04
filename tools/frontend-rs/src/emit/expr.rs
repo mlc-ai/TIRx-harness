@@ -1,10 +1,10 @@
 //! Expression emission as methods on the kernel emitter.
 
 use crate::tvm_compat::{int_bits, int_value};
-use tvm::ir::{FloatImmObj, IntImmObj, PrimExpr, TensorLoadObj};
-use tvm::prim::{CastObj, LetObj, NotObj, RampObj, SelectObj, ShuffleObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::{Expr, FloatImmObj, IntImmObj, TensorLoadObj};
+use tvm_tirx::ir::prim::{CastObj, LetObj, NotObj, RampObj, SelectObj, ShuffleObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::super::analyze::util::{
     as_buffer, dtype_of, ffi_text, kind_or_bail, not_covered, oref, unsupported, AResult,
@@ -1138,12 +1138,12 @@ impl<'a> Emitter<'a> {
             return not_covered("TensorLoad source is not a typed buffer");
         };
         let result_dtype = classify_vector_buffer_load(self.ctx, expr, load, &source)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let register_access_mask = self.register_access_mask.clone();
         // `self.buffer_load(expr.source, indices, source_node=expr, ...)`: the
         // kernel emitter swaps the loader around tile and TMEM lowerings.
         let value = match self.nested_load_site.clone() {
-            None | Some(NestedLoadSite::Exact) => self.emit_buffer_load(
+            None => self.emit_buffer_load(
                 &source,
                 &indices,
                 None,
@@ -1163,40 +1163,6 @@ impl<'a> Emitter<'a> {
                 None,
                 site,
             )?,
-            Some(NestedLoadSite::ByBuffer(op_id)) => {
-                let site = self.implicit_source_op_id(&source, op_id)?;
-                self.emit_buffer_load(
-                    &source,
-                    &indices,
-                    None,
-                    register_access_mask,
-                    false,
-                    result_dtype,
-                    None,
-                    site,
-                )?
-            }
-            Some(NestedLoadSite::AtLane(lane)) => self.emit_buffer_load_at_lane(
-                &source,
-                &indices,
-                &lane,
-                None,
-                false,
-                result_dtype,
-                Some(expr),
-                None,
-            )?,
-            Some(NestedLoadSite::AtLaneSite(lane, site)) => self.emit_buffer_load_at_lane(
-                &source,
-                &indices,
-                &lane,
-                None,
-                false,
-                result_dtype,
-                None,
-                site,
-            )?,
-            Some(NestedLoadSite::Reject(message)) => return unsupported(message),
         };
         self.instrument(expr, "TensorLoad", &[], value)
     }

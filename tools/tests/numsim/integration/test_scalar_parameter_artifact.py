@@ -5,32 +5,31 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.bindings import prepare_bindings
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def scalar_parameter_add(offset: T.int32, output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def scalar_parameter_add(offset: T.int32, output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = offset + lane
 
 
-@T.prim_func
-def second_scalar_parameter_add(offset: T.int32, second: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def second_scalar_parameter_add(offset: T.int32, second: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     second[lane] = offset - lane
 
 
-@T.prim_func
-def scalar_bound_shape(rows: T.int32, input_ptr: T.handle, output_ptr: T.handle):
-    input_buffer = T.match_buffer(input_ptr, (rows, 32), "float32")
-    output_buffer = T.match_buffer(output_ptr, (rows, 32), "float32")
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def scalar_bound_shape(
+    rows: T.int32,
+    input_buffer: T.Tensor((rows, 32), "float32"),
+    output_buffer: T.Tensor((rows, 32), "float32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output_buffer[0, lane] = input_buffer[0, lane] + T.float32(1)
 
 

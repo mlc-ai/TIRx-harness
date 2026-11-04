@@ -1,13 +1,13 @@
 //! Exact bindings and shape substitutions for symbolic expressions.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, PrimExpr, Var};
-use tvm::tirx::{BindObj, Stmt};
-use tvm::tvm_ffi::{Any, Map, ObjectRefCore};
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{Expr, Var};
+use tvm_tirx::ir::Stmt;
+use tvm_tirx::tvm_ffi::{Any, Map};
 
 use super::buffers::BufferBindings;
 use super::shapes::{structural_equal, ShapeExpressionContext};
-use super::util::{oref, prim, repr_of, same, unsupported, AResult};
+use super::util::{oref, prim, repr_of, same, scalar_bind, unsupported, AResult};
 
 pub struct ExpressionBindings {
     pub bindings: Vec<(Var, Expr)>,
@@ -22,7 +22,7 @@ impl ExpressionBindings {
     ) -> AResult<Self> {
         let mut bindings: Vec<(Var, Expr)> = Vec::new();
         for statement in statements {
-            let Some(bind) = statement.as_node::<BindObj>() else {
+            let Some(bind) = scalar_bind(statement) else {
                 continue;
             };
             if let Some((_, previous)) = bindings.iter().find(|(var, _)| same(var, &bind.var)) {
@@ -47,17 +47,12 @@ impl ExpressionBindings {
         })
     }
 
-    /// Transitively substitute exact Bind definitions, leaving runtime vars symbolic.
-    pub fn resolve_expression(&self, expression: &PrimExpr) -> AResult<PrimExpr> {
-        self.resolve_expression_with(expression, &self.shape_expressions.substitutions())
-    }
-
     /// Reuse a substitution map across a sequence of symbolic expressions.
     pub fn resolve_expression_with(
         &self,
-        expression: &PrimExpr,
+        expression: &Expr,
         substitutions: &Map<Var, Expr>,
-    ) -> AResult<PrimExpr> {
+    ) -> AResult<Expr> {
         let mut current = expression.clone();
         if !self.bindings.is_empty() {
             let mut resolved_once = false;
@@ -80,6 +75,6 @@ impl ExpressionBindings {
                 );
             }
         }
-        Ok(Analyzer::new()?.simplify(&current)?)
+        Ok(Analyzer::new().simplify(&current, 2)?)
     }
 }

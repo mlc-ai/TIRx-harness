@@ -6,19 +6,18 @@ from typing import Any
 
 import numpy as np
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_dense_f16_f32_k16(
-    a_words: T.Buffer((32, 4), "uint32"),
-    b_words: T.Buffer((32, 2), "uint32"),
-    c_values: T.Buffer((32, 4), "float32"),
-    output: T.Buffer((32, 4), "uint32"),
+    a_words: T.Tensor((32, 4), "uint32"),
+    b_words: T.Tensor((32, 2), "uint32"),
+    c_values: T.Tensor((32, 4), "float32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((2,), "uint32")
     c = T.alloc_local((4,), "float32")
@@ -45,19 +44,18 @@ def raw_dense_f16_f32_k16(
         c[3],
     )
     for register in T.unroll(4):
-        output[lane, register] = T.reinterpret("uint32", d[register])
+        output[lane, register] = T.reinterpret(d[register], ty="uint32")
 
 
-@T.prim_func
+@T.function
 def raw_dense_fp8_f32_k32(
-    a_words: T.Buffer((32, 4), "uint32"),
-    b_words: T.Buffer((32, 2), "uint32"),
-    c_values: T.Buffer((32, 4), "float32"),
-    output: T.Buffer((32, 4), "uint32"),
+    a_words: T.Tensor((32, 4), "uint32"),
+    b_words: T.Tensor((32, 2), "uint32"),
+    c_values: T.Tensor((32, 4), "float32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((2,), "uint32")
     c = T.alloc_local((4,), "float32")
@@ -84,20 +82,19 @@ def raw_dense_fp8_f32_k32(
         c[3],
     )
     for register in T.unroll(4):
-        output[lane, register] = T.reinterpret("uint32", d[register])
+        output[lane, register] = T.reinterpret(d[register], ty="uint32")
 
 
-@T.prim_func
+@T.function
 def raw_sparse_f16_f32_k32(
-    a_words: T.Buffer((32, 4), "uint32"),
-    b_words: T.Buffer((32, 4), "uint32"),
-    c_values: T.Buffer((32, 4), "float32"),
-    metadata_words: T.Buffer((32,), "uint32"),
-    output: T.Buffer((32, 4), "uint32"),
+    a_words: T.Tensor((32, 4), "uint32"),
+    b_words: T.Tensor((32, 4), "uint32"),
+    c_values: T.Tensor((32, 4), "float32"),
+    metadata_words: T.Tensor((32,), "uint32"),
+    output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((4,), "uint32")
     accumulator = T.alloc_local((4,), "float32")
@@ -128,17 +125,16 @@ def raw_sparse_f16_f32_k32(
         1,
     )
     for register in T.unroll(4):
-        output[lane, register] = T.reinterpret("uint32", accumulator[register])
+        output[lane, register] = T.reinterpret(accumulator[register], ty="uint32")
 
 
-@T.prim_func
+@T.function
 def raw_dense_u8_wrap_and_sat(
-    wrap_output: T.Buffer((32, 4), "uint32"),
-    sat_output: T.Buffer((32, 4), "uint32"),
+    wrap_output: T.Tensor((32, 4), "uint32"),
+    sat_output: T.Tensor((32, 4), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a = T.alloc_local((4,), "uint32")
     b = T.alloc_local((2,), "uint32")
     c = T.alloc_local((4,), "uint32")

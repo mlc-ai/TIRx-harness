@@ -2,9 +2,9 @@
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # TVM's public .pred result ABI is a writable uint32 carrier.
 MAINTENANCE_CASES = (
@@ -21,7 +21,7 @@ def maintenance_case(preserve=True, layout=1, generic=False, *, invalid=False, c
     """layout=None invalidates/reinitializes instead of querying the layout."""
     pointer = f"barrier.ptr_to([{int(invalid)}])"
     address = (
-        f'T.reinterpret("uint64", {pointer})'
+        f'T.reinterpret({pointer}, ty="uint64")'
         if generic
         else f"T.cuda.cvta_generic_to_shared({pointer})"
     )
@@ -50,12 +50,11 @@ def maintenance_case(preserve=True, layout=1, generic=False, *, invalid=False, c
         if preserve or layout is None
         else 'T.if_then_else(lane == selected, T.Cast("uint32", value[0]), T.uint32(0))'
     )
-    return tvm.script.from_source(
-        f'''@T.prim_func
-def kernel(output: T.Buffer((32,), "uint32"), selected: T.int32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    return tvm_tirx.script.from_source(
+        f'''@T.function
+def kernel(output: T.Tensor((32,), "uint32"), selected: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64", align=8)
     address = T.alloc_local((1,), "{"uint64" if generic else "uint32"}")
     value = T.alloc_local((1,), "uint32")

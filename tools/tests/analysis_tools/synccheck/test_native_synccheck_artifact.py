@@ -8,7 +8,6 @@ import pytest
 from tests.numsim.support.kernels import (
     mapped_remote_mbarrier_pointer,
     mbarrier_missing_arrivals,
-    tma_copy_transaction_mismatch,
 )
 from tests.numsim.support.remote_mbarrier import (
     mapped_remote_mbarrier_cluster_view,
@@ -18,16 +17,14 @@ from tirx_harness import numsim
 from tirx_harness.numsim.api import ExecutionSubset
 from tirx_harness.numsim.checker_report import SyncCheckReport
 from tirx_harness.numsim.checkers import _run_synccheck as internal_synccheck
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_synccheck_clean():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -35,12 +32,12 @@ def native_synccheck_clean():
         T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
 
 
-@T.prim_func
+@T.function
 def native_synccheck_cta_sync_publishes_init():
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if warp == 0 and lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.cuda.cta_sync()
@@ -49,42 +46,38 @@ def native_synccheck_cta_sync_publishes_init():
         T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
 
 
-@T.prim_func
+@T.function
 def native_synccheck_use_before_init():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_wait_before_init():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
 
 
-@T.prim_func
+@T.function
 def native_synccheck_expect_tx_before_init():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
 
 
-@T.prim_func
+@T.function
 def native_synccheck_plain_arrival_overflow():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -92,14 +85,13 @@ def native_synccheck_plain_arrival_overflow():
         T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_data_dependent_protocol(
     slot: T.int32, base_count: T.uint32, active_lanes: T.int32
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), base_count)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[1]), base_count + 1)
@@ -110,76 +102,11 @@ def native_synccheck_data_dependent_protocol(
         T.cuda.mbarrier_wait(T.address_of(barriers[slot]), 0)
 
 
-@T.prim_func
-def native_synccheck_tma_two_generations(source: T.Buffer((2, 4), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    if lane == 0:
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-        Tx.copy_async(shared[:], source[0, :], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-        Tx.copy_async(shared[:], source[1, :], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 1)
-
-
-@T.prim_func
-def native_synccheck_late_wait_gates_next_completion(source: T.Buffer((4,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((3,), "uint64", scope="shared")
-    if (warp == 0) and (lane == 0):
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[1]), 1)
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[2]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-    T.cuda.cta_sync()
-
-    if (warp == 0) and (lane == 0):
-        T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
-        T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[1]))
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 1)
-    elif (warp == 1) and (lane == 0):
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-        T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[2]))
-    elif lane == 0:
-        T.cuda.mbarrier_wait(T.address_of(barriers[1]), 0)
-        T.cuda.mbarrier_wait(T.address_of(barriers[2]), 0)
-        Tx.copy_async(shared[:], source[:], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-
-
-@T.prim_func
-def native_synccheck_tma_completion_before_expect(source: T.Buffer((4,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    if lane == 0:
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-        T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
-        Tx.copy_async(shared[:], source[:], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 1)
-
-
-@T.prim_func
+@T.function
 def native_synccheck_generation_reuse(consume: T.int32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -191,52 +118,12 @@ def native_synccheck_generation_reuse(consume: T.int32):
             T.cuda.mbarrier_wait(T.address_of(barriers[0]), 1)
 
 
-@T.prim_func
-def native_synccheck_tma_over_delivery(source: T.Buffer((4,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    if lane == 0:
-        T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
-        T.ptx.fence.mbarrier_init.release.cluster()
-        Tx.copy_async(shared[:], source[:], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-        T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 8)
-        T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-
-
-@T.prim_func
-def native_synccheck_schedule_sensitive_tma(
-    source: T.Buffer((4,), "int32"), flag: T.Buffer((1,), "int32")
-):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "int32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
-    if warp == 0:
-        if lane == 0:
-            flag[0] = 1
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 2)
-            T.ptx.fence.mbarrier_init.release.cluster()
-            Tx.copy_async(shared[:], source[:], dispatch="tma_auto", mbar=T.address_of(barriers[0]))
-            T.ptx.mbarrier.arrive.expect_tx.shared.b64(T.address_of(barriers[0]), 16)
-            T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
-    else:
-        if lane == 0:
-            if flag[0] == 0:
-                T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[1]))
-            else:
-                T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
-
-
-@T.prim_func
+@T.function
 def native_synccheck_nonblocking_arrive_exposes_uninitialized_successor():
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if warp == 0:
         if lane == 0:
             T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
@@ -250,12 +137,12 @@ def native_synccheck_nonblocking_arrive_exposes_uninitialized_successor():
         T.ptx.bar.arrive(T.uint32(7), T.uint32(64))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_blocking_wait_exposes_uninitialized_successor():
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     if warp == 0 and lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -273,12 +160,12 @@ def native_synccheck_blocking_wait_exposes_uninitialized_successor():
             T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_no_waiter_arrival_exposes_uninitialized_successor():
-    T.device_entry()
-    warp = T.warp_id([3])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=96))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((2,), "uint64")
     if warp == 0 and lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.fence.mbarrier_init.release.cluster()
@@ -294,20 +181,17 @@ def native_synccheck_no_waiter_arrival_exposes_uninitialized_successor():
             T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[1]))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_two_ctas():
-    T.device_entry()
-    _cta = T.cta_id([2])
-    _warp = T.warp_id([1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_second_cluster_error():
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if cta == 0:
         if lane == 0:
             T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
@@ -319,22 +203,21 @@ def native_synccheck_second_cluster_error():
             T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_named_barrier_contract_mismatch():
-    T.device_entry()
-    warp = T.warp_id([2])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
     if warp == 0:
         T.ptx.bar.sync(T.uint32(3), T.uint32(64))
     else:
         T.ptx.bar.sync(T.uint32(3), T.uint32(32))
 
 
-@T.prim_func
+@T.function
 def native_synccheck_order_dependent_tcgen_allocations():
-    T.device_entry()
-    warp = T.warp_id([2])
-    _lane = T.lane_id([32])
-    addresses = T.alloc_buffer((2,), "uint32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    addresses = T.alloc_shared((2,), "uint32")
 
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(
@@ -777,115 +660,6 @@ def test_native_synccheck_deadlock_is_error_even_with_staged_waits(tmp_path):
     assert SyncCheckReport.from_native(result).verdict == "error"
 
 
-def test_public_native_synccheck_handles_completion_issued_before_future_expectation(tmp_path):
-    module = _transpile_analysis(native_synccheck_tma_completion_before_expect, cache_dir=tmp_path)
-    source = np.arange(4, dtype=np.int32)
-    result = _run_native_phase(module, {"source": source})
-
-    assert result["verdict"] == "clean"
-    assert result["findings"] == []
-    assert result["incomplete"] == []
-
-    effect_names = [effect["effect"] for effect in result["effects"]]
-    assert effect_names == [
-        "mbarrier.init",
-        "mbarrier.arrive",
-        "mbarrier.completion_issue",
-        "mbarrier.complete_tx",
-        "mbarrier.wait",
-        "mbarrier.arrive",
-        "mbarrier.wait",
-    ]
-    issue = result["effects"][2]["outcome"]["actions"][0]
-    completion = result["effects"][3]["outcome"]
-    assert issue["generation"] == completion["generation"] == 1
-    assert issue["transactions"] == completion["transactions"] == 16
-    assert completion["completed_generation"] == 1
-    assert completion["ready_warps"] == [0]
-    arrives = [effect for effect in result["effects"] if effect["effect"] == "mbarrier.arrive"]
-    waits = [effect for effect in result["effects"] if effect["effect"] == "mbarrier.wait"]
-    assert [effect["outcome"]["completed_generation"] for effect in arrives] == [0, None]
-    assert [effect["outcome"]["committed"]["generation"] for effect in waits] == [0, 1]
-
-    coverage = numsim.CoverageBounds(max_warp_preemptions=0, max_completion_schedule_deviations=1)
-    report = internal_synccheck(
-        native_synccheck_tma_completion_before_expect,
-        inputs={"source": source},
-        cache_dir=tmp_path,
-        max_workers=1,
-        coverage_bounds=coverage,
-        resource_limits=_resource_limits(),
-    )
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["incomplete"] == []
-    assert native["counterexample"] is None
-    assert native["coverage"]["eligible_for_clean"] is True
-    assert native["coverage"]["maximum_observed_usage"]["completion_schedule_deviations"] == 0
-
-
-def test_native_synccheck_tracks_completion_tokens_across_future_generation(tmp_path):
-    module = _transpile_analysis(native_synccheck_tma_two_generations, cache_dir=tmp_path)
-    source = np.arange(8, dtype=np.int32).reshape(2, 4)
-
-    result = _run_native_phase(module, {"source": source})
-
-    assert result["verdict"] == "clean"
-    assert result["findings"] == []
-    assert result["incomplete"] == []
-    issues = [
-        effect for effect in result["effects"] if effect["effect"] == "mbarrier.completion_issue"
-    ]
-    completions = [
-        effect for effect in result["effects"] if effect["effect"] == "mbarrier.complete_tx"
-    ]
-    assert len(issues) == len(completions) == 2
-    assert [effect["outcome"]["actions"][0]["generation"] for effect in issues] == [0, 1]
-    assert [effect["outcome"]["actions"][0]["transactions"] for effect in issues] == [16, 16]
-    assert [effect["outcome"]["generation"] for effect in completions] == [0, 1]
-    assert [effect["outcome"]["completed_generation"] for effect in completions] == [0, 1]
-    assert [effect["outcome"]["ready_warps"] for effect in completions] == [[0], [0]]
-    assert SyncCheckReport.from_native(result).verdict == "clean"
-
-    report = internal_synccheck(
-        native_synccheck_tma_two_generations,
-        inputs={"source": source},
-        cache_dir=tmp_path,
-        max_workers=1,
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=0, max_completion_schedule_deviations=1
-        ),
-        resource_limits=_resource_limits(),
-    )
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["incomplete"] == []
-    assert native["counterexample"] is None
-    assert native["coverage"]["eligible_for_clean"] is True
-    assert native["coverage"]["maximum_observed_usage"] == {
-        "warp_preemptions": 0,
-        "completion_schedule_deviations": 0,
-    }
-    assert native["search"]["algorithm"] == "fixed_sync_state"
-    assert native["search"]["run_count"] == 1
-    assert native["search"]["backtrack_count"] == 0
-
-
-def test_native_synccheck_accepts_late_wait_ordered_before_next_completion(tmp_path):
-    module = _transpile_analysis(
-        native_synccheck_late_wait_gates_next_completion,
-        cache_dir=tmp_path,
-    )
-    source = np.arange(4, dtype=np.int32)
-
-    result = _run_native_phase(module, {"source": source})
-
-    assert result["verdict"] == "clean"
-    assert result["findings"] == []
-    assert result["incomplete"] == []
-    assert result["execution_error"] is None
-
-
 def test_public_native_synccheck_rejects_unconsumed_generation_reuse(tmp_path):
     module = _transpile_analysis(native_synccheck_generation_reuse, cache_dir=tmp_path)
     clean_phase = _run_native_phase(module, {"consume": np.int32(1)})
@@ -928,141 +702,6 @@ def test_public_native_synccheck_rejects_unconsumed_generation_reuse(tmp_path):
     error_native = error.to_dict()["native"]
     assert error_native["input"]["digest"] != clean_native["input"]["digest"]
     assert "before generation 0 was consumed" in finding["message"]
-
-
-def test_public_native_synccheck_transaction_under_delivery_is_exact_error(tmp_path):
-    source = np.arange(32, dtype=np.float16).reshape(4, 8)
-    output = np.zeros((4, 8), dtype=np.float16)
-
-    report = internal_synccheck(
-        tma_copy_transaction_mismatch,
-        inputs={"source": source, "output": output},
-        cache_dir=tmp_path,
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=1, max_completion_schedule_deviations=1
-        ),
-        resource_limits=_resource_limits(),
-    )
-
-    assert report.verdict == "error"
-    assert [(finding.status, finding.kind) for finding in report.findings] == [
-        ("error", "deadlock")
-    ]
-    assert "transactions=64/68" in report.findings[0].message
-    native = report.to_dict()["native"]
-    assert native["verdict"] == "error"
-    assert native["incomplete"] == []
-    assert native["coverage"]["termination"]["kind"] == "finding"
-    assert native["counterexample"] is None
-    assert native["execution_error"]["kind"] == "deadlock"
-    assert "transactions=64/68" in native["execution_error"]["message"]
-
-
-def test_public_native_synccheck_transaction_over_delivery_is_exact_error(tmp_path):
-    source = np.arange(4, dtype=np.int32)
-
-    report = internal_synccheck(
-        native_synccheck_tma_over_delivery,
-        inputs={"source": source},
-        cache_dir=tmp_path,
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=0, max_completion_schedule_deviations=1
-        ),
-        resource_limits=_resource_limits(),
-    )
-
-    finding = _assert_public_native_protocol_error(
-        report, kind="mbarrier_transaction_over_delivery", effect="mbarrier.complete_tx"
-    )
-    assert "completed 16 transaction bytes, expected 8" in finding["message"]
-
-
-def test_public_native_synccheck_executes_one_racy_control_path_without_replay(tmp_path):
-    module = _transpile_analysis(native_synccheck_schedule_sensitive_tma, cache_dir=tmp_path)
-    source = np.arange(4, dtype=np.int32)
-    flag_array = np.zeros(1, dtype=np.int32)
-    flag = flag_array
-    engine = numsim.Engine()
-
-    result = engine.run_synccheck_phase(
-        module,
-        {"source": source, "flag": flag},
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=0, max_completion_schedule_deviations=0
-        ),
-        resource_limits=_resource_limits(),
-    )
-
-    assert result.verdict == "error"
-    assert result.payload["search"]["algorithm"] == "fixed_sync_state"
-    assert result.payload["search"]["run_count"] == 1
-    assert result.payload["search"]["backtrack_count"] == 0
-    assert result.payload["coverage"]["termination"]["kind"] == "finding"
-    assert result.counterexample is None
-    assert [finding["kind"] for finding in result.findings] == [
-        "mbarrier_init_not_happens_before_use"
-    ]
-    assert result.payload["search"]["runs"] == [
-        {
-            "prefix": [],
-            "warp_preemption_bound": 0,
-            "trace_digest": None,
-            "trace_digest_hex": None,
-            "coverage_usage": {
-                "warp_preemptions": 0,
-                "completion_schedule_deviations": 0,
-            },
-            "status": "finding",
-        }
-    ]
-
-    report = internal_synccheck(
-        native_synccheck_schedule_sensitive_tma,
-        inputs={"source": source, "flag": flag},
-        cache_dir=tmp_path,
-        max_workers=1,
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=0, max_completion_schedule_deviations=0
-        ),
-        resource_limits=_resource_limits(),
-    )
-    assert [(finding.status, finding.kind) for finding in report.findings] == [
-        ("error", "mbarrier_init_not_happens_before_use")
-    ]
-    native = report.to_dict()["native"]
-    assert native["incomplete"] == []
-    assert native["counterexample"] is None
-    assert [finding["kind"] for finding in native["findings"]] == [
-        "mbarrier_init_not_happens_before_use"
-    ]
-    np.testing.assert_array_equal(flag_array, np.zeros(1, dtype=np.int32))
-
-    limited = engine.run_synccheck_phase(
-        module,
-        {"source": source, "flag": flag},
-        coverage_bounds=numsim.CoverageBounds(
-            max_warp_preemptions=0, max_completion_schedule_deviations=0
-        ),
-        resource_limits=_resource_limits(max_schedules=1),
-    )
-    assert limited.verdict == "error"
-    assert limited.counterexample is None
-    assert limited.payload["coverage"]["termination"]["kind"] == "finding"
-    assert limited.payload["coverage"]["resource_usage"]["schedules"] == 1
-    assert [finding["kind"] for finding in limited.findings] == [
-        "mbarrier_init_not_happens_before_use"
-    ]
-
-    with pytest.raises(numsim.NumSimExecutionError, match="missing required bindings"):
-        engine.run_synccheck_phase(
-            module,
-            {"flag": flag},
-            coverage_bounds=numsim.CoverageBounds(
-                max_warp_preemptions=0, max_completion_schedule_deviations=0
-            ),
-            resource_limits=_resource_limits(),
-        )
-    np.testing.assert_array_equal(flag_array, np.zeros(1, dtype=np.int32))
 
 
 def test_synccheck_reports_nonblocking_arrival_successor_error_without_replay(tmp_path):

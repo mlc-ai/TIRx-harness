@@ -11,12 +11,13 @@ from __future__ import annotations
 import numpy as np
 
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
+from tests.numsim.support.execution import specialize
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase
 
 
 def _specialize(kernel, values: dict[str, int | float]):
-    return kernel.specialize(
-        {param: values[param.name] for param in kernel.params if param.name in values}
+    return specialize(
+        kernel, {param: values[param.name] for param in kernel.params if param.name in values}
     )
 
 

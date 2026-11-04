@@ -5,27 +5,25 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ldmatrix_orders_cross_lane_shared_writes():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((512,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((512,), "uint8")
     fragment = T.alloc_local((1,), "uint32")
     for byte in T.unroll(16):
         shared[lane * 16 + byte] = T.cast(lane * 16 + byte, "uint8")
     T.ptx.ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16(fragment[0], shared.ptr_to([lane * 16]))
 
 
-@T.prim_func
-def stmatrix_orders_cross_lane_shared_reads(output: T.Buffer((64,), "uint16")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((8, 8), "uint16", scope="shared")
+@T.function
+def stmatrix_orders_cross_lane_shared_reads(output: T.Tensor((64,), "uint16")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((8, 8), "uint16")
     fragment = T.alloc_local((1,), "uint32")
     low = T.cast(lane * 2 + 1, "uint32")
     high = T.cast(lane * 2 + 2, "uint32")

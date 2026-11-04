@@ -36,23 +36,22 @@ from tests.numsim.microtests.cases.ptx_cvt_fp8_goldens import (
     GOLDENS,
 )
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 VALUE_COUNT = 256
 
 
-@T.prim_func
+@T.function
 def packed_fp8_cvt_sm100_forms(
-    f32_source: T.Buffer((256,), "float32"),
-    f16x2_source: T.Buffer((256,), "uint32"),
-    f8x2_source: T.Buffer((256,), "uint16"),
-    pack_from_f32: T.Buffer((4, 256), "uint16"),
-    pack_from_f16x2: T.Buffer((4, 256), "uint16"),
-    unpack_to_f16x2: T.Buffer((4, 256), "uint32"),
+    f32_source: T.Tensor((256,), "float32"),
+    f16x2_source: T.Tensor((256,), "uint32"),
+    f8x2_source: T.Tensor((256,), "uint16"),
+    pack_from_f32: T.Tensor((4, 256), "uint16"),
+    pack_from_f16x2: T.Tensor((4, 256), "uint16"),
+    unpack_to_f16x2: T.Tensor((4, 256), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for step in range(8):
         index: T.let = step * 32 + lane
         following: T.let = (index + 1) % 256
@@ -80,16 +79,15 @@ def packed_fp8_cvt_sm100_forms(
         T.ptx["cvt.rn.relu.f16x2.e5m2x2"](unpack_to_f16x2[3, index], packed_f8x2)
 
 
-@T.prim_func
+@T.function
 def packed_fp8_cvt_bf16x2_forms(
-    bf16x2_source: T.Buffer((256,), "uint32"),
-    f8x2_source: T.Buffer((256,), "uint16"),
-    pack_from_bf16x2: T.Buffer((4, 256), "uint16"),
-    unpack_to_bf16x2: T.Buffer((8, 256), "uint32"),
+    bf16x2_source: T.Tensor((256,), "uint32"),
+    f8x2_source: T.Tensor((256,), "uint16"),
+    pack_from_bf16x2: T.Tensor((4, 256), "uint16"),
+    unpack_to_bf16x2: T.Tensor((8, 256), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     for step in range(8):
         index: T.let = step * 32 + lane
         packed_bf16x2: T.let = bf16x2_source[index]

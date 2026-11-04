@@ -9,8 +9,9 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tests.numsim.support._tirx_kernels import load_tirx_kernel
 from tirx_harness.numsim.cases import ComparisonSpec, NumSimCase, TensorMap
 
@@ -47,7 +48,7 @@ def _prepare(name, config, launch=None):
         spec.loader.exec_module(module)
     calls, tensors, descriptors = [], {}, {}
     data_ptr = torch.Tensor.data_ptr
-    get_global_func = tvm.get_global_func
+    get_global_func = tvm_ffi.get_global_func
 
     def pointer(tensor):
         address = data_ptr(tensor)
@@ -76,7 +77,7 @@ def _prepare(name, config, launch=None):
 
     class Executable:
         def __init__(self, func):
-            if isinstance(func, tvm.IRModule):
+            if isinstance(func, tvm_tirx.IRModule):
                 funcs = list(func.functions.values())
                 assert len(funcs) == 1
                 func = funcs[0]
@@ -112,10 +113,13 @@ def _prepare(name, config, launch=None):
         stack.enter_context(patch.object(torch.cuda, "current_device", return_value=0))
         stack.enter_context(patch("tirx_kernels.runner.hardware_num_sms", return_value=1))
         stack.enter_context(patch("tirx_kernels.runner.compile_kernel", compile_kernel))
-        stack.enter_context(patch.object(tvm, "compile", compile_kernel))
+        # tvm_tirx.compile and tvm_tirx.tirx.compile name one function; patch both
+        # names, since kernels call either.
+        stack.enter_context(patch.object(tvm_tirx, "compile", compile_kernel))
+        stack.enter_context(patch.object(tvm_tirx.tirx, "compile", compile_kernel))
         stack.enter_context(
             patch.object(
-                tvm,
+                tvm_ffi,
                 "get_global_func",
                 lambda name, *a, **k: encode
                 if name == "runtime.cuTensorMapEncodeTiled"

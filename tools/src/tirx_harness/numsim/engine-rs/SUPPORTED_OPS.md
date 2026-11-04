@@ -19,8 +19,15 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.ballot_sync` | pure_scalar | modeled |  |
 | `tirx.cuda.bfloat1622float2` | pure_scalar | modeled |  |
 | `tirx.cuda.bfloat162float` | pure_scalar | modeled |  |
+| `tirx.cuda.block_dim` | pure_scalar | modeled |  |
+| `tirx.cuda.block_idx` | pure_scalar | modeled |  |
+| `tirx.cuda.bmma_sync` | architecture_rejection | rejected | binary WMMA fragments are not modeled |
 | `tirx.cuda.clock64` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
+| `tirx.cuda.cluster_cta_id` | pure_scalar | modeled |  |
+| `tirx.cuda.cluster_dim` | pure_scalar | modeled |  |
+| `tirx.cuda.cluster_id` | pure_scalar | modeled |  |
 | `tirx.cuda.cluster_sync` | synchronization | modeled |  |
+| `tirx.cuda.cta_pair_id` | pure_scalar | modeled |  |
 | `tirx.cuda.cta_reduce` | pure_scalar | modeled |  |
 | `tirx.cuda.cta_sync` | synchronization | modeled |  |
 | `tirx.cuda.cvta_generic_to_shared` | raw_memory | modeled |  |
@@ -39,6 +46,7 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.fp8x4_e4m3_from_float4` | pure_scalar | modeled |  |
 | `tirx.cuda.func_call` | validated_cuda_helper | modeled | only reviewed CUDA helper bodies are modeled; opaque CUDA helper bodies are rejected |
 | `tirx.cuda.get_tmem_addr` | pure_scalar | modeled |  |
+| `tirx.cuda.grid_dim` | pure_scalar | modeled |  |
 | `tirx.cuda.grid_sync` | synchronization | modeled |  |
 | `tirx.cuda.half2float` | pure_scalar | modeled |  |
 | `tirx.cuda.half8tofloat8` | destination_passing_arithmetic | modeled |  |
@@ -51,17 +59,19 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.iket_range_push` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.iket_range_start` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.iket_sentinel_token` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
-| `tirx.cuda.ldg` | memory | modeled |  |
+| `tirx.cuda.lane_id` | pure_scalar | modeled |  |
+| `tirx.cuda.linear_thread_id` | pure_scalar | modeled |  |
 | `tirx.cuda.make_float2` | pure_scalar | modeled |  |
 | `tirx.cuda.mbarrier_wait` | synchronization | modeled |  |
 | `tirx.cuda.mbarrier_wait_acquire_cluster` | synchronization | modeled |  |
+| `tirx.cuda.mma_fill` | warp_matrix_instruction | modeled |  |
+| `tirx.cuda.mma_store` | warp_matrix_instruction | modeled |  |
 | `tirx.cuda.mov_sreg` | pure_scalar | deterministic_representative | logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero |
 | `tirx.cuda.nano_sleep` | synchronization | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.printf` | synchronization | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.reduce_add_sync_u32` | pure_scalar | modeled |  |
 | `tirx.cuda.reduce_min_sync_u32` | pure_scalar | modeled |  |
 | `tirx.cuda.runtime_instr_desc` | destination_passing_arithmetic | modeled |  |
-| `tirx.cuda.sm100_2sm_leader_smem_addr` | pure_scalar | modeled |  |
 | `tirx.cuda.smem_addr_from_uint64` | pure_scalar | modeled |  |
 | `tirx.cuda.syncthreads_and` | pure_scalar | modeled |  |
 | `tirx.cuda.syncthreads_or` | pure_scalar | modeled |  |
@@ -69,12 +79,21 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.tcgen05_encode_instr_descriptor_block_scaled` | raw_tcgen | modeled | CUDA helper dtype and shape validation with exact instruction-descriptor bits; dense FP4 K96 encodes bit31 for CTA1/M128 or CTA2/M256; actual MMA consumers separately enforce architecture, layout, scale and memory-access requirements |
 | `tirx.cuda.tcgen05_encode_matrix_descriptor` | raw_tcgen | modeled | constant and runtime int32 LDO/SDO/swizzle use the same per-lane CUDA-helper encoding; offsets and shared-address units truncate to 14-bit fields; swizzle values outside 0..4 leave the zero-initialized layout; the existing address binding and destination store contracts remain enforced; encoding does not read shared data or validate a future TCGEN access, whose consumer retains descriptor, alignment, provenance and footprint checks |
 | `tirx.cuda.thread_fence` | synchronization | ordering_only | operation has no numerical payload; native Racecheck consumes its typed order and scope for scoped-global happens-before analysis; PTX instruction predicates restrict publication/acquisition to issuing lanes, and acquire/release fence halves are not strengthened to acq_rel |
+| `tirx.cuda.thread_idx` | pure_scalar | modeled |  |
+| `tirx.cuda.thread_in_warpgroup` | pure_scalar | modeled |  |
 | `tirx.cuda.thread_rank` | pure_scalar | modeled |  |
+| `tirx.cuda.timer_end` | pure_scalar | modeled |  |
+| `tirx.cuda.timer_finalize` | pure_scalar | modeled |  |
+| `tirx.cuda.timer_init` | pure_scalar | modeled |  |
+| `tirx.cuda.timer_start` | pure_scalar | modeled |  |
 | `tirx.cuda.trap_when_assert_failed` | assertion | modeled |  |
 | `tirx.cuda.uint_as_float` | pure_scalar | modeled |  |
 | `tirx.cuda.wait_until` | wait_until | modeled |  |
+| `tirx.cuda.warp_id` | pure_scalar | modeled |  |
+| `tirx.cuda.warp_in_warpgroup` | pure_scalar | modeled |  |
 | `tirx.cuda.warp_reduce` | pure_scalar | modeled |  |
 | `tirx.cuda.warp_sync` | synchronization | modeled |  |
+| `tirx.cuda.warpgroup_id` | pure_scalar | modeled |  |
 | `tirx.cuda.warpgroup_sync` | synchronization | modeled |  |
 | `tirx.cuda.wgmma_encode_matrix_descriptor` | architecture_rejection | rejected | WGMMA is not supported by the SM100 NumSim target |
 | `tirx.cuda.wgmma_noop_barrier` | architecture_rejection | rejected | WGMMA is not supported by the SM100 NumSim target |
@@ -586,32 +605,6 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.ptx.wgmma_wait_group` | architecture_rejection | rejected | WGMMA is not supported by the SM100 NumSim target |
 | `tirx.ptx.xor` | register_bit_manipulation | modeled | table register types and bit carriers share instruction-predicated reads/writeback; preserved predicate outputs retain Boolean truth; unspecified inactive outputs use a zero representative |
 
-## CUDA Tile Primitives
+## CUDA Tile Operations
 
-Every warp-, warpgroup-, or CTA-scoped tile call validates complete dynamic participation in its declared execution scope, including register-only lowerings with no completion barrier.
-
-| Operation | Fidelity | Notes |
-| --- | --- | --- |
-| `tirx.tile.add` | modeled |  |
-| `tirx.tile.cast` | modeled |  |
-| `tirx.tile.copy` | modeled |  |
-| `tirx.tile.copy_async` | modeled | the engine resolves each TMA shared payload component from concrete runtime addresses and requires its start to be 128-byte aligned |
-| `tirx.tile.exp` | modeled |  |
-| `tirx.tile.exp2` | modeled |  |
-| `tirx.tile.fdiv` | modeled |  |
-| `tirx.tile.fill` | modeled |  |
-| `tirx.tile.fma` | modeled |  |
-| `tirx.tile.gemm` | modeled |  |
-| `tirx.tile.gemm_async` | modeled |  |
-| `tirx.tile.log2` | modeled |  |
-| `tirx.tile.max` | modeled |  |
-| `tirx.tile.maximum` | modeled |  |
-| `tirx.tile.min` | modeled |  |
-| `tirx.tile.mul` | modeled |  |
-| `tirx.tile.permute_layout` | modeled |  |
-| `tirx.tile.reciprocal` | modeled |  |
-| `tirx.tile.silu` | modeled |  |
-| `tirx.tile.sqrt` | modeled |  |
-| `tirx.tile.sub` | modeled |  |
-| `tirx.tile.sum` | modeled |  |
-| `tirx.tile.zero` | modeled |  |
+`tirx.cuda.tile.apply` and `tirx.cuda.tile.ewise` are expanded by TIRx's TileDispatch before analysis; NumSim models the instructions and statements it selects.

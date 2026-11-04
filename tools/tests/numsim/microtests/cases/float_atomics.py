@@ -6,24 +6,23 @@ from typing import Any
 
 import ml_dtypes
 import numpy as np
+import tvm_ffi
 from tests.numsim.microtests.harness import PairedBuffer
 
-import tvm
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f16_global_shared(
-    counter: T.Buffer((1,), "float16"),
-    initial: T.Buffer((1,), "float16"),
-    increment: T.Buffer((1,), "float16"),
-    old_values: T.Buffer((2,), "float16"),
-    final_values: T.Buffer((2,), "float16"),
+    counter: T.Tensor((1,), "float16"),
+    initial: T.Tensor((1,), "float16"),
+    increment: T.Tensor((1,), "float16"),
+    old_values: T.Tensor((2,), "float16"),
+    final_values: T.Tensor((2,), "float16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "float16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "float16")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -36,18 +35,17 @@ def cuda_atomic_f16_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_bf16_global_shared(
-    counter: T.Buffer((1,), "bfloat16"),
-    initial: T.Buffer((1,), "bfloat16"),
-    increment: T.Buffer((1,), "bfloat16"),
-    old_values: T.Buffer((2,), "bfloat16"),
-    final_values: T.Buffer((2,), "bfloat16"),
+    counter: T.Tensor((1,), "bfloat16"),
+    initial: T.Tensor((1,), "bfloat16"),
+    increment: T.Tensor((1,), "bfloat16"),
+    old_values: T.Tensor((2,), "bfloat16"),
+    final_values: T.Tensor((2,), "bfloat16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "bfloat16", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "bfloat16")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -60,18 +58,17 @@ def cuda_atomic_bf16_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f32_global_shared(
-    counter: T.Buffer((1,), "float32"),
-    initial: T.Buffer((1,), "float32"),
-    increment: T.Buffer((1,), "float32"),
-    old_values: T.Buffer((2,), "float32"),
-    final_values: T.Buffer((2,), "float32"),
+    counter: T.Tensor((1,), "float32"),
+    initial: T.Tensor((1,), "float32"),
+    increment: T.Tensor((1,), "float32"),
+    old_values: T.Tensor((2,), "float32"),
+    final_values: T.Tensor((2,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "float32")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -84,18 +81,17 @@ def cuda_atomic_f32_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f64_global_shared(
-    counter: T.Buffer((1,), "float64"),
-    initial: T.Buffer((1,), "float64"),
-    increment: T.Buffer((1,), "float64"),
-    old_values: T.Buffer((2,), "float64"),
-    final_values: T.Buffer((2,), "float64"),
+    counter: T.Tensor((1,), "float64"),
+    initial: T.Tensor((1,), "float64"),
+    increment: T.Tensor((1,), "float64"),
+    old_values: T.Tensor((2,), "float64"),
+    final_values: T.Tensor((2,), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "float64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "float64")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -108,18 +104,17 @@ def cuda_atomic_f64_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f16x2_global_shared(
-    counter: T.Buffer((1,), "float16x2"),
-    initial: T.Buffer((1,), "float16x2"),
-    increment: T.Buffer((1,), "float16x2"),
-    old_values: T.Buffer((2,), "float16x2"),
-    final_values: T.Buffer((2,), "float16x2"),
+    counter: T.Tensor((1,), "float16x2"),
+    initial: T.Tensor((1,), "float16x2"),
+    increment: T.Tensor((1,), "float16x2"),
+    old_values: T.Tensor((2,), "float16x2"),
+    final_values: T.Tensor((2,), "float16x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "float16x2", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "float16x2")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -132,18 +127,17 @@ def cuda_atomic_f16x2_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_bf16x2_global_shared(
-    counter: T.Buffer((1,), "bfloat16x2"),
-    initial: T.Buffer((1,), "bfloat16x2"),
-    increment: T.Buffer((1,), "bfloat16x2"),
-    old_values: T.Buffer((2,), "bfloat16x2"),
-    final_values: T.Buffer((2,), "bfloat16x2"),
+    counter: T.Tensor((1,), "bfloat16x2"),
+    initial: T.Tensor((1,), "bfloat16x2"),
+    increment: T.Tensor((1,), "bfloat16x2"),
+    old_values: T.Tensor((2,), "bfloat16x2"),
+    final_values: T.Tensor((2,), "bfloat16x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((1,), "bfloat16x2", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((1,), "bfloat16x2")
     if lane == 0:
         shared[0] = initial[0]
     T.cuda.warp_sync()
@@ -156,16 +150,15 @@ def cuda_atomic_bf16x2_global_shared(
         final_values[1] = shared[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f32x2_global(
-    counter: T.Buffer((1,), "float32x2"),
-    increment: T.Buffer((1,), "float32x2"),
-    old_value: T.Buffer((1,), "float32x2"),
-    final_value: T.Buffer((1,), "float32x2"),
+    counter: T.Tensor((1,), "float32x2"),
+    increment: T.Tensor((1,), "float32x2"),
+    old_value: T.Tensor((1,), "float32x2"),
+    final_value: T.Tensor((1,), "float32x2"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old_value[0] = T.cuda.atomic_add(counter.ptr_to([0]), increment[0])
     T.cuda.warp_sync()
@@ -173,16 +166,15 @@ def cuda_atomic_f32x2_global(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def cuda_atomic_f32x4_global(
-    counter: T.Buffer((1,), "float32x4"),
-    increment: T.Buffer((1,), "float32x4"),
-    old_value: T.Buffer((1,), "float32x4"),
-    final_value: T.Buffer((1,), "float32x4"),
+    counter: T.Tensor((1,), "float32x4"),
+    increment: T.Tensor((1,), "float32x4"),
+    old_value: T.Tensor((1,), "float32x4"),
+    final_value: T.Tensor((1,), "float32x4"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         old_value[0] = T.cuda.atomic_add(counter.ptr_to([0]), increment[0])
     T.cuda.warp_sync()
@@ -190,21 +182,20 @@ def cuda_atomic_f32x4_global(
         final_value[0] = counter[0]
 
 
-@T.prim_func
+@T.function
 def ptx_atomic_f32_global_shared(
-    atom_cell: T.Buffer((1,), "float32"),
-    red_cell: T.Buffer((1,), "float32"),
-    initial: T.Buffer((1,), "float32"),
-    increment: T.Buffer((1,), "float32"),
-    atom_old: T.Buffer((2,), "float32"),
-    atom_final: T.Buffer((2,), "float32"),
-    red_final: T.Buffer((2,), "float32"),
+    atom_cell: T.Tensor((1,), "float32"),
+    red_cell: T.Tensor((1,), "float32"),
+    initial: T.Tensor((1,), "float32"),
+    increment: T.Tensor((1,), "float32"),
+    atom_old: T.Tensor((2,), "float32"),
+    atom_final: T.Tensor((2,), "float32"),
+    red_final: T.Tensor((2,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_atom = T.alloc_buffer((1,), "float32", scope="shared")
-    shared_red = T.alloc_buffer((1,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_atom = T.alloc_shared((1,), "float32")
+    shared_red = T.alloc_shared((1,), "float32")
     if lane == 0:
         shared_atom[0] = initial[0]
         shared_red[0] = initial[0]
@@ -236,21 +227,20 @@ def ptx_atomic_f32_global_shared(
         red_final[1] = shared_red[0]
 
 
-@T.prim_func
+@T.function
 def ptx_atomic_f64_global_shared(
-    atom_cell: T.Buffer((1,), "float64"),
-    red_cell: T.Buffer((1,), "float64"),
-    initial: T.Buffer((1,), "float64"),
-    increment: T.Buffer((1,), "float64"),
-    atom_old: T.Buffer((2,), "float64"),
-    atom_final: T.Buffer((2,), "float64"),
-    red_final: T.Buffer((2,), "float64"),
+    atom_cell: T.Tensor((1,), "float64"),
+    red_cell: T.Tensor((1,), "float64"),
+    initial: T.Tensor((1,), "float64"),
+    increment: T.Tensor((1,), "float64"),
+    atom_old: T.Tensor((2,), "float64"),
+    atom_final: T.Tensor((2,), "float64"),
+    red_final: T.Tensor((2,), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared_atom = T.alloc_buffer((1,), "float64", scope="shared")
-    shared_red = T.alloc_buffer((1,), "float64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared_atom = T.alloc_shared((1,), "float64")
+    shared_red = T.alloc_shared((1,), "float64")
     if lane == 0:
         shared_atom[0] = initial[0]
         shared_red[0] = initial[0]
@@ -293,7 +283,7 @@ def _bf16_buffer(values: np.ndarray) -> PairedBuffer:
 
 
 def _vector_buffer(values: np.ndarray, logical_dtype: str) -> PairedBuffer:
-    data_type = tvm.DataType(logical_dtype)
+    data_type = tvm_ffi.dtype(logical_dtype)
     lanes = int(data_type.lanes)
     base_dtype = np.dtype(logical_dtype[: -len(f"x{lanes}")])
     logical = np.asarray(values, dtype=base_dtype).reshape(-1, lanes)

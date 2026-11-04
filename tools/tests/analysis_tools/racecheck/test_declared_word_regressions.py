@@ -8,13 +8,11 @@ the mechanism it guards.
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _flag_inputs():
@@ -32,14 +30,14 @@ def _handoff(*, writer_fence: str, reader_fence: str, publish: str):
     if the wait is worth an acquire, so `out = data[0]` is the question the
     checker has to answer.
     """
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def handoff(flag: T.Buffer((1,), "int32"), data: T.Buffer((1,), "int32"),
-            out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def handoff(flag: T.Tensor((1,), "int32"), data: T.Tensor((1,), "int32"),
+            out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.local_scalar("int32")
     if lane == 0:
         if cta == 0:
@@ -117,70 +115,19 @@ def test_a_relaxed_store_composes_into_a_release_with_a_preceding_fence():
     report.require_clean()
 
 
-def test_a_declared_wait_merges_its_tcgen_frontier_without_deadlocking():
-    """Guards against re-taking a lock the effect dispatch already holds.
-
-    A declared wait carries the specialized `tcgen05.fence` execution-ordering
-    frontier to the waiting actor, and it does that while the shard's race lock
-    is held for the whole effect match -- so the merge has to go through that
-    guard rather than acquire the lock again. When it acquired it again the
-    checker self-deadlocked: no error and no verdict, just a run that never
-    returned.
-
-    The shape matters. Only a kernel whose handoff sits between two
-    `tcgen05.fence` halves reaches that merge at all, so a plain flag handoff
-    would pass whether the bug is present or not. A wall-clock bound is the
-    only assertion that catches a hang.
-
-    This covers half of the mechanism and knows it: the bound says the merge
-    returned, not that the frontier arrived. Deleting the merge outright leaves
-    this test green, and
-    `test_native_tcgen_thread_fence.py::test_cross_thread_cp_to_mma_requires_both_thread_fences`
-    is what fails then -- its `relaxed_flag` case is clean only if the declared
-    wait carried the frontier across. The two together are the control; neither
-    alone is.
-    """
-    from tests.analysis_tools.racecheck import test_native_tcgen_thread_fence as tcgen
-
-    finished = threading.Event()
-    box: dict[str, object] = {}
-
-    def run():
-        try:
-            box["report"] = tcgen._run(
-                with_before=True,
-                with_after=True,
-                handoff=1,  # the declared relaxed flag between the fence halves
-                cache_dir=None,
-            )
-        except BaseException as exc:
-            box["error"] = exc
-        finally:
-            finished.set()
-
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    assert finished.wait(timeout=180), (
-        "a declared wait did not return within 180s; the checker is most "
-        "likely deadlocked re-acquiring its own shard lock"
-    )
-    if "error" in box:
-        raise box["error"]  # type: ignore[misc]
-
-
 def test_raw_protocol_reports_only_the_proven_payload_race():
     """A relaxed flag read does not acquire the payload's publication.
 
     Report that proven data race; missing wait syntax is not a separate defect.
     """
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def read_once(flag: T.Buffer((1,), "int32"), data: T.Buffer((1,), "int32"),
-              out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def read_once(flag: T.Tensor((1,), "int32"), data: T.Tensor((1,), "int32"),
+              out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.local_scalar("int32")
     if lane == 0:
         if cta == 0:
@@ -213,14 +160,14 @@ def test_a_phase_flip_predicate_takes_the_edge_of_the_arrival_that_flipped_it():
     history would order the wrong thing.
     """
 
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def phase_flip(state: T.Buffer((1,), "uint32"), data: T.Buffer((1,), "int32"),
-               out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def phase_flip(state: T.Tensor((1,), "uint32"), data: T.Tensor((1,), "int32"),
+               out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     old = T.local_scalar("uint32")
     cur = T.local_scalar("uint32")
     if lane == 0:
@@ -255,14 +202,14 @@ def test_two_waits_on_one_word_never_conflict_with_each_other():
     protocol.
     """
 
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def two_waiters(state: T.Buffer((1,), "int32"), data: T.Buffer((1,), "int32"),
-                out: T.Buffer((2,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([3])
-    lane = T.lane_id([32])
+@T.function
+def two_waiters(state: T.Tensor((1,), "int32"), data: T.Tensor((1,), "int32"),
+                out: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.local_scalar("int32")
     if lane == 0:
         if cta == 0:
@@ -293,14 +240,14 @@ def test_a_morally_strong_pair_is_exempt_unless_one_side_is_a_plain_read():
     read-modify-writes and a release store against the contributions joining
     its release sequence starts reporting `write_write`.
     """
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def publish_and_contribute(flag: T.Buffer((1,), "int32"),
-                           out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def publish_and_contribute(flag: T.Tensor((1,), "int32"),
+                           out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     old = T.local_scalar("int32")
     if lane == 0:
         if cta == 0:
@@ -330,13 +277,13 @@ def _wide_publication(*, width):
         if width == 16
         else "T.ptx.st.release.gpu.global_.b32(state.ptr_to([0]), T.uint32(7))"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def wide(state: T.Buffer((4,), "uint32"), observed: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def wide(state: T.Tensor((4,), "uint32"), observed: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "uint32")
     if lane == 0:
         if warp == 0:
@@ -399,14 +346,14 @@ def _scoped_handoff(*, publish_scope):
     The waiter asks for the widest scope, so what decides the verdict is
     whether the publication's own scope reaches the waiting CTA.
     """
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def scoped(flag: T.Buffer((1,), "int32"), data: T.Buffer((1,), "int32"),
-           out: T.Buffer((1,), "int32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def scoped(flag: T.Tensor((1,), "int32"), data: T.Tensor((1,), "int32"),
+           out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         if cta == 0:
@@ -463,16 +410,16 @@ def _proxy_publication(*, proxy):
         publish_payload = """
             for index in T.serial(4):
                 data[index] = seed[index]"""
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def proxy_publish(seed: T.Buffer((4,), "uint32"), data: T.Buffer((4,), "uint32"),
-                  flag: T.Buffer((1,), "int32"), out: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def proxy_publish(seed: T.Tensor((4,), "uint32"), data: T.Tensor((4,), "uint32"),
+                  flag: T.Tensor((1,), "int32"), out: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
-    shared = T.alloc_buffer((4,), "uint32", scope="shared")
+    shared = T.alloc_shared((4,), "uint32")
     if lane == 0:
         if cta == 0:{publish_payload}
             T.ptx.st.release.gpu.global_.s32(flag.ptr_to([0]), T.int32(1))
@@ -535,13 +482,13 @@ def _ring_credit(*, lap: int):
     has reached yet, so it is a wait that genuinely blocks on a publication.
     """
 
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def ring_credit(credit: T.Buffer((1,), "uint32"), out: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+@T.function
+def ring_credit(credit: T.Tensor((1,), "uint32"), out: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     seen = T.local_scalar("uint32")
     if lane == 0:
         if cta == 0:
@@ -622,13 +569,12 @@ def test_a_host_initialized_value_explains_the_wait():
     holds for every schedule rather than the one that ran. The launch value is
     earlier than every write.
     """
-    kernel = tvm.script.from_source(
+    kernel = tvm_tirx.script.from_source(
         """
-@T.prim_func
-def host_init(flag: T.Buffer((1,), "int32"), observed: T.Buffer((1,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def host_init(flag: T.Tensor((1,), "int32"), observed: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     seen = T.alloc_local((1,), "int32")
     if lane == 0:
         seen[0] = 0

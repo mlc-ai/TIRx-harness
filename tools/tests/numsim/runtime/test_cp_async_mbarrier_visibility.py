@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim, racecheck, synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def copy_arrival_case(
@@ -31,13 +31,13 @@ def copy_arrival_case(
         if extra
         else "T.evaluate(0)"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(source: T.Buffer((4,), "uint32"), output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def kernel(source: T.Tensor((4,), "uint32"), output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((12,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=16)
     ready = T.alloc_local((1,), "uint32")
@@ -76,13 +76,13 @@ def arrived_open_batch_case(
         if overwrite_after_wait
         else "T.evaluate(0)"
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f"""
-@T.prim_func
-def kernel(source: T.Buffer((4,), "uint32"), output: T.Buffer((1,), "uint32")):
-    T.device_entry()
-    warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def kernel(source: T.Tensor((4,), "uint32"), output: T.Tensor((1,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     shared = T.alloc_shared((4,), "uint32", align=16)
     barrier = T.alloc_shared((1,), "uint64", align=16)
     if lane == 0:

@@ -2,18 +2,20 @@
 //! keep the full seed. Runtime validation catches raw address arithmetic that
 //! escapes a candidate allocation and repeats with the complete seed.
 
-use tvm::tirx::TensorMapTypeObj;
+use tvm_tirx::tirx::TensorMapTypeObj;
 
 use std::collections::BTreeSet;
-use tvm::ir::TensorRegionObj;
-use tvm::ir::{CallObj, PointerTypeObj, TensorLoadObj};
-use tvm::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
-use tvm::tirx::{BindObj, BufferStoreObj, BufferVar};
-use tvm::tvm_ffi::{object::ObjectRef, ObjectRefCore};
+use tvm_tirx::ir::TensorRegionObj;
+use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
+use tvm_tirx::ir::prim::{AddObj, CastObj, LetObj, SelectObj, SubObj};
+use tvm_tirx::ir::TensorStoreObj;
+
+use tvm_tirx::tvm_ffi::{object::ObjectRef, ObjectRefCore};
 
 use super::frontend::KernelPlan;
 use super::util::{
-    as_buffer, as_var, dtype_of, ffi_text, int_imm, oref, same, AResult, IdMap, IdSet,
+    as_buffer, as_var, dtype_of, enum_name, int_imm, oref, same, scalar_bind, tensor_var,
+    AResult, IdMap, IdSet,
 };
 use super::Ctx;
 use crate::decode::pointers::{
@@ -98,13 +100,13 @@ impl<'a> PointerTargets<'a> {
             writes.insert(key, Vec::new());
         }
         for node in &plan.nodes {
-            if let Some(bind) = node.as_node::<BindObj>() {
+            if let Some(bind) = scalar_bind(node) {
                 result
                     .bindings
                     .set(oref(bind.var.clone()), oref(bind.value.clone()));
             }
-            if let Some(store) = node.as_node::<BufferStoreObj>() {
-                let key = plan.buffer_bindings.storage_key(&store.buffer)?;
+            if let Some(store) = node.as_node::<TensorStoreObj>() {
+                let key = plan.buffer_bindings.storage_key(&tensor_var(&oref(store.dest.clone()))?)?;
                 if let Some(defs) = writes.get_mut(&key) {
                     defs.push(vec![oref(store.value.clone())]);
                 }
@@ -119,7 +121,7 @@ impl<'a> PointerTargets<'a> {
             if let Some(region) = node.as_node::<TensorRegionObj>() {
                 escaped.add(
                     plan.buffer_bindings
-                        .storage_key(&BufferVar::try_from(region.source.clone())?)?,
+                        .storage_key(&tensor_var(&oref(region.source.clone()))?)?,
                 );
             }
             if let Some(call) = node.as_node::<CallObj>() {
@@ -187,7 +189,7 @@ impl<'a> PointerTargets<'a> {
         Ok(result)
     }
 
-    fn buffer(&self, buffer: &BufferVar, seen: &mut IdSet) -> AResult<Fact> {
+    fn buffer(&self, buffer: &Var, seen: &mut IdSet) -> AResult<Fact> {
         let plan = self
             .plan
             .memory_plan
@@ -231,11 +233,11 @@ impl<'a> PointerTargets<'a> {
                 return self.expr(value, seen);
             }
             if let Some(index) = self.plan.func.params.iter().position(|p| same(&p, &var)) {
-                if let Some(pointer) = var.ty.as_node::<PointerTypeObj>() {
+                if let Some(pointer) = var.ty.as_node::<PtrTypeObj>() {
                     if pointer.element_type.as_node::<TensorMapTypeObj>().is_some() {
                         return Ok(Fact::Unknown);
                     }
-                    if ffi_text(&pointer.storage_scope) == "global" {
+                    if enum_name(&*pointer.scope) == "global" {
                         return Ok(Fact::target(Target::Pointer(index)));
                     }
                 }

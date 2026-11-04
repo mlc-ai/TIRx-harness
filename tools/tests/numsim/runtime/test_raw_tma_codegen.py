@@ -3,13 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.kernels import (
     raw_tma_dynamic_wait_group_loop,
     raw_tma_fp4_align8_roundtrip,
     raw_tma_rank3_roundtrip,
     raw_tma_roundtrip,
-    raw_tma_sm100_barrier_address,
     raw_tma_split_swizzle_atoms,
     raw_tma_swizzle_to_dense,
     raw_tma_swizzle_to_matching_layout,
@@ -18,19 +17,20 @@ from tests.numsim.support.kernels import (
 )
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def raw_tma_fp4_align16_physical_alias(
-    input_map: T.TensorMap(), output: T.Buffer((2, 64), "uint8")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((2, 64), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    physical = T.alloc_buffer((256,), "uint8", scope="shared")
-    destination = T.decl_buffer((2, 128), "uint8", data=physical.data, scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    physical = T.alloc_shared((256,), "uint8")
+    destination = T.decl_tensor(
+        physical.data, ty_args=[T.Tensor((2, 128), "uint8", scope="shared")]
+    )
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -60,16 +60,17 @@ def raw_tma_fp4_align16_physical_alias(
         output[row, packed_byte] = physical[row * 128 + atom * 16 + byte_in_atom]
 
 
-@T.prim_func
+@T.function
 def raw_tma_fp4_align16_uninitialized_padding(
-    input_map: T.TensorMap(), output: T.Buffer((1,), "uint8")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((1,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    physical = T.alloc_buffer((128,), "uint8", scope="shared")
-    destination = T.decl_buffer((1, 128), "uint8", data=physical.data, scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    physical = T.alloc_shared((128,), "uint8")
+    destination = T.decl_tensor(
+        physical.data, ty_args=[T.Tensor((1, 128), "uint8", scope="shared")]
+    )
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -92,12 +93,11 @@ def raw_tma_fp4_align16_uninitialized_padding(
         output[0] = physical[8]
 
 
-@T.prim_func
-def raw_tma_fp4_align16_store_is_unsupported(output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((128,), "uint8", scope="shared")
+@T.function
+def raw_tma_fp4_align16_store_is_unsupported(output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((128,), "uint8")
     if lane == 0:
         T.evaluate(
             T.ptx["cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"](
@@ -106,17 +106,15 @@ def raw_tma_fp4_align16_store_is_unsupported(output_map: T.TensorMap()):
         )
 
 
-@T.prim_func
+@T.function
 def raw_tma_multicast_cta_group1_per_target_barriers(
-    input_map: T.TensorMap(), output: T.Buffer((2, 4), "float32")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((2, 4), "float32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -142,17 +140,15 @@ def raw_tma_multicast_cta_group1_per_target_barriers(
         output[cta, lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_static_single_bit_mask_is_unicast(
-    input_map: T.TensorMap(), output: T.Buffer((2, 4), "float32")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((2, 4), "float32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane < 4:
         shared[lane] = T.float32(-7)
     if lane == 0:
@@ -174,17 +170,15 @@ def raw_tma_static_single_bit_mask_is_unicast(
         output[cta, lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_dynamic_single_bit_mask_is_multicast(
-    input_map: T.TensorMap(), cta_mask: T.int32, output: T.Buffer((4,), "float32")
+    input_map: T.Ptr(T.TensorMap), cta_mask: T.int32, output: T.Tensor((4,), "float32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -210,18 +204,17 @@ def raw_tma_dynamic_single_bit_mask_is_multicast(
         output[lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_select_descriptor(
-    first_map: T.TensorMap(),
-    second_map: T.TensorMap(),
+    first_map: T.Ptr(T.TensorMap),
+    second_map: T.Ptr(T.TensorMap),
     choose_first: T.int32,
-    output: T.Buffer((4,), "float32"),
+    output: T.Tensor((4,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -245,18 +238,17 @@ def raw_tma_select_descriptor(
         output[lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_if_then_else_descriptor(
-    first_map: T.TensorMap(),
-    second_map: T.TensorMap(),
+    first_map: T.Ptr(T.TensorMap),
+    second_map: T.Ptr(T.TensorMap),
     choose_first: T.int32,
-    output: T.Buffer((4,), "float32"),
+    output: T.Tensor((4,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -282,36 +274,35 @@ def raw_tma_if_then_else_descriptor(
         output[lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_materialized_tensor_map_address(
-    first_map: T.TensorMap(),
-    second_map: T.TensorMap(),
+    first_map: T.Ptr(T.TensorMap),
+    second_map: T.Ptr(T.TensorMap),
     choose_first: T.int32,
-    output: T.Buffer((4,), "float32"),
+    output: T.Tensor((4,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cta_sync()
     if lane == 0:
-        selected_map: T.uint64 = T.reinterpret("uint64", T.address_of(first_map))
+        selected_map: T.uint64 = T.reinterpret(T.address_of(first_map), ty="uint64")
         selected_map = T.if_then_else(
             choose_first != 0,
-            T.reinterpret("uint64", T.address_of(first_map)),
-            T.reinterpret("uint64", T.address_of(second_map)),
+            T.reinterpret(T.address_of(first_map), ty="uint64"),
+            T.reinterpret(T.address_of(second_map), ty="uint64"),
         )
         T.evaluate(
             T.ptx[
                 "cp.async.bulk.tensor.1d.shared::cluster.global.mbarrier::complete_tx::bytes.cta_group::1"
             ](
                 T.address_of(shared[0]),
-                T.reinterpret(T.handle().ty, selected_map),
+                T.reinterpret(selected_map, ty=T.handle().ty),
                 0,
                 T.address_of(barriers[0]),
             )
@@ -323,17 +314,15 @@ def raw_tma_materialized_tensor_map_address(
         output[lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_multicast_cta_group2_across_pairs(
-    input_map: T.TensorMap(), output: T.Buffer((4, 4), "float32")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((4, 4), "float32")
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([4])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=4, block=32, cluster=4))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if (cta % 2 == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -359,15 +348,16 @@ def raw_tma_multicast_cta_group2_across_pairs(
         output[cta, lane] = shared[lane]
 
 
-@T.prim_func
+@T.function
 def raw_tma_outer_element_stride2(
-    input_map: T.TensorMap(), roundtrip_map: T.TensorMap(), output: T.Buffer((3, 4), "float32")
+    input_map: T.Ptr(T.TensorMap),
+    roundtrip_map: T.Ptr(T.TensorMap),
+    output: T.Tensor((3, 4), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -395,14 +385,13 @@ def raw_tma_outer_element_stride2(
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
+@T.function
 def raw_tma_read_then_full_wait(
-    source: T.Buffer((4,), "float32"), first_map: T.TensorMap(), second_map: T.TensorMap()
+    source: T.Tensor((4,), "float32"), first_map: T.Ptr(T.TensorMap), second_map: T.Ptr(T.TensorMap)
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
     if lane < 4:
         shared[lane] = source[lane]
     T.cuda.warp_sync()
@@ -427,12 +416,11 @@ def raw_tma_read_then_full_wait(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
-def raw_tma_uncommitted_exit_store(output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
+@T.function
+def raw_tma_uncommitted_exit_store(output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
     if lane < 4:
         shared[lane] = T.cast(lane, "float32")
     T.cuda.warp_sync()
@@ -445,12 +433,11 @@ def raw_tma_uncommitted_exit_store(output_map: T.TensorMap()):
         )
 
 
-@T.prim_func
-def raw_tma_missing_wait(output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
+@T.function
+def raw_tma_missing_wait(output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
     if lane < 4:
         shared[lane] = T.cast(lane, "float32")
     T.cuda.warp_sync()
@@ -464,12 +451,11 @@ def raw_tma_missing_wait(output_map: T.TensorMap()):
         T.ptx.cp.async_.bulk.commit_group()
 
 
-@T.prim_func
-def raw_tma_read_only_exit(output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((4,), "float32", scope="shared")
+@T.function
+def raw_tma_read_only_exit(output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((4,), "float32")
     if lane < 4:
         shared[lane] = T.cast(lane, "float32")
     T.cuda.warp_sync()
@@ -484,12 +470,11 @@ def raw_tma_read_only_exit(output_map: T.TensorMap()):
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
-def raw_tma_predicated_s2g(output_map: T.TensorMap(), issue: T.int32):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
+@T.function
+def raw_tma_predicated_s2g(output_map: T.Ptr(T.TensorMap), issue: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
     if lane < 12:
         shared[lane // 4, lane % 4] = T.cast(lane + 1, "float32")
     T.cuda.warp_sync()
@@ -508,15 +493,14 @@ def raw_tma_predicated_s2g(output_map: T.TensorMap(), issue: T.int32):
         T.ptx.cp.async_.bulk.wait_group.read(0)
 
 
-@T.prim_func
+@T.function
 def raw_tma_predicated_g2s(
-    input_map: T.TensorMap(), output: T.Buffer((3, 4), "float32"), issue: T.int32
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((3, 4), "float32"), issue: T.int32
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -542,15 +526,16 @@ def raw_tma_predicated_g2s(
         output[lane // 4, lane % 4] = shared[lane // 4, lane % 4]
 
 
-@T.prim_func
-def raw_tma_per_lane_coordinates(input_map: T.TensorMap(), output: T.Buffer((32, 4), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def raw_tma_per_lane_coordinates(
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((32, 4), "float32")
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     # Each lane issues an independent 16-byte box.  Keep every destination
     # base 128-byte aligned, as required by the raw TMA shared-address form.
-    shared = T.alloc_buffer((32, 32), "float32", scope="shared", align=128)
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    shared = T.alloc_shared((32, 32), "float32", align=128)
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -574,17 +559,16 @@ def raw_tma_per_lane_coordinates(input_map: T.TensorMap(), output: T.Buffer((32,
         output[lane, column] = shared[lane, column]
 
 
-@T.prim_func
+@T.function
 def raw_tma_gather4_per_lane_coordinates(
-    input_map: T.TensorMap(), output: T.Buffer((32, 4, 4), "float32")
+    input_map: T.Ptr(T.TensorMap), output: T.Tensor((32, 4, 4), "float32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     # A gather writes 64 bytes here; the padded middle dimension gives each
     # lane an independently aligned 128-byte destination component.
-    shared = T.alloc_buffer((32, 8, 4), "float32", scope="shared", align=128)
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    shared = T.alloc_shared((32, 8, 4), "float32", align=128)
+    barriers = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -612,12 +596,11 @@ def raw_tma_gather4_per_lane_coordinates(
         output[lane, row, column] = shared[lane, row, column]
 
 
-@T.prim_func
-def raw_tma_warp_issued_s2g(output_map: T.TensorMap()):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
+@T.function
+def raw_tma_warp_issued_s2g(output_map: T.Ptr(T.TensorMap)):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
     if lane < 12:
         shared[lane // 4, lane % 4] = T.cast(lane + 1, "float32")
     T.cuda.warp_sync()
@@ -1288,13 +1271,13 @@ def test_static_bulk_wait_group_immediates_execute_in_source_order(tmp_path):
 
 def test_bulk_wait_group_rejects_runtime_count_during_numsim_transpilation(tmp_path):
     source = """
-@T.prim_func
-def invalid(pending: T.Buffer((1,), "int32")):
-    T.device_entry()
+@T.function
+def invalid(pending: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.cp.async_.bulk.wait_group.read(pending[0])
 """
 
-    kernel = tvm.script.from_source(source, {"T": T})
+    kernel = tvm_tirx.script.from_source(source, {"T": T})
     with pytest.raises(numsim.UnsupportedTIRxError, match="pending_group_count must be static"):
         numsim.transpile(kernel, cache_dir=tmp_path)
 
@@ -1500,38 +1483,6 @@ def test_raw_tensor_map_swizzle_matches_canonical_shared_atom(tmp_path, swizzle_
     result = numsim.Engine().run(module, {"input_map": input_map, "output": output})
 
     np.testing.assert_array_equal(result.outputs["output"], source)
-
-
-def test_sm100_two_cta_barrier_address_targets_pair_base(tmp_path):
-    spec = analyze(raw_tma_sm100_barrier_address)
-    assert spec.unsupported == ()
-
-    even = np.arange(4, dtype=np.float32).reshape(1, 4) + np.float32(10)
-    odd = np.arange(4, dtype=np.float32).reshape(1, 4) + np.float32(20)
-    even_map, _ = _tensor_map(
-        even,
-        global_shape=(4, 1),
-        global_strides=(16,),
-        box_shape=(4, 1),
-    )
-    odd_map, _ = _tensor_map(
-        odd,
-        global_shape=(4, 1),
-        global_strides=(16,),
-        box_shape=(4, 1),
-    )
-
-    module = numsim.transpile(raw_tma_sm100_barrier_address, cache_dir=tmp_path)
-    result = numsim.Engine().run(
-        module,
-        {
-            "input_map_even": even_map,
-            "input_map_odd": odd_map,
-            "output": np.zeros((2, 4), dtype=np.float32),
-        },
-    )
-
-    np.testing.assert_array_equal(result.outputs["output"], np.concatenate([even, odd], axis=0))
 
 
 def test_raw_tensor_map_under_delivery_reports_exact_bytes(tmp_path):

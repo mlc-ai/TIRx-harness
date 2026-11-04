@@ -4,19 +4,18 @@ from itertools import product
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import assert_rejected, run_checked
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def mov_aliased_registers(
-    source: T.Buffer((32, 4), "uint16"),
-    output: T.Buffer((3, 32, 4), "uint16"),
+    source: T.Tensor((32, 4), "uint16"),
+    output: T.Tensor((3, 32, 4), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     words = T.alloc_local((4,), "uint16")
     wide = words.view("uint64")
     for i in T.unroll(4):
@@ -77,7 +76,7 @@ def mov_pointer_case(space, *, dereference_null=False):
         ""
         if space == "global"
         else (
-            f'storage = T.alloc_buffer(({size},), "uint32", scope="{space}")\n'
+            f'storage = T.alloc_tensor(ty_args=[T.Tensor(({size},), "uint32", scope="{space}")])\n'
             f"    storage[{index}] = source[lane]\n"
             f"    storage[{second}] = source[lane + 32]"
         )
@@ -112,7 +111,7 @@ def mov_pointer_case(space, *, dereference_null=False):
             guard = "True"
         lines += [
             f"    if {guard}:",
-            f'        T.ptx.ld.b32(output[{number}, lane], T.reinterpret("handle", {result}[0]))',
+            f'        T.ptx.ld.b32(output[{number}, lane], T.reinterpret({result}[0], ty="handle"))',
         ]
         if mode in (0, 3):
             expected[number] = np.arange(32, dtype=np.uint32) + 100
@@ -122,17 +121,16 @@ def mov_pointer_case(space, *, dereference_null=False):
             expected[number, ::2] = np.arange(0, 32, 2, dtype=np.uint32) + 132
         else:
             expected[number, 1::2] = np.arange(1, 32, 2, dtype=np.uint32) + 100
-    kernel = tvm.script.from_source(
-        f"""@T.prim_func
-def kernel(source: T.Buffer((64,), "uint32"), output: T.Buffer((12, 32), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f"""@T.function
+def kernel(source: T.Tensor((64,), "uint32"), output: T.Tensor((12, 32), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     {declaration}
-    a = T.reinterpret("uint64", {storage}.ptr_to([{index}]))
+    a = T.reinterpret({storage}.ptr_to([{index}]), ty="uint64")
     partial = T.alloc_local((1,), "uint64")
     if lane % 2 == 0:
-        partial[0] = T.reinterpret("uint64", {storage}.ptr_to([{second}]))
+        partial[0] = T.reinterpret({storage}.ptr_to([{second}]), ty="uint64")
 {chr(10).join(lines)}
 """,
         {"T": T},

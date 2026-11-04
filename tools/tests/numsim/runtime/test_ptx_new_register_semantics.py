@@ -3,40 +3,39 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_new_register_semantics(
-    lhs_i32: T.Buffer((32,), "int32"),
-    rhs_i32: T.Buffer((32,), "int32"),
-    mul_i32: T.Buffer((32,), "int32"),
-    sub_i32: T.Buffer((32,), "int32"),
-    f16_lhs: T.Buffer((32,), "uint32"),
-    f16_rhs: T.Buffer((32,), "uint32"),
-    f16_addend: T.Buffer((32,), "uint32"),
-    f16_out: T.Buffer((32,), "uint32"),
-    bf16_lhs: T.Buffer((32,), "uint32"),
-    bf16_rhs: T.Buffer((32,), "uint32"),
-    bf16_addend: T.Buffer((32,), "uint32"),
-    bf16_out: T.Buffer((32,), "uint32"),
-    bit_lhs: T.Buffer((32,), "uint32"),
-    bit_rhs: T.Buffer((32,), "uint32"),
-    bit_or: T.Buffer((32,), "uint32"),
-    prmt_a: T.Buffer((32,), "uint32"),
-    prmt_b: T.Buffer((32,), "uint32"),
-    prmt_selector: T.Buffer((32,), "uint32"),
-    prmt_out: T.Buffer((32,), "uint32"),
-    mul_hi_lhs: T.Buffer((32,), "uint32"),
-    mul_hi_rhs: T.Buffer((32,), "uint32"),
-    mul_hi_out: T.Buffer((32,), "uint32"),
-    xor_lhs: T.Buffer((32,), "int32"),
-    xor_rhs: T.Buffer((32,), "int32"),
-    xor_out: T.Buffer((32,), "int32"),
+    lhs_i32: T.Tensor((32,), "int32"),
+    rhs_i32: T.Tensor((32,), "int32"),
+    mul_i32: T.Tensor((32,), "int32"),
+    sub_i32: T.Tensor((32,), "int32"),
+    f16_lhs: T.Tensor((32,), "uint32"),
+    f16_rhs: T.Tensor((32,), "uint32"),
+    f16_addend: T.Tensor((32,), "uint32"),
+    f16_out: T.Tensor((32,), "uint32"),
+    bf16_lhs: T.Tensor((32,), "uint32"),
+    bf16_rhs: T.Tensor((32,), "uint32"),
+    bf16_addend: T.Tensor((32,), "uint32"),
+    bf16_out: T.Tensor((32,), "uint32"),
+    bit_lhs: T.Tensor((32,), "uint32"),
+    bit_rhs: T.Tensor((32,), "uint32"),
+    bit_or: T.Tensor((32,), "uint32"),
+    prmt_a: T.Tensor((32,), "uint32"),
+    prmt_b: T.Tensor((32,), "uint32"),
+    prmt_selector: T.Tensor((32,), "uint32"),
+    prmt_out: T.Tensor((32,), "uint32"),
+    mul_hi_lhs: T.Tensor((32,), "uint32"),
+    mul_hi_rhs: T.Tensor((32,), "uint32"),
+    mul_hi_out: T.Tensor((32,), "uint32"),
+    xor_lhs: T.Tensor((32,), "int32"),
+    xor_rhs: T.Tensor((32,), "int32"),
+    xor_out: T.Tensor((32,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mul.lo.s32(mul_i32[lane], lhs_i32[lane], rhs_i32[lane])
     T.ptx.sub.s32(sub_i32[lane], lhs_i32[lane], rhs_i32[lane])
     T.ptx.fma.rn.f16x2(f16_out[lane], f16_lhs[lane], f16_rhs[lane], f16_addend[lane])
@@ -47,22 +46,21 @@ def ptx_new_register_semantics(
     T.ptx.xor.b32(xor_out[lane], xor_lhs[lane], xor_rhs[lane])
 
 
-@T.prim_func
+@T.function
 def ptx_scalar_moves_and_mad_lo_s64(
-    predicates: T.Buffer((32,), "bool"),
-    pred_out: T.Buffer((32,), "uint32"),
-    b16_source: T.Buffer((32,), "uint16"),
-    b16_out: T.Buffer((32,), "uint16"),
-    b64_source: T.Buffer((32,), "uint64"),
-    b64_out: T.Buffer((32,), "uint64"),
-    mad_a: T.Buffer((32,), "int64"),
-    mad_b: T.Buffer((32,), "int64"),
-    mad_c: T.Buffer((32,), "int64"),
-    mad_out: T.Buffer((32,), "int64"),
+    predicates: T.Tensor((32,), "bool"),
+    pred_out: T.Tensor((32,), "uint32"),
+    b16_source: T.Tensor((32,), "uint16"),
+    b16_out: T.Tensor((32,), "uint16"),
+    b64_source: T.Tensor((32,), "uint64"),
+    b64_out: T.Tensor((32,), "uint64"),
+    mad_a: T.Tensor((32,), "int64"),
+    mad_b: T.Tensor((32,), "int64"),
+    mad_c: T.Tensor((32,), "int64"),
+    mad_out: T.Tensor((32,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.mov.pred(pred_out[lane], predicates[lane])
     T.ptx.mov.b16(b16_out[lane], b16_source[lane])
     T.ptx.mov.b64(b64_out[lane], b64_source[lane])

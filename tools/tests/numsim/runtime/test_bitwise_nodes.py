@@ -3,22 +3,21 @@
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.execution import run_checked
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 DTYPES = [f"{sign}int{bits}" for sign in ("", "u") for bits in (8, 16, 32, 64)]
 
 
 def bitwise_case(dtype):
     bits = np.dtype(dtype).itemsize * 8
-    kernel = tvm.script.from_source(
-        f'''@T.prim_func
-def bitwise_nodes(values: T.Buffer((32,), "{dtype}"), output: T.Buffer((32, 6), "{dtype}")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    kernel = tvm_tirx.script.from_source(
+        f'''@T.function
+def bitwise_nodes(values: T.Tensor((32,), "{dtype}"), output: T.Tensor((32, 6), "{dtype}")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     x: T.let = values[lane]
     mask: T.let = T.cast(5, "{dtype}")
     count: T.let = T.cast(lane * {bits - 1} // 31, "{dtype}")
@@ -55,11 +54,10 @@ def test_bitwise_nodes_match_integer_oracle(dtype, tmp_path):
     np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
-@T.prim_func
-def boolean_bitwise(output: T.Buffer((32, 4), "bool")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def boolean_bitwise(output: T.Tensor((32, 4), "bool")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     a: T.let = lane % 2 == 0
     b: T.let = lane % 3 == 0
     output[lane, 0] = T.bitwise_and(a, b)
@@ -81,12 +79,11 @@ def test_boolean_bitwise_nodes_preserve_masks(tmp_path):
     np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
-@T.prim_func
-def bitwise_launch_extent(output: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def bitwise_launch_extent(output: T.Tensor((32,), "int32")):
     width: T.let = 64
-    _warp = T.warp_id([1])
-    lane = T.lane_id([width >> 1])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=width >> 1))
+    lane = T.cuda.lane_id()
     output[lane] = lane
 
 

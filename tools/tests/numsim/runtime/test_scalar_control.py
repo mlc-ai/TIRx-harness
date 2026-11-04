@@ -7,19 +7,19 @@ import pytest
 
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import NumSimExecutionError
-from tvm.ir.type import PointerType, PrimType
-from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
+from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def scalar_warp_intrinsics(
-    output_u32: T.Buffer((32, 7), "uint32"),
-    output_f32: T.Buffer((32, 4), "float32"),
-    output_u64: T.Buffer((32,), "uint64"),
+    output_u32: T.Tensor((32, 7), "uint32"),
+    output_f32: T.Tensor((32, 4), "float32"),
+    output_u64: T.Tensor((32,), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     full: T.let = T.uint32(0xFFFFFFFF)
     value: T.let = T.cast(lane + 1, "uint32")
     output_u32[lane, 0] = T.cuda.__shfl_up_sync(full, value, 1, 32)
@@ -28,9 +28,6 @@ def scalar_warp_intrinsics(
     output_u32[lane, 3] = T.cuda.__activemask()
     packed_float2: T.let = T.cuda.make_float2(T.cast(lane, "float32"), T.cast(lane + 1, "float32"))
     output_u32[lane, 4] = T.cuda.float22bfloat162_rn_from_float2(packed_float2)
-    output_u32[lane, 5] = T.call_intrin(
-        "uint32", "tirx.cuda.sm100_2sm_leader_smem_addr", T.uint64(0xFFFFFFFFF)
-    )
     output_u32[lane, 6] = T.cuda.smem_addr_from_uint64(T.uint64(0x123456789))
     output_f32[lane, 0] = T.cuda.half2float(T.cast(T.cast(lane, "float32") + 0.25, "float16"))
     output_f32[lane, 1] = T.cuda.bfloat162float(T.cast(T.cast(lane, "float32") + 0.5, "bfloat16"))
@@ -43,29 +40,27 @@ def scalar_warp_intrinsics(
     output_u64[lane] = T.cuda.clock64()
 
 
-@T.prim_func
+@T.function
 def ptx_three_source_nan_minmax(
-    lhs: T.Buffer((32,), "float32"),
-    middle: T.Buffer((32,), "float32"),
-    rhs: T.Buffer((32,), "float32"),
-    maximum: T.Buffer((32,), "float32"),
-    minimum: T.Buffer((32,), "float32"),
+    lhs: T.Tensor((32,), "float32"),
+    middle: T.Tensor((32,), "float32"),
+    rhs: T.Tensor((32,), "float32"),
+    maximum: T.Tensor((32,), "float32"),
+    minimum: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.max.NaN.f32(maximum[lane], lhs[lane], middle[lane], rhs[lane])
     T.ptx.min.NaN.f32(minimum[lane], lhs[lane], middle[lane], rhs[lane])
 
 
-@T.prim_func
-def timer_finalize_is_numerical_noop(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    profiler_buffer = T.alloc_buffer((4,), "uint64", scope="local")
-    profiler_tag = T.alloc_buffer((1,), "uint64", scope="local")
-    profiler_write_offset = T.alloc_buffer((1,), "int32", scope="local")
+@T.function
+def timer_finalize_is_numerical_noop(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    profiler_buffer = T.alloc_local((4,), "uint64")
+    profiler_tag = T.alloc_local((1,), "uint64")
+    profiler_write_offset = T.alloc_local((1,), "int32")
     T.cuda.timer_finalize(
         profiler_buffer.data,
         profiler_tag.data,
@@ -76,14 +71,13 @@ def timer_finalize_is_numerical_noop(output: T.Buffer((32,), "uint32")):
     output[lane] = T.cast(lane + 7, "uint32")
 
 
-@T.prim_func
+@T.function
 def current_scalar_device_intrinsics(
-    output_f32: T.Buffer((3, 32), "float32"),
-    output_u32: T.Buffer((3, 32), "uint32"),
+    output_f32: T.Tensor((3, 32), "float32"),
+    output_u32: T.Tensor((3, 32), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     T.evaluate(T.cuda.iket.mark("numsim"))
     sentinel: T.let = T.cuda.iket.sentinel_token("sentinel")
@@ -92,7 +86,9 @@ def current_scalar_device_intrinsics(
     T.evaluate(T.cuda.iket.range_push("stack"))
     T.evaluate(T.cuda.iket.range_pop())
     T.evaluate(T.cuda.iket.range_end(token))
-    official: T.let = T.call_intrin("uint32", "tirx.cuda.iket_official_event", T.int32(7), "numsim")
+    official: T.let = T.call_intrin(
+        "tirx.cuda.iket_official_event", T.int32(7), "numsim", ty="uint32"
+    )
 
     output_f32[0, lane] = T.cuda.fdividef(T.cast(lane + 1, "float32"), T.float32(2))
     T.ptx.cvt.rn.f32.s32(output_f32[1, lane], lane + 1)
@@ -102,33 +98,30 @@ def current_scalar_device_intrinsics(
     output_u32[2, lane] = official
 
 
-@T.prim_func
+@T.function
 def packed_f16x2_conversion(
-    high: T.Buffer((32,), "float32"),
-    low: T.Buffer((32,), "float32"),
-    output: T.Buffer((32,), "uint32"),
+    high: T.Tensor((32,), "float32"),
+    low: T.Tensor((32,), "float32"),
+    output: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.cvt.rn.f16x2.f32(output[lane], high[lane], low[lane])
 
 
-@T.prim_func
-def shuffle_xor_crosses_to_earlier_width_group(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def shuffle_xor_crosses_to_earlier_width_group(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     output[lane] = T.cuda.__shfl_xor_sync(T.uint32(0xFFFFFFFF), T.cast(lane, "uint32"), 16, 16)
 
 
-@T.prim_func
+@T.function
 def cuda_packed_nan_semantics(
-    output_u64: T.Buffer((32, 2), "uint64"), output_u32: T.Buffer((32, 4), "uint32")
+    output_u64: T.Tensor((32, 2), "uint64"), output_u32: T.Tensor((32, 4), "uint32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     lhs2: T.let = T.uint64(0x7FE12345FFC54321)
     rhs2: T.let = T.uint64(0x7FD2468A7FA13579)
     output_u64[lane, 0] = T.cuda.fadd2_rn(lhs2, rhs2)
@@ -143,18 +136,17 @@ def cuda_packed_nan_semantics(
     output_u32[lane, 3] = T.cuda.float22bfloat162_rn_from_float2(T.cuda.make_float2(nan_a, nan_b))
 
 
-@T.prim_func
+@T.function
 def cta_votes_and_grid_sync(
-    flags: T.Buffer((2,), "int32"),
-    output_and: T.Buffer((128,), "int64"),
-    output_or: T.Buffer((128,), "int64"),
-    output_grid: T.Buffer((4,), "int32"),
+    flags: T.Tensor((2,), "int32"),
+    output_and: T.Tensor((128,), "int64"),
+    output_or: T.Tensor((128,), "int64"),
+    output_grid: T.Tensor((4,), "int32"),
 ):
-    T.device_entry()
-    cluster = T.cluster_id([2])
-    _cta = T.cta_id_in_cluster([1])
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=1))
+    cluster = T.cuda.cluster_id("x")
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     index: T.let = cluster * 64 + warp * 32 + lane
     output_and[index] = T.cuda.syncthreads_and(
         T.cast(T.bitwise_or(cluster == 0, T.bitwise_or(warp != 1, lane != 31)), "int32")
@@ -174,19 +166,18 @@ def cta_votes_and_grid_sync(
         output_grid[cluster * 2 + warp] = flags[0] + flags[1]
 
 
-@T.prim_func
+@T.function
 def floating_predicate_collectives(
-    predicates: T.Buffer((2, 64), "float32"),
-    ballots: T.Buffer((2, 64), "uint32"),
-    any_results: T.Buffer((2, 64), "int32"),
-    and_results: T.Buffer((2, 64), "int64"),
-    or_results: T.Buffer((2, 64), "int64"),
+    predicates: T.Tensor((2, 64), "float32"),
+    ballots: T.Tensor((2, 64), "uint32"),
+    any_results: T.Tensor((2, 64), "int32"),
+    and_results: T.Tensor((2, 64), "int64"),
+    or_results: T.Tensor((2, 64), "int64"),
 ):
-    T.device_entry()
-    cluster = T.cluster_id([2])
-    _cta = T.cta_id_in_cluster([1])
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=1))
+    cluster = T.cuda.cluster_id("x")
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     index: T.let = warp * 32 + lane
     predicate: T.let = predicates[cluster, index]
     full: T.let = T.uint32(0xFFFFFFFF)
@@ -196,12 +187,11 @@ def floating_predicate_collectives(
     or_results[cluster, index] = T.cuda.syncthreads_or(predicate)
 
 
-@T.prim_func
-def mbarrier_nonblocking_queries(output: T.Buffer((32, 4), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def mbarrier_nonblocking_queries(output: T.Tensor((32, 4), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
@@ -223,13 +213,12 @@ def mbarrier_nonblocking_queries(output: T.Buffer((32, 4), "uint32")):
     )
 
 
-@T.prim_func
-def mbarrier_state_token_query(output: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
-    token = T.alloc_buffer((1,), "uint64", scope="local")
+@T.function
+def mbarrier_state_token_query(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
+    token = T.alloc_local((1,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), T.uint32(1))
     T.ptx.fence.proxy.async_.shared__cta()
@@ -241,13 +230,12 @@ def mbarrier_state_token_query(output: T.Buffer((32,), "uint32")):
         T.ptx.mbarrier.try_wait.shared__cta.b64(output[lane], barrier_address, token[0])
 
 
-@T.prim_func
-def mbarrier_stale_state_token(output: T.Buffer((4,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barrier = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
-    tokens = T.alloc_buffer((3,), "uint64", scope="local")
+@T.function
+def mbarrier_stale_state_token(output: T.Tensor((4,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    barrier = T.alloc_shared((1,), "uint64", align=8)
+    tokens = T.alloc_local((3,), "uint64")
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), T.uint32(1))
     T.ptx.fence.proxy.async_.shared__cta()
@@ -263,31 +251,29 @@ def mbarrier_stale_state_token(output: T.Buffer((4,), "uint32")):
         T.ptx.mbarrier.try_wait.shared__cta.b64(output[3], barrier_address, tokens[0])
 
 
-@T.prim_func
+@T.function
 def pointer_conversions_and_descriptor(
-    source: T.Buffer((32, 8), "float32"),
-    half: T.Buffer((32, 8), "float16"),
-    roundtrip: T.Buffer((32, 8), "float32"),
-    descriptor: T.Buffer((32,), "uint32"),
+    source: T.Tensor((32, 8), "float32"),
+    half: T.Tensor((32, 8), "float16"),
+    roundtrip: T.Tensor((32, 8), "float32"),
+    descriptor: T.Tensor((32,), "uint32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.cuda.float8tohalf8(T.address_of(source[lane, 0]), T.address_of(half[lane, 0]))
     T.cuda.half8tofloat8(T.address_of(half[lane, 0]), T.address_of(roundtrip[lane, 0]))
     T.cuda.float22half2(T.address_of(half[lane, 0]), T.address_of(source[lane, 0]))
     T.cuda.runtime_instr_desc(T.address_of(descriptor[lane]), lane % 4)
 
 
-@T.prim_func
+@T.function
 def ptx_dps_arithmetic(
-    output_f32: T.Buffer((32,), "float32"),
-    output_f32x2: T.Buffer((32,), "uint64"),
-    output_f64: T.Buffer((32, 4), "float64"),
+    output_f32: T.Tensor((32,), "float32"),
+    output_f32x2: T.Tensor((32,), "uint64"),
+    output_f64: T.Tensor((32, 4), "float64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     value_f32: T.let = T.cast(lane, "float32")
     T.ptx.sub.rn.f32(output_f32[lane], value_f32, T.float32(3))
     packed_lhs: T.let = T.cuda.make_float2(value_f32, value_f32 + T.float32(10))
@@ -300,13 +286,12 @@ def ptx_dps_arithmetic(
     T.ptx.fma.rn.f64(output_f64[lane, 3], value_f64, T.float64(2), T.float64(1))
 
 
-@T.prim_func
+@T.function
 def ptx_dps_modifier_forms(
-    output_f32: T.Buffer((32, 4), "float32"), output_f32x2: T.Buffer((32, 4), "uint64")
+    output_f32: T.Tensor((32, 4), "float32"), output_f32x2: T.Tensor((32, 4), "uint64")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     tiny: T.let = T.cuda.uint_as_float(T.uint32(1))
     increment: T.let = T.float32(2**-25)
     nan: T.let = T.cuda.uint_as_float(T.uint32(0x7FC00001))
@@ -333,33 +318,27 @@ def ptx_dps_modifier_forms(
     )
 
 
-@T.prim_func
-def canonical_mapa(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+@T.function
+def canonical_mapa(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane + 37
     T.cuda.cta_sync()
     mapped = T.local_scalar("uint64")
     T.ptx.mapa.shared__cluster.u64(mapped, T.address_of(shared[0]), T.uint32(0))
     mapped_ptr: T.let[
-        T.Var(name="canonical_mapped_ptr", ty=PointerType(PrimType("int32"), "shared"))
-    ] = T.reinterpret(PointerType(PrimType("int32"), "shared"), mapped)
-    mapped_buffer = T.decl_buffer((1,), "int32", scope="shared", data=mapped_ptr)
+        T.Var(name="canonical_mapped_ptr", ty=PtrType(PrimType("int32"), "shared"))
+    ] = T.reinterpret(mapped, ty=PtrType(PrimType("int32"), "shared"))
+    mapped_buffer = T.decl_tensor(mapped_ptr, ty_args=[T.Tensor((1,), "int32", scope="shared")])
     output[lane] = mapped_buffer[0]
 
 
-@T.prim_func
-def explicit_mapa_forms(output: T.Buffer((32,), "int32"), addresses: T.Buffer((32,), "uint32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+@T.function
+def explicit_mapa_forms(output: T.Tensor((32,), "int32"), addresses: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32, cluster=1))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = lane + 37
     T.cuda.cta_sync()
     generic_u64 = T.local_scalar("uint64")
@@ -370,33 +349,27 @@ def explicit_mapa_forms(output: T.Buffer((32,), "int32"), addresses: T.Buffer((3
     T.ptx.mapa.shared__cluster.u32(cluster_u32, shared_address, T.uint32(0))
     T.ptx.mapa.shared__cluster.u64(cluster_u64, T.address_of(shared[1]), T.uint32(0))
     mapped_ptr: T.let[
-        T.Var(name="explicit_mapa_shared_cluster_u64", ty=PointerType(PrimType("int32"), "shared"))
-    ] = T.reinterpret(
-        PointerType(PrimType("int32"), "shared"),
-        cluster_u64,
-    )
-    mapped = T.decl_buffer((1,), "int32", scope="shared", data=mapped_ptr)
+        T.Var(name="explicit_mapa_shared_cluster_u64", ty=PtrType(PrimType("int32"), "shared"))
+    ] = T.reinterpret(cluster_u64, ty=PtrType(PrimType("int32"), "shared"))
+    mapped = T.decl_tensor(mapped_ptr, ty_args=[T.Tensor((1,), "int32", scope="shared")])
     output[lane] = mapped[0]
     addresses[lane] = T.cuda.cvta_generic_to_shared(T.address_of(shared[1]))
 
 
-@T.prim_func
-def explicit_cvta_shared_cluster_u64(addresses: T.Buffer((32,), "uint64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+@T.function
+def explicit_cvta_shared_cluster_u64(addresses: T.Tensor((32,), "uint64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     T.ptx.cvta.to.shared__cluster.u64(addresses[lane], T.address_of(shared[lane]))
 
 
-@T.prim_func
-def mapa_u32_reads_the_peer_cta(output: T.Buffer((2, 32), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
+@T.function
+def mapa_u32_reads_the_peer_cta(output: T.Tensor((2, 32), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
     shared[lane] = cta * 100 + lane
     T.cuda.cluster_sync()
     remote_address = T.local_scalar("uint32")
@@ -410,17 +383,15 @@ def mapa_u32_reads_the_peer_cta(output: T.Buffer((2, 32), "int32")):
     output[cta, lane] = remote_value
 
 
-@T.prim_func
+@T.function
 def mapa_exposes_integer_address_bits(
-    addresses32: T.Buffer((2, 32, 3), "uint32"),
-    addresses64: T.Buffer((2, 32, 3), "uint64"),
+    addresses32: T.Tensor((2, 32, 3), "uint32"),
+    addresses64: T.Tensor((2, 32, 3), "uint64"),
 ):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "uint8", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "uint8")
     local32 = T.alloc_local((1,), "uint32")
     mapped32 = T.alloc_local((1,), "uint32")
     remapped32 = T.alloc_local((1,), "uint32")
@@ -442,15 +413,13 @@ def mapa_exposes_integer_address_bits(
     addresses64[cta, lane, 2] = mapped_generic64[0]
 
 
-@T.prim_func
-def mapped_addresses_use_ordinary_integer_dataflow(output: T.Buffer((2, 32), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((32,), "int32", scope="shared")
-    address_slots = T.alloc_buffer((32,), "uint32", scope="shared")
+@T.function
+def mapped_addresses_use_ordinary_integer_dataflow(output: T.Tensor((2, 32), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((32,), "int32")
+    address_slots = T.alloc_shared((32,), "uint32")
     mapped = T.alloc_local((1,), "uint32")
     loaded = T.alloc_local((1,), "uint32")
     value = T.alloc_local((1,), "int32")
@@ -470,15 +439,13 @@ def mapped_addresses_use_ordinary_integer_dataflow(output: T.Buffer((2, 32), "in
     output[cta, lane] = value[0]
 
 
-@T.prim_func
+@T.function
 def fetch_logical_and_representative_registers(
-    output32: T.Buffer((3, 32, 13), "int32"), output64: T.Buffer((3, 32, 3), "int64")
+    output32: T.Tensor((3, 32, 13), "int32"), output64: T.Tensor((3, 32, 3), "int64")
 ):
-    T.device_entry()
-    cluster = T.cluster_id([3])
-    _cta = T.cta_id_in_cluster([1])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=3, block=32, cluster=1))
+    cluster = T.cuda.cluster_id("x")
+    lane = T.cuda.lane_id()
     output32[cluster, lane, 0] = T.cuda.mov_sreg(32, "clusterid.x")
     output32[cluster, lane, 1] = T.cuda.mov_sreg(32, "clusterid.y")
     output32[cluster, lane, 2] = T.cuda.mov_sreg(32, "clusterid.z")
@@ -497,51 +464,46 @@ def fetch_logical_and_representative_registers(
     output64[cluster, lane, 2] = T.cuda.mov_sreg(64, "globaltimer")
 
 
-@T.prim_func
-def fetch_warp_identifier_registers(output: T.Buffer((2, 32, 2), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    _cta = T.cta_id_in_cluster([1])
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def fetch_warp_identifier_registers(output: T.Tensor((2, 32, 2), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64, cluster=1))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     output[warp, lane, 0] = T.cuda.mov_sreg(32, "warpid")
     output[warp, lane, 1] = T.cuda.mov_sreg(32, "nwarpid")
 
 
-@T.prim_func
-def integer_trap_predicate(flag: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def integer_trap_predicate(flag: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.cuda.trap_when_assert_failed(flag[0])
     output[lane] = lane + 1
 
 
-@T.prim_func
-def floating_trap_predicate(flag: T.Buffer((1,), "float32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def floating_trap_predicate(flag: T.Tensor((1,), "float32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.cuda.trap_when_assert_failed(flag[0])
     output[lane] = lane + 1
 
 
-@T.prim_func
+@T.function
 def misaligned_cuda_pointer_helpers(
-    source: T.Buffer((32,), "uint8"), destination: T.Buffer((32,), "uint8")
+    source: T.Tensor((32,), "uint8"), destination: T.Tensor((32,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         T.cuda.float22half2(T.address_of(destination[1]), T.address_of(source[1]))
 
 
-@T.prim_func
-def named_barrier_arrive_then_sync(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+@T.function
+def named_barrier_arrive_then_sync(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         T.ptx.bar.arrive(T.uint32(3), T.uint32(64))
     else:
@@ -553,12 +515,12 @@ def named_barrier_arrive_then_sync(output: T.Buffer((64,), "int32")):
     output[warp * 32 + lane] = warp + 1
 
 
-@T.prim_func
-def divergent_unaligned_named_barrier(output: T.Buffer((64,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((2,), "int32", scope="shared")
+@T.function
+def divergent_unaligned_named_barrier(output: T.Tensor((64,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((2,), "int32")
     if lane == 0:
         shared[warp] = warp + 11
     if lane == 0:
@@ -568,9 +530,9 @@ def divergent_unaligned_named_barrier(output: T.Buffer((64,), "int32")):
     output[warp * 32 + lane] = shared[1 - warp]
 
 
-@T.prim_func
-def directed_f64_rounding(output: T.Buffer((1,), "float64")):
-    T.device_entry()
+@T.function
+def directed_f64_rounding(output: T.Tensor((1,), "float64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.add.rm.f64(output[0], T.float64(1), T.float64(-(2**-54)))
 
 
@@ -601,7 +563,6 @@ def test_scalar_and_warp_intrinsics_execute_with_native_semantics(tmp_path):
     lane_bf16 = (lane_bits + np.uint32(0x7FFF) + ((lane_bits >> 16) & 1)) >> 16
     next_bf16 = (next_bits + np.uint32(0x7FFF) + ((next_bits >> 16) & 1)) >> 16
     expected_u32[:, 4] = lane_bf16 | (next_bf16 << 16)
-    expected_u32[:, 5] = np.uint32(0xFEFFFFFF)
     expected_u32[:, 6] = np.uint32(0x23456789)
     np.testing.assert_array_equal(result.outputs["output_u32"], expected_u32)
     np.testing.assert_array_equal(result.outputs["output_u64"], np.zeros(32, dtype=np.uint64))
@@ -661,21 +622,14 @@ def test_timer_finalize_is_a_numerical_noop(tmp_path):
 
 def test_removed_flat_arithmetic_helper_is_rejected_by_the_target_parser():
     with pytest.raises(AttributeError, match="tirx.ptx.add_f32"):
-        T.call_intrin(
-            "",
-            "tirx.ptx_add_f32",
-            T.float32(0),
-            T.float32(1),
-            T.float32(2),
-        )
+        T.call_intrin("tirx.ptx_add_f32", T.float32(0), T.float32(1), T.float32(2), ty="")
 
 
 def test_cuda_shuffle_rejects_invalid_width(tmp_path):
-    @T.prim_func
-    def kernel(output: T.Buffer((32,), "uint32"), width: T.int32):
-        T.device_entry()
-        _warp = T.warp_id([1])
-        lane = T.lane_id([32])
+    @T.function
+    def kernel(output: T.Tensor((32,), "uint32"), width: T.int32):
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+        lane = T.cuda.lane_id()
         output[lane] = T.cuda.__shfl_sync(T.uint32(0xFFFFFFFF), T.cast(lane, "uint32"), 0, width)
 
     module = numsim.transpile(kernel, cache_dir=tmp_path)

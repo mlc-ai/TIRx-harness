@@ -9,25 +9,24 @@ from tests.numsim.corpus.kernels.deepgemm import (
 )
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def mega_scalar_helpers(
-    packed_lhs: T.Buffer((32,), "uint32"),
-    packed_rhs: T.Buffer((32,), "uint32"),
-    fp8_values: T.Buffer((32, 4), "float32"),
-    masks: T.Buffer((32,), "uint32"),
-    bases: T.Buffer((32,), "uint32"),
-    offsets: T.Buffer((32,), "int32"),
-    accum: T.Buffer((32,), "float32"),
-    bf16_values: T.Buffer((32,), "uint16"),
-    packed_output: T.Buffer((32, 4), "uint32"),
-    float_output: T.Buffer((32,), "float32"),
+    packed_lhs: T.Tensor((32,), "uint32"),
+    packed_rhs: T.Tensor((32,), "uint32"),
+    fp8_values: T.Tensor((32, 4), "float32"),
+    masks: T.Tensor((32,), "uint32"),
+    bases: T.Tensor((32,), "uint32"),
+    offsets: T.Tensor((32,), "int32"),
+    accum: T.Tensor((32,), "float32"),
+    bf16_values: T.Tensor((32,), "uint16"),
+    packed_output: T.Tensor((32, 4), "uint32"),
+    float_output: T.Tensor((32,), "float32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     packed_output[lane, 0] = T.cuda.hmin2(packed_lhs[lane], packed_rhs[lane])
     packed_output[lane, 1] = T.cuda.hmax2(packed_lhs[lane], packed_rhs[lane])
     packed_output[lane, 2] = T.cuda.fp8x4_e4m3_from_float4(

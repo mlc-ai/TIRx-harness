@@ -5,19 +5,19 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def global_release_to_ordered_b128_acquire(
-    data: T.Buffer((1,), "uint64"),
-    response: T.Buffer((2,), "uint64"),
-    ready: T.Buffer((1,), "uint32"),
-    output: T.Buffer((2,), "uint64"),
+    data: T.Tensor((1,), "uint64"),
+    response: T.Tensor((2,), "uint64"),
+    ready: T.Tensor((1,), "uint32"),
+    output: T.Tensor((2,), "uint64"),
 ):
-    T.device_entry()
-    cta = T.cta_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     loaded = T.alloc_local((1,), "uint128")
     ready_seen = T.local_scalar("uint32")
     published = T.local_scalar("uint64")

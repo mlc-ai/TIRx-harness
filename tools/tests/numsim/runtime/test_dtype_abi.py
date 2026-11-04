@@ -9,8 +9,9 @@ from tests.numsim.support.manifest import (
 )
 from tirx_harness.numsim.dtype_abi import dtype_itemsize, vector_dtype_abi
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.backend.cuda.op import cuda_atomic_cas
-from tvm.tirx import Cast, Var, decl_buffer
+from tvm_tirx.backend.cuda.op import atomic_cas
+from tvm_tirx.ir import TensorLoad
+from tvm_tirx.tirx import Cast, TensorType, Var, tensor_data_ptr
 
 
 def test_storage_width_does_not_grant_scalar_cast_support():
@@ -78,9 +79,9 @@ def test_vector_dtype_abi_rejects_nonvector_or_unrepresentable_widths(dtype):
 )
 def test_cuda_atomic_cas_emits_every_byte_addressable_128bit_vector(dtype):
     pointer, compare, value = (
-        decl_buffer((1,), dtype, name=name) for name in ("memory", "compare", "value")
+        Var(name, TensorType((1,), dtype)) for name in ("memory", "compare", "value")
     )
-    call = cuda_atomic_cas(pointer.data, compare.vload([0]), value.vload([0]))
+    call = atomic_cas(tensor_data_ptr(pointer), TensorLoad(compare, [0]), TensorLoad(value, [0]))
     kernel = resolved_kernel(evaluated_kernel(call, (pointer, compare, value)))
     assert "tirx.cuda.atomic_cas" in call_op_names(kernel)
     assert not kernel.unsupported
@@ -90,6 +91,6 @@ def test_cuda_atomic_cas_emits_every_byte_addressable_128bit_vector(dtype):
     "dtype", ["uint32x2", "float32x2", "boolx4", "boolx128", "float4_e2m1fnx32"]
 )
 def test_cuda_atomic_cas_classifier_rejects_non128_or_non_byte_addressable_vectors(dtype):
-    call = cuda_atomic_cas(Var("pointer", "handle"), Var("compare", dtype), Var("value", dtype))
+    call = atomic_cas(Var("pointer", "handle"), Var("compare", dtype), Var("value", dtype))
     with pytest.raises(UnsupportedTIRxError, match="128-bit vector operands"):
         resolved_kernel(evaluated_kernel(call, call.args))

@@ -3,10 +3,10 @@
 import pytest
 import tvm_ffi
 
-import tvm
+import tvm_tirx
 from tirx_harness.numsim.errors import NumSimBuildError
 from tirx_harness.numsim.transpiler import native_frontend
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 
 def test_native_frontend_rejects_a_mismatched_build(monkeypatch):
@@ -19,14 +19,8 @@ def test_native_frontend_rejects_a_mismatched_build(monkeypatch):
         native_frontend._library.cache_clear()
 
 
-@pytest.mark.parametrize(
-    "callback",
-    [
-        "numsim.frontend.decode_ptx_call",
-        "numsim.frontend.tcgen05_cp_plan_error",
-    ],
-)
-def test_native_frontend_reports_callback_registration_failure_at_load(monkeypatch, callback):
+def test_native_frontend_reports_callback_registration_failure_at_load(monkeypatch):
+    callback = "numsim.frontend.decode_ptx_call"
     register = tvm_ffi.register_global_func
 
     def fail_registration(name, function, **kwargs):
@@ -44,21 +38,6 @@ def test_native_frontend_reports_callback_registration_failure_at_load(monkeypat
         # A failed load must not poison the cache; restoring registration is sufficient.
         loaded = native_frontend._library()
         assert str(loaded["numsim_frontend_identity"]()) == native_frontend._expected_identity()
-    finally:
-        native_frontend._library.cache_clear()
-
-
-def test_native_frontend_requires_the_tile_callback_dependency_at_load(monkeypatch):
-    from tvm.backend.cuda.tile_primitive.copy_async import tcgen05_cp
-
-    native_frontend._library.cache_clear()
-    try:
-        with monkeypatch.context() as patch:
-            patch.delattr(tcgen05_cp, "_build_plan")
-            with pytest.raises(NumSimBuildError, match="callback registration failed") as caught:
-                native_frontend._library()
-            assert isinstance(caught.value.__cause__, ImportError)
-        assert native_frontend._library() is not None
     finally:
         native_frontend._library.cache_clear()
 
@@ -92,6 +71,6 @@ def test_linear_mapping_and_full_domain_span_preserve_physical_coordinates(
     repeat_stride,
 ):
     expected = [offset + repeat * repeat_stride for repeat in range(3) for offset in atom_offsets]
-    before = tvm.ir.save_json(layout)
+    before = tvm_tirx.ir.save_json(layout)
     assert list(map(int, native_frontend.layout_linear_offsets(layout, len(expected)))) == expected
-    assert tvm.ir.save_json(layout) == before
+    assert tvm_tirx.ir.save_json(layout) == before

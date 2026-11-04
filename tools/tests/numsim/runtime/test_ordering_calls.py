@@ -3,18 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.kernels import ordering_only_control_calls
 from tests.numsim.support.manifest import emitted_calls
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
-def setmaxnreg_ordering_only(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_ordering_only(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     T.ptx.setmaxnreg.inc.sync.aligned.u32(24)
     T.cuda.warpgroup_sync(7)
     T.ptx.setmaxnreg.dec.sync.aligned.u32(256)
@@ -22,22 +22,22 @@ def setmaxnreg_ordering_only(output: T.Buffer((1,), "int32")):
         output[0] = 7
 
 
-@T.prim_func
-def setmaxnreg_without_intervening_sync(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_without_intervening_sync(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     T.ptx.setmaxnreg.inc.sync.aligned.u32(24)
     T.ptx.setmaxnreg.dec.sync.aligned.u32(256)
     if (warp == 0) and (lane == 0):
         output[0] = 7
 
 
-@T.prim_func
-def setmaxnreg_warp_disagreement(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_warp_disagreement(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         T.ptx.setmaxnreg.inc.sync.aligned.u32(24)
     else:
@@ -46,11 +46,11 @@ def setmaxnreg_warp_disagreement(output: T.Buffer((1,), "int32")):
         output[0] = 7
 
 
-@T.prim_func
-def setmaxnreg_equivalent_branch_sites(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_equivalent_branch_sites(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     if warp == 0:
         T.ptx.setmaxnreg.dec.sync.aligned.u32(24)
     elif warp == 1:
@@ -63,24 +63,24 @@ def setmaxnreg_equivalent_branch_sites(output: T.Buffer((1,), "int32")):
         output[0] = 11
 
 
-@T.prim_func
-def setmaxnreg_deleted(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_deleted(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     T.cuda.warpgroup_sync(7)
     if (warp == 0) and (lane == 0):
         output[0] = 7
 
 
 def _setmaxnreg_static_expression_kernel():
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         """
-@T.prim_func
-def setmaxnreg_static_expressions(output: T.Buffer((1,), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
+@T.function
+def setmaxnreg_static_expressions(output: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     T.ptx.setmaxnreg.inc.sync.aligned.u32(T.int32(24) + T.int32(8))
     T.cuda.warpgroup_sync(7)
     T.ptx.setmaxnreg.dec.sync.aligned.u32(T.int32(72) - T.int32(8))
@@ -91,30 +91,27 @@ def setmaxnreg_static_expressions(output: T.Buffer((1,), "int32")):
     )
 
 
-@T.prim_func
-def divergent_warp_sync(output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def divergent_warp_sync(output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane < 16:
         T.cuda.warp_sync()
     output[lane] = lane
 
 
-@T.prim_func
-def griddep_producer(intermediate: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def griddep_producer(intermediate: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     intermediate[lane] = lane + 1
     T.ptx.griddepcontrol.launch_dependents()
 
 
-@T.prim_func
-def griddep_consumer(intermediate: T.Buffer((32,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def griddep_consumer(intermediate: T.Tensor((32,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.griddepcontrol.wait()
     output[lane] = intermediate[lane] * 2
 
@@ -145,13 +142,13 @@ def test_ordering_only_calls_emit_the_registered_instructions():
 )
 def test_target_ptx_parser_rejects_extra_ordering_operands(statement, message):
     source = f"""
-@T.prim_func
+@T.function
 def invalid():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     {statement}
 """
-    with pytest.raises(tvm.error.DiagnosticError, match=message):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match=message):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_ordering_only_calls_preserve_native_source_order(tmp_path):
@@ -217,13 +214,13 @@ def test_setmaxnreg_parser_rejects_nonliteral_and_illegal_counts(
     parameters, register_count, message
 ):
     source = f"""
-@T.prim_func
+@T.function
 def invalid({parameters}):
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx.setmaxnreg.inc.sync.aligned.u32({register_count})
 """
-    with pytest.raises(tvm.error.DiagnosticError, match=message):
-        tvm.script.from_source(source, {"T": T})
+    with pytest.raises(ValueError, match=message):
+        tvm_tirx.script.from_source(source, {"T": T})
 
 
 def test_setmaxnreg_requires_explicit_warpgroup_sync_before_a_later_call(tmp_path):

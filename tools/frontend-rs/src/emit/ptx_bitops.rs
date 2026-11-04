@@ -5,7 +5,7 @@ use crate::decode::ptx::{unmodeled_form, DecodedPtx};
 use crate::decode::Decoded;
 use crate::emit::register_call::{require_register_call, table_marker, PTX_TYPE_MARKERS};
 use crate::emit::{Emitter, RustValue, Uniformity};
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 /// The Rust carrier type of `dtype`; an unknown dtype is an internal error.
 fn carrier_rust_type(dtype: &str) -> AResult<&'static str> {

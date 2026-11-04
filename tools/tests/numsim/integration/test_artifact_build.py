@@ -58,70 +58,56 @@ from tirx_harness.numsim.bindings import prepare_bindings
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
 from tirx_harness.numsim.transpiler.source_map import flatten_source_span
-from tvm import tirx
-from tvm.ir import load_json, save_json
-from tvm.script import tirx as T
-from tvm.tirx.layout import ComposeLayout, S, TileLayout
+from tvm_tirx import ir, tirx
+from tvm_tirx.ir import load_json, save_json
+from tvm_tirx.script import tirx as T
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _PADDED_COMPOSE_LAYOUT = ComposeLayout(0, 0, 0, TileLayout(S[(2, 2) : (4, 1)]))
 
 
-@T.prim_func
-def lazy_logical_buffer_load(source: T.Buffer((1,), "int32"), output: T.Buffer((32,), "int32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+@T.function
+def lazy_logical_buffer_load(source: T.Tensor((1,), "int32"), output: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     and_value: T.let = (lane == 0) and (source[lane] == 5)
     or_value: T.let = (lane != 0) or (source[lane] == 5)
     output[lane] = T.cast(and_value, "int32") + T.cast(or_value, "int32") * 2
 
 
-@T.prim_func
-def lane_and_thread_scope_ids(output: T.Buffer((4, 32, 2), "int32")):
-    T.device_entry()
-    warp = T.warp_id([4])
-    lane = T.lane_id([32])
-    thread = T.thread_id([128])
+@T.function
+def lane_and_thread_scope_ids(output: T.Tensor((4, 32, 2), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    thread = T.cuda.linear_thread_id()
     output[warp, lane, 0] = lane
     output[warp, lane, 1] = thread
 
 
-@T.prim_func
-def dps_pointer_offset(output: T.Buffer((33,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    destination = T.ptr_byte_offset(output.ptr_to([lane]), T.uint32(4), "float32")
+@T.function
+def dps_pointer_offset(output: T.Tensor((33,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    destination = T.ptr_byte_offset(output.ptr_to([lane]), T.uint32(4), ty=T.Ptr("float32"))
     T.ptx.st.global_.f32(destination, T.cast(lane, "float32") + T.float32(100))
 
 
-@T.prim_func
-def dps_read_only_destination(output: T.Buffer((33,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    destination = output.access_ptr("r", offset=lane, extent=1)
+@T.function
+def dps_destination_after_access_extent(output: T.Tensor((33,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    bounded = output.ptr_to([lane])
+    destination = T.ptr_byte_offset(bounded, T.uint32(4), ty=T.Ptr("float32"))
     T.ptx.st.global_.f32(destination, T.cast(lane, "float32") + T.float32(100))
 
 
-@T.prim_func
-def dps_destination_after_access_extent(output: T.Buffer((33,), "float32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    bounded = output.access_ptr("w", offset=lane, extent=1)
-    destination = T.ptr_byte_offset(bounded, T.uint32(4), "float32")
-    T.ptx.st.global_.f32(destination, T.cast(lane, "float32") + T.float32(100))
-
-
-@T.prim_func
-def remote_mbarrier_explicit_count(output: T.Buffer((2,), "int32")):
-    T.device_entry()
-    _cluster = T.cluster_id([1])
-    cta = T.cta_id_in_cluster([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+@T.function
+def remote_mbarrier_explicit_count(output: T.Tensor((2,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    cta = T.cuda.cluster_cta_id("x")
+    lane = T.cuda.lane_id()
+    barriers = T.alloc_shared((1,), "uint64")
     if (cta == 0) and (lane == 0):
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 4)
     T.ptx.fence.proxy.async_.shared__cluster()
@@ -139,13 +125,12 @@ def remote_mbarrier_explicit_count(output: T.Buffer((2,), "int32")):
         output[cta] = 1
 
 
-@T.prim_func
-def padded_compose_alias(output: T.Buffer((6,), "uint32")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((2, 2), "uint32", scope="shared", layout=_PADDED_COMPOSE_LAYOUT)
-    dense = T.decl_buffer((6,), "uint32", data=shared.data, scope="shared")
+@T.function
+def padded_compose_alias(output: T.Tensor((6,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((2, 2), "uint32", layout=_PADDED_COMPOSE_LAYOUT)
+    dense = T.decl_tensor(shared.data, ty_args=[T.Tensor((6,), "uint32", scope="shared")])
     if lane == 0:
         dense[2] = 90
         dense[3] = 91
@@ -157,14 +142,14 @@ def padded_compose_alias(output: T.Buffer((6,), "uint32")):
             output[index] = dense[index]
 
 
-@T.prim_func
-def cta_reductions_preserve_scratch(output: T.Buffer((3, 3), "float32")):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    sum_scratch = T.alloc_buffer((2,), "float32", scope="shared")
-    max_scratch = T.alloc_buffer((2,), "float32", scope="shared")
-    min_scratch = T.alloc_buffer((2,), "float32", scope="shared")
+@T.function
+def cta_reductions_preserve_scratch(output: T.Tensor((3, 3), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    sum_scratch = T.alloc_shared((2,), "float32")
+    max_scratch = T.alloc_shared((2,), "float32")
+    min_scratch = T.alloc_shared((2,), "float32")
     value = T.cast(warp * 100 + lane, "float32")
     sum_result = T.cuda.cta_sum(value, 2, sum_scratch.ptr_to([0]))
     max_result = T.cuda.cta_max(value, 2, max_scratch.ptr_to([0]))
@@ -181,34 +166,34 @@ def cta_reductions_preserve_scratch(output: T.Buffer((3, 3), "float32")):
         output[2, 2] = min_scratch[1]
 
 
-@T.prim_func
+@T.function
 def cuda_float_reduction_edge_bits(
-    operands: T.Buffer((2,), "uint32"), output: T.Buffer((7,), "uint32")
+    operands: T.Tensor((2,), "uint32"), output: T.Tensor((7,), "uint32")
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
-    sum_scratch = T.alloc_buffer((2,), "float32", scope="shared")
-    max_scratch = T.alloc_buffer((2,), "float32", scope="shared")
-    min_scratch = T.alloc_buffer((2,), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    sum_scratch = T.alloc_shared((2,), "float32")
+    max_scratch = T.alloc_shared((2,), "float32")
+    min_scratch = T.alloc_shared((2,), "float32")
     is_special = (warp == 0) and (lane == 1)
     nan_value = T.if_then_else(
-        is_special, T.reinterpret("float32", T.uint32(0x7FC12345)), T.float32(0.0)
+        is_special, T.reinterpret(T.uint32(0x7FC12345), ty="float32"), T.float32(0.0)
     )
     zero_value = T.if_then_else(is_special, T.float32(0.0), T.float32(-0.0))
     sum_result = T.cuda.cta_sum(nan_value, 2, sum_scratch.ptr_to([0]))
     max_result = T.cuda.cta_max(zero_value, 2, max_scratch.ptr_to([0]))
     min_result = T.cuda.cta_min(zero_value, 2, min_scratch.ptr_to([0]))
     if (warp == 0) and (lane == 0):
-        lhs = T.reinterpret("float32", operands[0])
-        rhs = T.reinterpret("float32", operands[1])
-        output[0] = T.reinterpret("uint32", sum_result)
-        output[1] = T.reinterpret("uint32", max_result)
-        output[2] = T.reinterpret("uint32", min_result)
-        output[3] = T.reinterpret("uint32", T.max(lhs, rhs))
-        output[4] = T.reinterpret("uint32", T.max(rhs, lhs))
-        output[5] = T.reinterpret("uint32", T.min(lhs, rhs))
-        output[6] = T.reinterpret("uint32", T.min(rhs, lhs))
+        lhs = T.reinterpret(operands[0], ty="float32")
+        rhs = T.reinterpret(operands[1], ty="float32")
+        output[0] = T.reinterpret(sum_result, ty="uint32")
+        output[1] = T.reinterpret(max_result, ty="uint32")
+        output[2] = T.reinterpret(min_result, ty="uint32")
+        output[3] = T.reinterpret(T.max(lhs, rhs), ty="uint32")
+        output[4] = T.reinterpret(T.max(rhs, lhs), ty="uint32")
+        output[5] = T.reinterpret(T.min(lhs, rhs), ty="uint32")
+        output[6] = T.reinterpret(T.min(rhs, lhs), ty="uint32")
 
 
 def _encode_bf16(values: np.ndarray) -> np.ndarray:
@@ -230,8 +215,8 @@ def test_codegen_rejects_a_spec_paired_with_different_primfuncs() -> None:
 
 def test_codegen_rejects_alpha_renamed_host_abi_with_the_same_structural_hash() -> None:
     def make_func(parameter_name: str):
-        buffer = tirx.decl_buffer((1,), "int32", name=parameter_name)
-        return tirx.PrimFunc([buffer], tirx.Evaluate(tirx.IntImm("int32", 0)))
+        buffer = tirx.Var(parameter_name, tirx.TensorType((1,), "int32"))
+        return tirx.Function([buffer], ir.Evaluate(ir.IntImm("int32", 0)))
 
     original = make_func("original")
     renamed = make_func("renamed")
@@ -375,8 +360,8 @@ def test_artifact_cache_identity_ignores_spans_and_rebinds_current_location(tmp_
     for node in payload["nodes"]:
         if node["type"] == "ir.SourceName":
             node["data"] = "/tmp/relocated/no_op_kernel.py"
-        elif node["type"] == "ir.Span":
-            node["data"]["line"] += 2000
+        elif node["type"] == "ir.SourceLoc":
+            node["data"]["start_line"] += 2000
             node["data"]["end_line"] += 2000
     relocated = load_json(json.dumps(payload))
 
@@ -942,19 +927,6 @@ def test_dps_writes_through_the_full_physical_pointer(tmp_path):
         (np.array([-1], dtype=np.float32), np.arange(100, 132, dtype=np.float32))
     )
     np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-@pytest.mark.parametrize(
-    ("kernel", "message"),
-    [
-        (dps_read_only_destination, "non-writable physical pointer"),
-    ],
-)
-def test_dps_preserves_pointer_access_contracts(kernel, message, tmp_path):
-    module = numsim.transpile(kernel, cache_dir=tmp_path)
-
-    with pytest.raises(numsim.NumSimExecutionError, match=message):
-        numsim.Engine().run(module, {"output": np.zeros(33, dtype=np.float32)})
 
 
 def test_dps_integer_pointer_arithmetic_does_not_carry_access_ptr_extent(tmp_path):

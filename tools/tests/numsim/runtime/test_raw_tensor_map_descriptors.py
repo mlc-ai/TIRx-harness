@@ -6,8 +6,9 @@ import pytest
 from tirx_harness import numsim
 from tirx_harness.numsim.cases import _descriptor_storage
 from tirx_harness.numsim.errors import UnsupportedTIRxError
-from tvm.ir.type import PointerType, PrimType
-from tvm.script import tirx as T
+from tvm_tirx.ir import PtrType
+from tvm_tirx.ir.type import PrimType
+from tvm_tirx.script import tirx as T
 
 _FLASHKDA_ACQUIRE_SOURCE = r"""__device__ __forceinline__ void flashkda_tensormap_acquire(const void *tmap_ptr) {
     asm volatile(
@@ -70,8 +71,7 @@ def _replace_global_dim(descriptor, index: int, value):
         f"gdn_tensormap_replace_global_dim_{index}",
         descriptor,
         value,
-        source_code=_gdn_replace_dim_source(index),
-        return_type="void",
+        _gdn_replace_dim_source(index),
     )
 
 
@@ -80,23 +80,19 @@ def _replace_global_stride(descriptor, index: int, value):
         f"gdn_tensormap_replace_global_stride_{index}",
         descriptor,
         value,
-        source_code=_gdn_replace_stride_source(index),
-        return_type="void",
+        _gdn_replace_stride_source(index),
     )
 
 
 @T.inline
 def _copy_descriptor_payload(source_map, descriptor):
-    payload = T.decl_buffer(
-        (8,),
-        "uint64",
-        data=T.reinterpret("handle", T.address_of(source_map)),
-        scope="param",
-        align=16,
+    payload = T.decl_tensor(
+        T.reinterpret(T.address_of(source_map), ty="handle"),
+        ty_args=[T.Tensor((8,), "uint64", scope="global", align=16)],
     )
     T.ptx.st.global_.v4.b64(descriptor, payload[0], payload[1], payload[2], payload[3])
     T.ptx.st.global_.v4.b64(
-        T.reinterpret("handle", T.reinterpret("uint64", descriptor) + T.uint64(32)),
+        T.reinterpret(T.reinterpret(descriptor, ty="uint64") + T.uint64(32), ty="handle"),
         payload[4],
         payload[5],
         payload[6],
@@ -106,9 +102,9 @@ def _copy_descriptor_payload(source_map, descriptor):
 
 @T.inline
 def _copy_raw_descriptor_payload_with_scalar_stores(source_descriptor_storage, descriptor):
-    payload = T.alloc_buffer((4,), "uint64", scope="local")
-    source = T.reinterpret("uint64", source_descriptor_storage.ptr_to([0]))
-    target = T.reinterpret("uint64", descriptor)
+    payload = T.alloc_local((4,), "uint64")
+    source = T.reinterpret(source_descriptor_storage.ptr_to([0]), ty="uint64")
+    target = T.reinterpret(descriptor, ty="uint64")
     for group in range(2):
         offset = T.uint64(group * 32)
         T.ptx.ld.global_.v4.b64(
@@ -116,27 +112,24 @@ def _copy_raw_descriptor_payload_with_scalar_stores(source_descriptor_storage, d
             payload[1],
             payload[2],
             payload[3],
-            T.reinterpret("handle", source + offset),
+            T.reinterpret(source + offset, ty="handle"),
         )
         for word in range(4):
             T.ptx.st.global_.b64(
-                T.reinterpret("handle", target + T.uint64((group * 4 + word) * 8)),
+                T.reinterpret(target + T.uint64((group * 4 + word) * 8), ty="handle"),
                 payload[word],
             )
 
 
-@T.prim_func
+@T.function
 def typed_param_descriptor_scalar_copy(
-    source_map: T.TensorMap(), output: T.Buffer((16,), "uint64")
+    source_map: T.Ptr(T.TensorMap), output: T.Tensor((16,), "uint64")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    payload = T.decl_buffer(
-        (16,),
-        "uint64",
-        data=T.reinterpret(PointerType(PrimType("uint64"), "param"), T.address_of(source_map)),
-        scope="param",
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    payload = T.decl_tensor(
+        T.reinterpret(T.address_of(source_map), ty=PtrType(PrimType("uint64"), "global")),
+        ty_args=[T.Tensor((16,), "uint64", scope="global")],
     )
     if lane == 0:
         for word in T.serial(16):
@@ -156,25 +149,19 @@ def test_typed_param_descriptor_scalar_copy_preserves_payload(tmp_path):
     assert result.verdict == "clean"
 
 
-@T.prim_func
+@T.function
 def host_descriptor_tma_load(
-    source: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((16,), "int64"),
+    source: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
-        T.cuda.func_call(
-            "flashkda_tensormap_acquire",
-            descriptor,
-            source_code=_FLASHKDA_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("flashkda_tensormap_acquire", descriptor, _FLASHKDA_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -183,17 +170,16 @@ def host_descriptor_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def host_descriptor_tma_load_without_acquire(
-    source: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((16,), "int64"),
+    source: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
@@ -204,31 +190,25 @@ def host_descriptor_tma_load_without_acquire(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def host_descriptor_tma_load_to_raw_shared_offset(
-    source: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((16,), "int64"),
+    source: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((16,), "int64"),
     destination_row: T.int32,
     barrier_index: T.int32,
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((11, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((2,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((11, 4), "float32")
+    barriers = T.alloc_shared((2,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     shared_base: T.uint32 = T.cuda.cvta_generic_to_shared(shared.ptr_to([0, 0]))
     destination = shared_base + T.cast(destination_row * 16, "uint32")
     barrier_base: T.uint32 = T.cuda.cvta_generic_to_shared(barriers.ptr_to([0]))
     transaction_barrier = barrier_base + T.cast(barrier_index * 8, "uint32")
     if lane == 0:
-        T.cuda.func_call(
-            "flashkda_tensormap_acquire",
-            descriptor,
-            source_code=_FLASHKDA_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("flashkda_tensormap_acquire", descriptor, _FLASHKDA_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[barrier_index]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -248,31 +228,27 @@ def host_descriptor_tma_load_to_raw_shared_offset(
                 output[row, column] = shared[row + destination_row, column]
 
 
-@T.prim_func
+@T.function
 def copied_and_replaced_descriptor_tma_load(
-    source_map: T.TensorMap(),
-    source: T.Buffer((3, 4), "float32"),
-    replacement: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((128,), "uint8"),
+    source_map: T.Ptr(T.TensorMap),
+    source: T.Tensor((3, 4), "float32"),
+    replacement: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
-        payload = T.decl_buffer(
-            (8,),
-            "uint64",
-            data=T.reinterpret("handle", T.address_of(source_map)),
-            scope="param",
-            align=16,
+        payload = T.decl_tensor(
+            T.reinterpret(T.address_of(source_map), ty="handle"),
+            ty_args=[T.Tensor((8,), "uint64", scope="global", align=16)],
         )
         T.ptx.st.global_.v4.b64(descriptor, payload[0], payload[1], payload[2], payload[3])
         T.ptx.st.global_.v4.b64(
-            T.reinterpret("handle", T.reinterpret("uint64", descriptor) + T.uint64(32)),
+            T.reinterpret(T.reinterpret(descriptor, ty="uint64") + T.uint64(32), ty="handle"),
             payload[4],
             payload[5],
             payload[6],
@@ -282,8 +258,7 @@ def copied_and_replaced_descriptor_tma_load(
             "gdn_tensormap_replace_global_address",
             descriptor,
             replacement.data,
-            source_code=_GDN_REPLACE_ADDRESS_SOURCE,
-            return_type="void",
+            _GDN_REPLACE_ADDRESS_SOURCE,
         )
         _replace_global_dim(descriptor, 0, T.uint32(4))
         _replace_global_dim(descriptor, 1, T.uint32(3))
@@ -294,17 +269,8 @@ def copied_and_replaced_descriptor_tma_load(
         _replace_global_stride(descriptor, 1, T.uint64(0))
         _replace_global_stride(descriptor, 2, T.uint64(0))
         _replace_global_stride(descriptor, 3, T.uint64(0))
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -313,23 +279,22 @@ def copied_and_replaced_descriptor_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def raw_copied_and_replaced_descriptor_tma_load(
-    source_descriptor_storage: T.Buffer((16,), "int64"),
-    source: T.Buffer((3, 4), "float32"),
-    replacement: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_workspace: T.Buffer((16,), "int64"),
+    source_descriptor_storage: T.Tensor((16,), "int64"),
+    source: T.Tensor((3, 4), "float32"),
+    replacement: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_workspace: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    payload = T.alloc_buffer((4,), "uint64", scope="local")
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    source_descriptor = T.reinterpret("uint64", source_descriptor_storage.ptr_to([0]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    payload = T.alloc_local((4,), "uint64")
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
+    source_descriptor = T.reinterpret(source_descriptor_storage.ptr_to([0]), ty="uint64")
     descriptor = descriptor_workspace.ptr_to([0])
-    destination_descriptor = T.reinterpret("uint64", descriptor)
+    destination_descriptor = T.reinterpret(descriptor, ty="uint64")
     if lane == 0:
         for chunk in T.serial(2):
             byte_offset = T.cast(chunk * 32, "uint64")
@@ -338,10 +303,10 @@ def raw_copied_and_replaced_descriptor_tma_load(
                 payload[1],
                 payload[2],
                 payload[3],
-                T.reinterpret("handle", source_descriptor + byte_offset),
+                T.reinterpret(source_descriptor + byte_offset, ty="handle"),
             )
             T.ptx.st.global_.v4.b64(
-                T.reinterpret("handle", destination_descriptor + byte_offset),
+                T.reinterpret(destination_descriptor + byte_offset, ty="handle"),
                 payload[0],
                 payload[1],
                 payload[2],
@@ -351,8 +316,7 @@ def raw_copied_and_replaced_descriptor_tma_load(
             "gdn_tensormap_replace_global_address",
             descriptor,
             replacement.data,
-            source_code=_GDN_REPLACE_ADDRESS_SOURCE,
-            return_type="void",
+            _GDN_REPLACE_ADDRESS_SOURCE,
         )
         _replace_global_dim(descriptor, 0, T.uint32(4))
         _replace_global_dim(descriptor, 1, T.uint32(3))
@@ -363,17 +327,8 @@ def raw_copied_and_replaced_descriptor_tma_load(
         _replace_global_stride(descriptor, 1, T.uint64(0))
         _replace_global_stride(descriptor, 2, T.uint64(0))
         _replace_global_stride(descriptor, 3, T.uint64(0))
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -382,31 +337,21 @@ def raw_copied_and_replaced_descriptor_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def raw_descriptor_scalar_store_copy_tma_load(
-    source_descriptor_storage: T.Buffer((16,), "int64"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_workspace: T.Buffer((16,), "int64"),
+    source_descriptor_storage: T.Tensor((16,), "int64"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_workspace: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_workspace.ptr_to([0])
     if lane == 0:
         _copy_raw_descriptor_payload_with_scalar_stores(source_descriptor_storage, descriptor)
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -415,21 +360,20 @@ def raw_descriptor_scalar_store_copy_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def incomplete_raw_descriptor_copy_tma_load(
-    source_descriptor_storage: T.Buffer((16,), "int64"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_workspace: T.Buffer((16,), "int64"),
+    source_descriptor_storage: T.Tensor((16,), "int64"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_workspace: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    payload = T.alloc_buffer((4,), "uint64", scope="local")
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    source_descriptor = T.reinterpret("uint64", source_descriptor_storage.ptr_to([0]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    payload = T.alloc_local((4,), "uint64")
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
+    source_descriptor = T.reinterpret(source_descriptor_storage.ptr_to([0]), ty="uint64")
     descriptor = descriptor_workspace.ptr_to([0])
-    destination_descriptor = T.reinterpret("uint64", descriptor)
+    destination_descriptor = T.reinterpret(descriptor, ty="uint64")
     if lane == 0:
         for chunk in T.serial(1):
             byte_offset = T.cast(chunk * 32, "uint64")
@@ -438,26 +382,17 @@ def incomplete_raw_descriptor_copy_tma_load(
                 payload[1],
                 payload[2],
                 payload[3],
-                T.reinterpret("handle", source_descriptor + byte_offset),
+                T.reinterpret(source_descriptor + byte_offset, ty="handle"),
             )
             T.ptx.st.global_.v4.b64(
-                T.reinterpret("handle", destination_descriptor + byte_offset),
+                T.reinterpret(destination_descriptor + byte_offset, ty="handle"),
                 payload[0],
                 payload[1],
                 payload[2],
                 payload[3],
             )
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -466,21 +401,20 @@ def incomplete_raw_descriptor_copy_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def raw_descriptor_96b_copy_tma_load(
-    source_descriptor_storage: T.Buffer((16,), "int64"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_workspace: T.Buffer((16,), "int64"),
+    source_descriptor_storage: T.Tensor((16,), "int64"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_workspace: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    payload = T.alloc_buffer((4,), "uint64", scope="local")
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
-    source_descriptor = T.reinterpret("uint64", source_descriptor_storage.ptr_to([0]))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    payload = T.alloc_local((4,), "uint64")
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
+    source_descriptor = T.reinterpret(source_descriptor_storage.ptr_to([0]), ty="uint64")
     descriptor = descriptor_workspace.ptr_to([0])
-    destination_descriptor = T.reinterpret("uint64", descriptor)
+    destination_descriptor = T.reinterpret(descriptor, ty="uint64")
     if lane == 0:
         for chunk in T.serial(3):
             byte_offset = T.cast(chunk * 32, "uint64")
@@ -489,26 +423,17 @@ def raw_descriptor_96b_copy_tma_load(
                 payload[1],
                 payload[2],
                 payload[3],
-                T.reinterpret("handle", source_descriptor + byte_offset),
+                T.reinterpret(source_descriptor + byte_offset, ty="handle"),
             )
             T.ptx.st.global_.v4.b64(
-                T.reinterpret("handle", destination_descriptor + byte_offset),
+                T.reinterpret(destination_descriptor + byte_offset, ty="handle"),
                 payload[0],
                 payload[1],
                 payload[2],
                 payload[3],
             )
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -517,14 +442,13 @@ def raw_descriptor_96b_copy_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
-def ordinary_u64x4_copy(source: T.Buffer((16,), "int64"), output: T.Buffer((16,), "int64")):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    payload = T.alloc_buffer((4,), "uint64", scope="local")
-    source_address = T.reinterpret("uint64", source.ptr_to([0]))
-    output_address = T.reinterpret("uint64", output.ptr_to([0]))
+@T.function
+def ordinary_u64x4_copy(source: T.Tensor((16,), "int64"), output: T.Tensor((16,), "int64")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    payload = T.alloc_local((4,), "uint64")
+    source_address = T.reinterpret(source.ptr_to([0]), ty="uint64")
+    output_address = T.reinterpret(output.ptr_to([0]), ty="uint64")
     if lane == 0:
         for chunk in T.serial(4):
             byte_offset = T.cast(chunk * 32, "uint64")
@@ -533,10 +457,10 @@ def ordinary_u64x4_copy(source: T.Buffer((16,), "int64"), output: T.Buffer((16,)
                 payload[1],
                 payload[2],
                 payload[3],
-                T.reinterpret("handle", source_address + byte_offset),
+                T.reinterpret(source_address + byte_offset, ty="handle"),
             )
             T.ptx.st.global_.v4.b64(
-                T.reinterpret("handle", output_address + byte_offset),
+                T.reinterpret(output_address + byte_offset, ty="handle"),
                 payload[0],
                 payload[1],
                 payload[2],
@@ -544,17 +468,16 @@ def ordinary_u64x4_copy(source: T.Buffer((16,), "int64"), output: T.Buffer((16,)
             )
 
 
-@T.prim_func
+@T.function
 def copied_and_replaced_descriptor_tma_store(
-    output_map: T.TensorMap(),
-    source: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((128,), "uint8"),
+    output_map: T.Ptr(T.TensorMap),
+    source: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
     descriptor = descriptor_storage.ptr_to([0])
     if lane < 12:
         shared[lane // 4, lane % 4] = source[lane // 4, lane % 4]
@@ -565,20 +488,10 @@ def copied_and_replaced_descriptor_tma_store(
             "gdn_tensormap_replace_global_address",
             descriptor,
             output.data,
-            source_code=_GDN_REPLACE_ADDRESS_SOURCE,
-            return_type="void",
+            _GDN_REPLACE_ADDRESS_SOURCE,
         )
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
     T.cuda.warp_sync()
     T.ptx.fence.proxy.async_.shared__cta()
     if lane == 0:
@@ -591,27 +504,21 @@ def copied_and_replaced_descriptor_tma_store(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
+@T.function
 def host_descriptor_tma_store(
-    source: T.Buffer((3, 4), "float32"),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((16,), "int64"),
+    source: T.Tensor((3, 4), "float32"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((16,), "int64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
     descriptor = descriptor_storage.ptr_to([0])
     if lane < 12:
         shared[lane // 4, lane % 4] = source[lane // 4, lane % 4]
     T.cuda.warp_sync()
     if lane == 0:
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
     T.cuda.warp_sync()
     T.ptx.fence.proxy.async_.shared__cta()
     if lane == 0:
@@ -624,37 +531,23 @@ def host_descriptor_tma_store(
         T.ptx.cp.async_.bulk.wait_group(0)
 
 
-@T.prim_func
+@T.function
 def stale_generation_descriptor_tma_load(
-    source_map: T.TensorMap(),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((128,), "uint8"),
+    source_map: T.Ptr(T.TensorMap),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
         _copy_descriptor_payload(source_map, descriptor)
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         _replace_global_dim(descriptor, 0, T.uint32(4))
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -663,38 +556,25 @@ def stale_generation_descriptor_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def incomplete_typed_descriptor_copy_tma_load(
-    source_map: T.TensorMap(),
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage: T.Buffer((128,), "uint8"),
+    source_map: T.Ptr(T.TensorMap),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
-        payload = T.decl_buffer(
-            (8,),
-            "uint64",
-            data=T.reinterpret("handle", T.address_of(source_map)),
-            scope="param",
-            align=16,
+        payload = T.decl_tensor(
+            T.reinterpret(T.address_of(source_map), ty="handle"),
+            ty_args=[T.Tensor((8,), "uint64", scope="global", align=16)],
         )
         T.ptx.st.global_.v4.b64(descriptor, payload[0], payload[1], payload[2], payload[3])
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
-        T.cuda.func_call(
-            "gdn_tensormap_acquire",
-            descriptor,
-            source_code=_GDN_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
+        T.cuda.func_call("gdn_tensormap_acquire", descriptor, _GDN_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
@@ -703,56 +583,44 @@ def incomplete_typed_descriptor_copy_tma_load(
         _descriptor_tma_load_body(descriptor, shared, barriers, output)
 
 
-@T.prim_func
+@T.function
 def maximum_dimension_descriptor_update(
-    source_map: T.TensorMap(), descriptor_storage: T.Buffer((128,), "uint8")
+    source_map: T.Ptr(T.TensorMap), descriptor_storage: T.Tensor((128,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
         _copy_descriptor_payload(source_map, descriptor)
         _replace_global_dim(descriptor, 0, T.uint32(0))
-        T.cuda.func_call(
-            "gdn_tensormap_release",
-            source_code=_GDN_RELEASE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("gdn_tensormap_release", _GDN_RELEASE_SOURCE)
 
 
-@T.prim_func
+@T.function
 def invalid_dimension_index_descriptor_update(
-    source_map: T.TensorMap(), descriptor_storage: T.Buffer((128,), "uint8")
+    source_map: T.Ptr(T.TensorMap), descriptor_storage: T.Tensor((128,), "uint8")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     descriptor = descriptor_storage.ptr_to([0])
     if lane == 0:
         _copy_descriptor_payload(source_map, descriptor)
         _replace_global_dim(descriptor, 5, T.uint32(1))
 
 
-@T.prim_func
+@T.function
 def conflicting_host_descriptor_slots(
-    output: T.Buffer((3, 4), "float32"),
-    descriptor_storage_a: T.Buffer((128,), "uint8"),
-    descriptor_storage_b: T.Buffer((128,), "uint8"),
+    output: T.Tensor((3, 4), "float32"),
+    descriptor_storage_a: T.Tensor((128,), "uint8"),
+    descriptor_storage_b: T.Tensor((128,), "uint8"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    shared = T.alloc_buffer((3, 4), "float32", scope="shared")
-    barriers = T.alloc_buffer((1,), "uint64", scope="shared")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    shared = T.alloc_shared((3, 4), "float32")
+    barriers = T.alloc_shared((1,), "uint64")
     descriptor = descriptor_storage_a.ptr_to([0])
     if lane == 0:
-        T.cuda.func_call(
-            "flashkda_tensormap_acquire",
-            descriptor,
-            source_code=_FLASHKDA_ACQUIRE_SOURCE,
-            return_type="void",
-        )
+        T.cuda.func_call("flashkda_tensormap_acquire", descriptor, _FLASHKDA_ACQUIRE_SOURCE)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()

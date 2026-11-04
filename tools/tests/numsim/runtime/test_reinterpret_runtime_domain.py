@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import tvm
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 _SCALAR_BITS = {
     "bool": 8,
@@ -132,30 +132,28 @@ _REINTERPRET_SHARDS = (
 )
 
 
-@T.prim_func
+@T.function
 def reinterpret_float16_payload(
-    source_bits: T.Buffer((32,), "uint16"), output: T.Buffer((32,), "float32")
+    source_bits: T.Tensor((32,), "uint16"), output: T.Tensor((32,), "float32")
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    value: T.float16 = T.reinterpret("float16", source_bits[lane])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    value: T.float16 = T.reinterpret(source_bits[lane], ty="float16")
     output[lane] = T.cast(value, "float32")
 
 
-@T.prim_func
+@T.function
 def reinterpret_low_precision_payloads(
-    source_bits: T.Buffer((32,), "uint16"),
-    f16_bits: T.Buffer((32,), "uint16"),
-    bf16_bits: T.Buffer((32,), "uint16"),
+    source_bits: T.Tensor((32,), "uint16"),
+    f16_bits: T.Tensor((32,), "uint16"),
+    bf16_bits: T.Tensor((32,), "uint16"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
-    f16_value: T.float16 = T.reinterpret("float16", source_bits[lane])
-    bf16_value: T.bfloat16 = T.reinterpret("bfloat16", source_bits[lane])
-    f16_bits[lane] = T.reinterpret("uint16", f16_value)
-    bf16_bits[lane] = T.reinterpret("uint16", bf16_value)
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    f16_value: T.float16 = T.reinterpret(source_bits[lane], ty="float16")
+    bf16_value: T.bfloat16 = T.reinterpret(source_bits[lane], ty="bfloat16")
+    f16_bits[lane] = T.reinterpret(f16_value, ty="uint16")
+    bf16_bits[lane] = T.reinterpret(bf16_value, ty="uint16")
 
 
 def _identifier(dtype: str) -> str:
@@ -167,29 +165,28 @@ def _make_raw_kernel(shard: _ReinterpretShard):
     sources = sorted({source for source, _target in shard.signatures})
     source_index = {dtype: index for index, dtype in enumerate(sources)}
     parameters = [
-        f'    source_{source_index[dtype]}: T.Buffer((1,), "{dtype}"),' for dtype in sources
+        f'    source_{source_index[dtype]}: T.Tensor((1,), "{dtype}"),' for dtype in sources
     ]
     parameters.append(
-        f'    output_bits: T.Buffer(({len(shard.signatures)},), "{_CANONICAL_DTYPE[shard.bit_width]}"),'
+        f'    output_bits: T.Tensor(({len(shard.signatures)},), "{_CANONICAL_DTYPE[shard.bit_width]}"),'
     )
     statements: list[str] = []
     for index, (source, target) in enumerate(shard.signatures):
         statements.extend(
             (
-                f'        value_{index}: T.let = T.call_intrin("{target}", "tirx.reinterpret", source_{source_index[source]}[0])',
-                f'        output_bits[{index}] = T.call_intrin("{_CANONICAL_DTYPE[shard.bit_width]}", "tirx.reinterpret", value_{index})',
+                f'        value_{index}: T.let = T.call_intrin("tirx.reinterpret", source_{source_index[source]}[0], ty="{target}")',
+                f'        output_bits[{index}] = T.call_intrin("tirx.reinterpret", value_{index}, ty="{_CANONICAL_DTYPE[shard.bit_width]}")',
             )
         )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 f"def reinterpret_{shard.name.replace('-', '_')}(",
                 *parameters,
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 "    if lane == 0:",
                 *statements,
             )
@@ -205,23 +202,22 @@ def _make_identity_kernel(shard: _ReinterpretShard):
         suffix = _identifier(dtype)
         parameters.extend(
             (
-                f'    source_{suffix}: T.Buffer((1,), "{dtype}"),',
-                f'    output_{suffix}: T.Buffer((1,), "{dtype}"),',
+                f'    source_{suffix}: T.Tensor((1,), "{dtype}"),',
+                f'    output_{suffix}: T.Tensor((1,), "{dtype}"),',
             )
         )
         statements.append(
-            f'        output_{suffix}[0] = T.call_intrin("{dtype}", "tirx.reinterpret", source_{suffix}[0])'
+            f'        output_{suffix}[0] = T.call_intrin("tirx.reinterpret", source_{suffix}[0], ty="{dtype}")'
         )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def reinterpret_scalar_identities(",
                 *parameters,
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 "    if lane == 0:",
                 *statements,
             )
@@ -231,20 +227,19 @@ def _make_identity_kernel(shard: _ReinterpretShard):
 
 
 def _make_handle_kernel():
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         "\n".join(
             (
-                "@T.prim_func",
+                "@T.function",
                 "def reinterpret_handle_token(",
-                '    source: T.Buffer((1,), "uint32"),',
-                '    output: T.Buffer((1,), "uint32"),',
+                '    source: T.Tensor((1,), "uint32"),',
+                '    output: T.Tensor((1,), "uint32"),',
                 "):",
-                "    T.device_entry()",
-                "    _warp = T.warp_id([1])",
-                "    lane = T.lane_id([32])",
+                "    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))",
+                "    lane = T.cuda.lane_id()",
                 "    if lane == 0:",
-                '        token: T.uint64 = T.call_intrin("uint64", "tirx.reinterpret", source.ptr_to([0]))',
-                '        pointer: T.let[T.handle] = T.call_intrin("handle", "tirx.reinterpret", token)',
+                '        token: T.uint64 = T.call_intrin("tirx.reinterpret", source.ptr_to([0]), ty="uint64")',
+                '        pointer: T.let[T.handle] = T.call_intrin("tirx.reinterpret", token, ty="handle")',
                 "        T.ptx.ld.global_.u32(output[0], pointer)",
             )
         ),

@@ -47,17 +47,17 @@ Import the Python interface as `tirx_kernels.tirx_lite`, conventionally named
 
 | Interface | Role |
 | --- | --- |
-| `txl.kernel(...)` | Define a kernel entry and its launch configuration. |
-| `txl.gptr(dtype)`, `txl.TensorMap`, scalar dtype annotations | Describe pointer, tensor-map, and scalar parameters. |
+| `txl.kernel(...)`, `txl.device_entry(launch=txl.cuda.LaunchConfig(...))` | Define a kernel entry; its body declares the launch configuration. |
+| `txl.Tensor(shape, dtype)`, `txl.Ptr(...)`, `txl.Ptr(txl.TensorMap)`, scalar dtype annotations | Describe tensor, pointer, tensor-map, and scalar parameters. |
 | `txl.local_scalar(...)`, `txl.alloc_local(...)`, `txl.assign(...)` | Allocate and update register-local values. |
-| `txl.If(...)`, `txl.While(...)`, `txl.serial(...)`, `txl.unroll(...)` | Build IR branches and loops through context managers. |
+| `txl.if_(...)` with `txl.then_()`/`txl.else_()`, `txl.while_(...)`, `txl.serial(...)`, `txl.unroll(...)` | Build IR branches and loops through context managers. |
 | `txl.cta_id(...)`, `txl.warp_id()`, `txl.lane_id()`, `txl.thread_id()` | Obtain execution coordinates for addressing and control flow. |
 | `txl.smem_pool().alloc(...)` | Allocate shared-memory storage with an explicit shape, dtype, and optional swizzle. |
 | `txl.specialize()` | Define named warp roles and their execution scopes. |
 | `txl.MBarrier`, `txl.TMABar`, `txl.TCGen05Bar` | Construct barrier helpers. |
 | `txl.Pipeline`, `txl.PipelineState`, `txl.RingState` | Construct pipeline protocols and stage/phase state. |
 | `txl.ptx`, `txl.cuda`, `txl.idioms` | Spell instructions and CUDA intrinsics, or compose reusable instruction sequences. |
-| `kernel.func` / `kernel.mod` | Inspect the pre-lowering TIRx `PrimFunc` or its containing `IRModule`. |
+| `kernel.func` / `kernel.mod` | Inspect the pre-lowering TIRx `Function` or its containing `IRModule`. |
 | `kernel.compile(target=None)` | Compile through the TIRx pipeline. |
 
 The {kernels}`authoring guide <tirx_kernels/tirx_lite/README.md>` owns the full
@@ -79,8 +79,9 @@ to a 32-element output buffer:
 import tirx_kernels.tirx_lite as txl
 
 
-@txl.kernel(warps=1, arch="sm_100a", grid=1)
-def zero(out: txl.gptr(txl.f32)):
+@txl.kernel()
+def zero(out: txl.Tensor((32,), "float32")):
+    txl.device_entry(launch=txl.cuda.LaunchConfig(grid=1, block=32))
     txl.ptx.st.global_.f32(out.ptr_to([txl.lane_id()]), txl.float32(0))
 
 

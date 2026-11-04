@@ -1,6 +1,6 @@
 //! Exact PTX bit-size register carriers.
 
-use tvm::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::super::analyze::util::{dtype_of, ffi_error, unsupported, AResult, Failure};
 use super::{Emitter, RustValue, Uniformity};

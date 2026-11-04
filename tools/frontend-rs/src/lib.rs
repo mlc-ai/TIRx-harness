@@ -13,15 +13,16 @@ mod serialization;
 mod tables;
 mod tvm_compat;
 
-use crate::analyze::util::{json_object, json_strings, AResult, Failure, Json};
+use crate::analyze::util::{int_const, json_object, json_strings, AResult, Failure, Json};
 use std::collections::HashSet;
 
-use tvm::analysis::Analyzer;
-use tvm::ir::StringImmObj;
-use tvm::ir::{Call, Expr, IntImm, Op, PrimExpr, Var};
-use tvm::tirx::{AttrStmtObj, BufferVar, Layout, PrimFunc, Stmt};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::StringImmObj;
+use tvm_tirx::ir::{Call, Expr, Op, Var};
+use tvm_tirx::ir::Stmt;
+use tvm_tirx::tirx::{Function, Layout};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{
     structural_map, structural_visit, tvm_ffi_dll_export_typed_func, Any, Array, Error, Map,
     ObjectIdentity, ObjectRefCast, ObjectRefCore, Result, String, StructuralView, VisitCallbacks,
     VisitContext, VisitInterrupt, WalkOrder, VALUE_ERROR,
@@ -29,26 +30,22 @@ use tvm::tvm_ffi::{
 
 fn identity() -> Result<String> {
     Ok(format!(
-        "{}:{}",
+        "{}:tvm-tirx-{}",
         env!("CARGO_PKG_VERSION"),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/thirdparty/tvm-rust-ext/REVISION"
-        ))
-        .trim(),
+        env!("NUMSIM_TVM_TIRX_VERSION"),
     )
     .into())
 }
 
-pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<PrimExpr>> {
-    let analyzer = Analyzer::new()?;
+pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<Expr>> {
+    let analyzer = Analyzer::new();
     let mut offsets = Vec::new();
     for index in 0..count {
-        let mapped = layout.apply_linear(&IntImm::new("int64", index)?.into())?;
+        let mapped = layout.apply_linear(Expr::from(int_const("int64", index)?))?;
         let offset = mapped
             .get(&"m".into())?
-            .unwrap_or(IntImm::new("int64", 0)?.into());
-        offsets.push(analyzer.simplify(&offset)?);
+            .unwrap_or(int_const("int64", 0)?.into());
+        offsets.push(analyzer.simplify(&offset, 2)?);
     }
     Ok(Array::new(offsets))
 }
@@ -61,10 +58,6 @@ pub(crate) fn walk_statements(stmt: Stmt) -> Result<Array<Stmt>> {
          -> Result<Option<VisitInterrupt>> {
             if let Some(stmt) = value.cast::<Stmt>() {
                 visitor.state_mut().push(stmt);
-                // AttrStmt.node is an annotation target, not an executed child.
-                if let Some(attr) = value.as_node::<AttrStmtObj>() {
-                    return visitor.visit(&attr.body);
-                }
                 return visitor.visit_children();
             }
             if value.cast::<Array<Stmt>>().is_some() {
@@ -78,12 +71,11 @@ pub(crate) fn walk_statements(stmt: Stmt) -> Result<Array<Stmt>> {
     Ok(Array::new(visitor.into_state()))
 }
 
-pub(crate) fn buffer_parameters(func: PrimFunc) -> Result<Array<Var>> {
+pub(crate) fn buffer_parameters(func: Function) -> Result<Array<Var>> {
     Ok(Array::new(
         func.params
             .iter()
-            .filter_map(|parameter| BufferVar::try_from(parameter).ok())
-            .map(|buffer| buffer.as_var().clone())
+            .filter(|parameter| analyze::util::is_tensor_var(parameter))
             .collect::<Vec<_>>(),
     ))
 }
@@ -134,7 +126,7 @@ pub(crate) fn substitute(node: ObjectRef, replacements: Map<Var, Expr>) -> Resul
     .try_into()
 }
 
-fn normalize_host_tensor_maps(func: PrimFunc, tvm_version: String) -> Result<Map<String, Any>> {
+fn normalize_host_tensor_maps(func: Function, tvm_version: String) -> Result<Map<String, Any>> {
     service_result(emit::raw_tma::host_prelude::normalize(func, tvm_version))
 }
 
@@ -157,10 +149,10 @@ fn ptx_call_parts(call: Call, modifier_count: i64) -> Result<Array<Any>> {
         })
         .collect::<Vec<_>>();
     Ok(Array::new(vec![
-        call.op.clone().try_cast::<Op>()?.name()?.into(),
+        call.op.clone().try_cast::<Op>()?.name.clone().into(),
         call.args.clone().into(),
         Array::new(tokens).into(),
-        call.span.clone().into(),
+        call.loc.clone().into(),
         call.ty.clone().into(),
     ]))
 }
@@ -259,7 +251,7 @@ fn registry(schema: Map<String, Any>) -> AResult<String> {
 
 fn analyze_kernels(
     context: &analyze::Ctx,
-    funcs: &Array<PrimFunc>,
+    funcs: &Array<Function>,
 ) -> AResult<Vec<analyze::frontend::KernelPlan>> {
     funcs
         .iter()
@@ -293,7 +285,7 @@ fn module_manifest(plans: Vec<analyze::frontend::KernelPlan>) -> (Vec<Any>, Host
 
 /// `[module_manifest_json, source_nodes per kernel, host ABI]` of one kernel
 /// sequence.
-fn analyze_module(funcs: Array<PrimFunc>, schema: Map<String, Any>) -> AResult<Array<Any>> {
+fn analyze_module(funcs: Array<Function>, schema: Map<String, Any>) -> AResult<Array<Any>> {
     let schema = schema::Schema::parse(&schema)?;
     let context = analyze::Ctx::new(&schema)?;
     let plans = analyze_kernels(&context, &funcs)?;
@@ -321,12 +313,12 @@ fn module_host_abi(manifest: String) -> AResult<String> {
 /// `frontend._extract_topology(func, environment)`: one kernel's launch
 /// topology under concrete scalar parameter values, as JSON.
 fn launch_topology(
-    func: PrimFunc,
+    func: Function,
     schema: Map<String, Any>,
     environment: Map<Var, Any>,
 ) -> AResult<String> {
     use analyze::topology::StaticValue;
-    use tvm::tvm_ffi::TypeIndex;
+    use tvm_tirx::tvm_ffi::TypeIndex;
     let schema = schema::Schema::parse(&schema)?;
     let context = analyze::Ctx::new(&schema)?;
     let mut values = analyze::util::IdMap::default();
@@ -346,7 +338,7 @@ fn launch_topology(
         };
         values.insert(analyze::util::oref(variable), value);
     }
-    let topology = analyze::topology::extract_topology(&context, &func.body(), values)?;
+    let topology = analyze::topology::extract_topology(&context, &analyze::util::function_body(&func)?, values)?;
     Ok(topology.json().to_string().into())
 }
 
@@ -356,7 +348,7 @@ fn launch_topology(
 /// returned as structured data, so the caller reports
 /// verification and host ABI errors first.
 fn compile_module(
-    funcs: Array<PrimFunc>,
+    funcs: Array<Function>,
     schema: Map<String, Any>,
     flags: Map<String, Any>,
 ) -> AResult<Array<Any>> {
@@ -418,8 +410,8 @@ macro_rules! export_service {
 }
 
 export_service!(numsim_registry, registry, schema: Map<String, Any>);
-export_service!(numsim_analyze_module, analyze_module, funcs: Array<PrimFunc>, schema: Map<String, Any>);
-export_service!(numsim_launch_topology, launch_topology, func: PrimFunc, schema: Map<String, Any>, environment: Map<Var, Any>);
-export_service!(numsim_compile_module, compile_module, funcs: Array<PrimFunc>, schema: Map<String, Any>, flags: Map<String, Any>);
+export_service!(numsim_analyze_module, analyze_module, funcs: Array<Function>, schema: Map<String, Any>);
+export_service!(numsim_launch_topology, launch_topology, func: Function, schema: Map<String, Any>, environment: Map<Var, Any>);
+export_service!(numsim_compile_module, compile_module, funcs: Array<Function>, schema: Map<String, Any>, flags: Map<String, Any>);
 export_service!(numsim_host_abi, module_host_abi, manifest: String);
 tvm_ffi_dll_export_typed_func!(numsim_frontend_identity, identity);

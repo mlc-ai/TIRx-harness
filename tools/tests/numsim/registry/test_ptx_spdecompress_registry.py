@@ -5,13 +5,13 @@ from itertools import product
 
 import pytest
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.manifest import emitted_calls, resolved_kernel
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tirx_harness.numsim.transpiler.frontend import analyze
-from tvm.backend.cuda.ptx.table import TABLE, mods, operand_layout
-from tvm.script import tirx as T
+from tvm_tirx.backend.cuda.ptx.table import TABLE, mods, operand_layout
+from tvm_tirx.script import tirx as T
 
 
 @dataclass(frozen=True)
@@ -80,26 +80,32 @@ def _defined_forms() -> tuple[_Form, ...]:
 _DEFINED_FORMS = _defined_forms()
 
 
-@T.prim_func
+@T.function
 def spdecompress_aliased_register_views():
-    T.device_entry()
-    storage = T.alloc_buffer((3,), "uint32", scope="local")
-    alias = T.decl_buffer((2,), "uint32", data=storage.data, elem_offset=1, scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_local((3,), "uint32")
+    alias = T.decl_tensor(
+        T.ptr_byte_offset(storage.data, 4, ty=T.Ptr("uint32", "local")),
+        ty_args=[T.Tensor((2,), "uint32", scope="local")],
+    )
     T.ptx["spdecompress.b8.b4.sp::1:2.x2"](storage[1], alias[0], storage[2])
 
 
-@T.prim_func
+@T.function
 def spdecompress_disjoint_aliased_register_views():
-    T.device_entry()
-    storage = T.alloc_buffer((3,), "uint32", scope="local")
-    alias = T.decl_buffer((2,), "uint32", data=storage.data, elem_offset=1, scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_local((3,), "uint32")
+    alias = T.decl_tensor(
+        T.ptr_byte_offset(storage.data, 4, ty=T.Ptr("uint32", "local")),
+        ty_args=[T.Tensor((2,), "uint32", scope="local")],
+    )
     T.ptx["spdecompress.b8.b4.sp::1:2.x2"](storage[0], alias[0], storage[2])
 
 
-@T.prim_func
+@T.function
 def spdecompress_dynamic_register_index(index: T.int32):
-    T.device_entry()
-    storage = T.alloc_buffer((3,), "uint32", scope="local")
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    storage = T.alloc_local((3,), "uint32")
     T.ptx["spdecompress.b8.b4.sp::1:2.x2"](storage[index], storage[1], storage[2])
 
 
@@ -113,11 +119,11 @@ def _kernel(form: _Form, dtypes: tuple[str, ...] | None = None, *, overlap: bool
     arguments = ", ".join(
         "operand_0" if overlap else f"operand_{index}" for index in range(argument_count)
     )
-    return tvm.script.from_source(
+    return tvm_tirx.script.from_source(
         f'''
-@T.prim_func
+@T.function
 def kernel():
-    T.device_entry()
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
 {declarations}
     T.ptx["{form.spelling}"]({arguments})
 ''',
@@ -149,7 +155,7 @@ def test_spdecompress_rejects_mixed_carriers_within_one_register_vector():
     form = _form("b8.b4.sp::2:4.x2")
     argument_count = form.data_registers + form.metadata_registers + form.compressed_registers
     mixed = ("uint32", "int32") + ("uint32",) * (argument_count - 2)
-    with pytest.raises(tvm.error.DiagnosticError, match="spdecompress"):
+    with pytest.raises(ValueError, match="spdecompress"):
         _kernel(form, mixed)
 
 

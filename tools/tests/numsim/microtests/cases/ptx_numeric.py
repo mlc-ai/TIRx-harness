@@ -15,17 +15,16 @@ from tests.numsim.runtime.test_scalar_control import (
     ptx_dps_modifier_forms,
 )
 
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_directed_rounding_forms(
-    output_scalar: T.Buffer((4, 4), "float32"),
-    output_packed: T.Buffer((3, 4), "uint64"),
+    output_scalar: T.Tensor((4, 4), "float32"),
+    output_packed: T.Tensor((3, 4), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     if lane == 0:
         one = T.cuda.uint_as_float(T.uint32(0x3F800000))
         half_ulp = T.cuda.uint_as_float(T.uint32(0x33800000))

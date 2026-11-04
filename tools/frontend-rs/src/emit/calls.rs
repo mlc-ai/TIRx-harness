@@ -1,8 +1,8 @@
 //! Shared registry dispatch and call context.
 
-use tvm::ir::CallObj;
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::ir::CallObj;
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::super::analyze::util::{oref, unsupported, AResult};
 use super::abi;

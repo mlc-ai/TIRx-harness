@@ -2,11 +2,17 @@
 //! `tmem_access_mode`, the TMEM branches of `emit_buffer_load` /
 //! `emit_store` / `logical_buffer_name`, and `physical_tmem_coordinates`.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{Expr, IntImm, PrimExpr, Range, Var};
-use tvm::tirx::{BufferStoreObj, BufferVar, ForObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use tvm_tirx::sym::{Analyzer, ProofStrength};
+use tvm_tirx::ir::prim::sub;
+use tvm_tirx::ir::{Expr, Location, Range, Var};
+use tvm_tirx::ir::{ForObj, TensorStoreObj};
+
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::bind_ranges;
+use crate::analyze::util::tensor_var;
+use crate::analyze::util::int_const;
+use crate::analyze::util::TensorVarExt;
 
 use super::super::analyze::expression_bindings::ExpressionBindings;
 use super::super::analyze::frontend::KernelPlan;
@@ -41,7 +47,7 @@ impl State<'_> {
 struct TmemNaming<'a> {
     bindings: &'a ExpressionBindings,
     substitutions: Map<Var, Expr>,
-    loop_ranges: Vec<(Var, PrimExpr, PrimExpr)>,
+    loop_ranges: Vec<(Var, Expr, Expr)>,
 }
 
 impl<'a> TmemNaming<'a> {
@@ -51,10 +57,11 @@ impl<'a> TmemNaming<'a> {
         let mut loop_ranges = Vec::new();
         for statement in &emitter.plan.statements {
             if let Some(loop_stmt) = statement.as_node::<ForObj>() {
+                let extent = sub(loop_stmt.end.clone(), loop_stmt.begin.clone())?;
                 loop_ranges.push((
-                    loop_stmt.loop_var.as_var().clone(),
-                    bindings.resolve_expression_with(&loop_stmt.min, &substitutions)?,
-                    bindings.resolve_expression_with(&loop_stmt.extent, &substitutions)?,
+                    loop_stmt.var.clone(),
+                    bindings.resolve_expression_with(&loop_stmt.begin, &substitutions)?,
+                    bindings.resolve_expression_with(&extent, &substitutions)?,
                 ));
             }
         }
@@ -66,7 +73,7 @@ impl<'a> TmemNaming<'a> {
     }
 
     /// `(start, end, width)` in TMEM bit units.
-    fn interval_bits(&self, plan: &BufferPlan) -> AResult<Option<(PrimExpr, PrimExpr, i64)>> {
+    fn interval_bits(&self, plan: &BufferPlan) -> AResult<Option<(Expr, Expr, i64)>> {
         let info = &plan.layout;
         let (Some(allocated_addr), Some(tcol_base), Some(tcol_span)) = (
             &info.allocated_addr,
@@ -106,12 +113,16 @@ impl<'a> TmemNaming<'a> {
         if outer.layout.tmem_lane_span.unwrap_or(0) < inner.layout.tmem_lane_span.unwrap_or(0) {
             return Ok(false);
         }
-        let analyzer = Analyzer::new()?;
+        let analyzer = Analyzer::new();
+        let mut ranges = Vec::new();
         for (variable, minimum, extent) in &self.loop_ranges {
-            let range = Range::from_complete_fields(minimum.clone(), extent.clone(), None);
-            if analyzer.bind(variable, &range).is_err() {
-                return Ok(false);
-            }
+            ranges.push((
+                variable.clone(),
+                Range::from_min_extent(minimum.clone(), extent.clone(), Location::unknown())?,
+            ));
+        }
+        if bind_ranges(&analyzer, ranges).is_err() {
+            return Ok(false);
         }
         let starts = op_binary(
             "_OpLE",
@@ -123,14 +134,14 @@ impl<'a> TmemNaming<'a> {
             expr_any(&inner_interval.1),
             expr_any(&outer_interval.1),
         )?;
-        Ok(analyzer.can_prove(&starts)? && analyzer.can_prove(&ends)?)
+        Ok(analyzer.can_prove(&starts, ProofStrength::Default)? && analyzer.can_prove(&ends, ProofStrength::Default)?)
     }
 }
 
 impl<'a> Emitter<'a> {
     /// The TMEM branch of `logical_buffer_name` (the cache miss is already
     /// established by the caller).
-    pub fn tmem_logical_buffer_name(&mut self, buffer: &BufferVar) -> AResult<String> {
+    pub fn tmem_logical_buffer_name(&mut self, buffer: &Var) -> AResult<String> {
         // Whole-function facts,
         // computed once per kernel.
         if self.tmem.naming.is_none() {
@@ -141,7 +152,7 @@ impl<'a> Emitter<'a> {
             let buffers = &self.memory_plan.buffers;
             let Some(plan_index) = buffers
                 .iter()
-                .position(|candidate| same(candidate.buffer.as_var(), buffer.as_var()))
+                .position(|candidate| same(&candidate.buffer, buffer))
             else {
                 return Err(Failure::Ffi(ffi_error("TMEM view has no memory plan")));
             };
@@ -208,9 +219,9 @@ impl<'a> Emitter<'a> {
     /// Layout-derived `(TLane, TCol)` coordinates in element units.
     pub fn physical_tmem_coordinates(
         &self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
-    ) -> AResult<(PrimExpr, PrimExpr)> {
+        buffer: &Var,
+        indices: &[Expr],
+    ) -> AResult<(Expr, Expr)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         let name = buffer_name(buffer);
         if info.physical_axes != ["TCol", "TLane"] {
@@ -223,14 +234,14 @@ impl<'a> Emitter<'a> {
                 indices.len()
             ));
         }
-        let Some(layout) = buffer.buffer_type().layout.clone() else {
+        let Some(layout) = buffer.tensor_type().layout.clone() else {
             return not_covered("buffer without a layout");
         };
         let coordinates = Array::new(indices.to_vec());
-        let mapped: Map<FfiString, PrimExpr> = layout
+        let mapped: Map<FfiString, Expr> = layout
             .canonicalize()?
-            .apply_with_shape(&coordinates, &buffer.buffer_type().shape)?;
-        let mut axes: Vec<(String, PrimExpr)> = mapped
+            .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
+        let mut axes: Vec<(String, Expr)> = mapped
             .iter()
             .map(|(axis, value)| (ffi_text(&axis), value))
             .collect();
@@ -246,8 +257,8 @@ impl<'a> Emitter<'a> {
                 layout_signature(&layout)?
             ));
         }
-        let zero: PrimExpr = IntImm::new("int32", 0)?.into();
-        let axis = |wanted: &str| -> PrimExpr {
+        let zero: Expr = int_const("int32", 0)?.into();
+        let axis = |wanted: &str| -> Expr {
             axes.iter()
                 .find(|(axis, _)| axis == wanted)
                 .map_or_else(|| zero.clone(), |(_, value)| value.clone())
@@ -273,8 +284,8 @@ impl<'a> Emitter<'a> {
     /// `tmem_coordinates`: `(lane, tcol, allocated_addr)` as warp `i64` values.
     pub fn tmem_coordinates(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
         source_op_id: Option<i64>,
     ) -> AResult<(RustValue, RustValue, RustValue)> {
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
@@ -298,7 +309,7 @@ impl<'a> Emitter<'a> {
     }
 
     /// `tmem_access_mode`.
-    pub fn tmem_access_mode(&self, buffer: &BufferVar) -> AResult<String> {
+    pub fn tmem_access_mode(&self, buffer: &Var) -> AResult<String> {
         let plan = self.memory_plan.resolve(buffer)?;
         if plan.space != MemorySpace::Tmem {
             return unsupported(format!(
@@ -314,7 +325,7 @@ impl<'a> Emitter<'a> {
         Ok(format!("TmemAccessMode::{mode}"))
     }
 
-    pub(super) fn tmem_access_marker(&self, buffer: &BufferVar) -> AResult<&'static str> {
+    pub(super) fn tmem_access_marker(&self, buffer: &Var) -> AResult<&'static str> {
         Ok(if self.tmem_access_mode(buffer)?.ends_with("::Static") {
             "v2::tcgen05::variant::StaticTmem"
         } else {
@@ -326,8 +337,8 @@ impl<'a> Emitter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_tmem_buffer_load(
         &mut self,
-        buffer: &BufferVar,
-        indices: &[PrimExpr],
+        buffer: &Var,
+        indices: &[Expr],
         name: &str,
         buffer_ref: &str,
         requested_mask: &str,
@@ -393,16 +404,16 @@ impl<'a> Emitter<'a> {
     /// The `MemorySpace.TMEM` branch of `emit_store`.
     pub fn emit_tmem_store(
         &mut self,
-        stmt: &BufferStoreObj,
+        stmt: &TensorStoreObj,
         op_id: i64,
         dtype: &str,
         value: &RustValue,
         buffer_ref: &str,
     ) -> AResult<()> {
-        let indices: Vec<PrimExpr> = stmt.indices.iter().collect();
-        let (lane, tcol, allocated_addr) =
-            self.tmem_coordinates(&stmt.buffer, &indices, Some(op_id))?;
-        let access_marker = self.tmem_access_marker(&stmt.buffer)?;
+        let buffer = tensor_var(&oref(stmt.dest.clone()))?;
+        let indices: Vec<Expr> = stmt.indices.iter().collect();
+        let (lane, tcol, allocated_addr) = self.tmem_coordinates(&buffer, &indices, Some(op_id))?;
+        let access_marker = self.tmem_access_marker(&buffer)?;
         let memory_dtype = if dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu" {
             "uint8"
         } else {
@@ -424,7 +435,7 @@ impl<'a> Emitter<'a> {
         }
         let marker = v2_memory_type_rust(self.ctx.schema, memory_dtype)?;
         let site = self.v2_site(Some(op_id));
-        let logical_name = self.logical_buffer_name(&stmt.buffer)?;
+        let logical_name = self.logical_buffer_name(&buffer)?;
         let invocation = abi::warp_call(
             "tmem::write",
             &site,

@@ -23,7 +23,7 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 # Ping-pong rounds and the maximum jittered noise burst per round.  Sized from
 # measurement, not taste: 2048 x 64 caught the unfixed base 40/40 while costing
@@ -32,12 +32,12 @@ _ROUNDS = 2048
 _BURST = 64
 
 
-@T.prim_func
+@T.function
 def native_lost_wake_pingpong(
     rounds: T.int32,
     burst: T.int32,
-    flags: T.Buffer((2,), "int32"),
-    noise: T.Buffer((2,), "int32"),
+    flags: T.Tensor((2,), "int32"),
+    noise: T.Tensor((2,), "int32"),
 ):
     """Two CTAs hand a ticket back and forth; each publishes then immediately spins.
 
@@ -46,10 +46,9 @@ def native_lost_wake_pingpong(
     and then publishes `flags[1] = t + 1`.  Any `deadlock` verdict on it is a
     false positive.
     """
-    T.device_entry()
-    cta = T.cta_id([2])
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
     ticket = T.local_scalar("int32")
     step = T.local_scalar("int32")
     limit = T.local_scalar("int32")

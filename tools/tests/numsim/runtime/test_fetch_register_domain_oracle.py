@@ -2,27 +2,27 @@ from __future__ import annotations
 
 import numpy as np
 
-import tvm
+import tvm_tirx
 from tests.numsim.support.runtime_domains import (
     FETCH_REGISTERS_32,
     FETCH_REGISTERS_64,
 )
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
 def _make_fetch_register_full_domain():
     lines = [
-        "@T.prim_func",
+        "@T.function",
         "def fetch_register_full_domain(",
-        f"    output32: T.Buffer((2, 2, 2, 32, {len(FETCH_REGISTERS_32)}), 'int32'),",
-        f"    output64: T.Buffer((2, 2, 2, 32, {len(FETCH_REGISTERS_64)}), 'int64'),",
+        f"    output32: T.Tensor((2, 2, 2, 32, {len(FETCH_REGISTERS_32)}), 'int32'),",
+        f"    output64: T.Tensor((2, 2, 2, 32, {len(FETCH_REGISTERS_64)}), 'int64'),",
         "):",
-        "    T.device_entry()",
-        "    cluster = T.cluster_id([2])",
-        "    cta = T.cta_id_in_cluster([2])",
-        "    warp = T.warp_id([2])",
-        "    lane = T.lane_id([32])",
+        "    T.device_entry(launch=T.cuda.LaunchConfig(grid=4, block=64, cluster=2))",
+        "    cluster = T.cuda.cluster_id('x')",
+        "    cta = T.cuda.cluster_cta_id('x')",
+        "    warp = T.cuda.warp_id()",
+        "    lane = T.cuda.lane_id()",
     ]
     lines.extend(
         f'    output32[cluster, cta, warp, lane, {index}] = T.cuda.mov_sreg(32, "{register}")'
@@ -32,7 +32,7 @@ def _make_fetch_register_full_domain():
         f'    output64[cluster, cta, warp, lane, {index}] = T.cuda.mov_sreg(64, "{register}")'
         for index, register in enumerate(FETCH_REGISTERS_64)
     )
-    return tvm.script.from_source("\n".join(lines), extra_vars={"T": T})
+    return tvm_tirx.script.from_source("\n".join(lines), extra_vars={"T": T})
 
 
 fetch_register_full_domain = _make_fetch_register_full_domain()

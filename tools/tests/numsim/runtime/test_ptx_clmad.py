@@ -3,19 +3,18 @@ from __future__ import annotations
 import numpy as np
 
 from tirx_harness import numsim
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def ptx_clmad_register_semantics(
-    lhs: T.Buffer((32,), "uint64"),
-    rhs: T.Buffer((32,), "uint64"),
-    addend: T.Buffer((32,), "uint64"),
-    output: T.Buffer((2, 32), "uint64"),
+    lhs: T.Tensor((32,), "uint64"),
+    rhs: T.Tensor((32,), "uint64"),
+    addend: T.Tensor((32,), "uint64"),
+    output: T.Tensor((2, 32), "uint64"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     T.ptx.clmad.lo.u64(output[0, lane], lhs[lane], rhs[lane], addend[lane])
     T.ptx.clmad.hi.u64(output[1, lane], lhs[lane], rhs[lane], addend[lane])
 

@@ -7,22 +7,22 @@ import pytest
 
 from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm.script import tirx as T
+from tvm_tirx.script import tirx as T
 
 
-@T.prim_func
+@T.function
 def native_break_continue_facade_control(
     mode: T.int32,
     limit: T.int32,
     skip_odd: T.int32,
     sync_enabled: T.int32,
     probe_oob: T.int32,
-    inner_limits: T.Buffer((3,), "int32"),
-    output: T.Buffer((6,), "int32"),
+    inner_limits: T.Tensor((3,), "int32"),
+    output: T.Tensor((6,), "int32"),
 ):
-    T.device_entry()
-    warp = T.warp_id([2])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
     step = T.local_scalar("int32")
     outer = T.local_scalar("int32")
     inner = T.local_scalar("int32")
@@ -68,16 +68,15 @@ def native_break_continue_facade_control(
         output[6] = 1
 
 
-@T.prim_func
+@T.function
 def native_data_dependent_for_break(
-    extent: T.Buffer((1,), "int32"),
+    extent: T.Tensor((1,), "int32"),
     break_after: T.int32,
     probe_oob: T.int32,
-    output: T.Buffer((4,), "int32"),
+    output: T.Tensor((4,), "int32"),
 ):
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
 
     for iteration in T.serial(extent[0]):
         T.ptx.bar.sync(T.uint32(12), T.uint32(32))
@@ -89,11 +88,10 @@ def native_data_dependent_for_break(
         output[4] = 1
 
 
-@T.prim_func
+@T.function
 def native_lane_divergent_break():
-    T.device_entry()
-    _warp = T.warp_id([1])
-    lane = T.lane_id([32])
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
     iteration = T.local_scalar("int32")
     iteration = 0
 

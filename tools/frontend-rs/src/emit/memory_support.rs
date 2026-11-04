@@ -2,10 +2,10 @@
 //! destination store, pointer recovery helpers, the PTX instruction-predicate
 //! regions and the memory carrier spellings that take a PTX type.
 
-use tvm::analysis::Analyzer;
-use tvm::ir::{CallObj, PrimExpr, TensorLoadObj};
-use tvm::tvm_ffi::object::ObjectRef;
-use tvm::tvm_ffi::ObjectRefCore;
+use tvm_tirx::sym::Analyzer;
+use tvm_tirx::ir::{CallObj, Expr, TensorLoadObj};
+use tvm_tirx::tvm_ffi::object::ObjectRef;
+use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 use super::super::analyze::buffers::call_op_name;
 use super::super::analyze::memory::MemorySpace;
@@ -77,7 +77,7 @@ pub struct PredicatedRegion {
 
 impl<'a> Emitter<'a> {
     /// Reuse the resolved physical view at the point its store is lowered.
-    pub fn record_global_write(&mut self, buffer: &tvm::tirx::BufferVar) -> AResult<()> {
+    pub fn record_global_write(&mut self, buffer: &tvm_tirx::ir::Var) -> AResult<()> {
         if self.written_global_buffers.is_none() {
             return Ok(());
         }
@@ -355,7 +355,7 @@ impl<'a> Emitter<'a> {
             );
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<PrimExpr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().collect();
         let code = self.buffer_code(&buffer)?;
         let plan = self.plan_of(&code);
         let plan_name = plan.name.clone();
@@ -541,9 +541,6 @@ pub struct SharedAddressForms<'a> {
     pub integers: Option<&'a [&'a str]>,
     /// Unwrap `cvta_generic_to_shared` of a pointer.
     pub cvta: bool,
-    /// Unwrap `sm100_2sm_leader_smem_addr` of a pointer, the SM100 two-SM
-    /// pair base.
-    pub leader: bool,
     /// Unwrap the pair base `cvta_generic_to_shared(pointer) & 0xFEFF_FFFF`,
     /// simplifying the mask with this analyzer.
     pub pair_mask: Option<&'a Analyzer>,
@@ -557,7 +554,6 @@ impl SharedAddressForms<'static> {
     pub const MEMORY: Self = Self {
         integers: None,
         cvta: true,
-        leader: false,
         pair_mask: None,
         allow_pair_base: false,
     };
@@ -566,7 +562,6 @@ impl SharedAddressForms<'static> {
     pub const SYNC: Self = Self {
         integers: Some(&["uint32", "uint64"]),
         cvta: false,
-        leader: false,
         pair_mask: None,
         allow_pair_base: false,
     };
@@ -575,7 +570,6 @@ impl SharedAddressForms<'static> {
     pub const TCGEN: Self = Self {
         integers: Some(&["uint32"]),
         cvta: true,
-        leader: true,
         pair_mask: None,
         allow_pair_base: true,
     };
@@ -588,7 +582,6 @@ impl<'a> SharedAddressForms<'a> {
         Self {
             integers: Some(if raw_address { &["uint32"] } else { &[] }),
             cvta: true,
-            leader: true,
             pair_mask: Some(analyzer),
             allow_pair_base,
         }
@@ -632,12 +625,12 @@ fn shared_conversion(
     if let Some(call) = expression.as_node::<CallObj>() {
         let op_name = call_op_name(call)?.unwrap_or_default();
         let arguments: Vec<ObjectRef> = call.args.iter().map(oref).collect();
-        let leader = op_name == "tirx.cuda.sm100_2sm_leader_smem_addr";
-        if (forms.cvta && op_name == "tirx.cuda.cvta_generic_to_shared") || (forms.leader && leader)
+        if forms.cvta
+            && op_name == "tirx.cuda.cvta_generic_to_shared"
+            && arguments.len() == 1
+            && dtype_of(&arguments[0])? == "handle"
         {
-            if arguments.len() == 1 && dtype_of(&arguments[0])? == "handle" {
-                return Ok(Some((arguments[0].clone(), leader)));
-            }
+            return Ok(Some((arguments[0].clone(), false)));
         }
     }
     let Some(analyzer) = forms.pair_mask else {
