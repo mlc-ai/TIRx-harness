@@ -42,23 +42,23 @@ python -m pip install tirx-harness
 ```
 
 To develop the harness, follow
-[Build from source](https://tirxharness.mlc.ai/docs/installation.html#build-from-source)
+[Build from source](docs/installation.md#build-from-source)
 for the build prerequisites and repository checkout.
 
-See the [documentation](https://tirxharness.mlc.ai/docs/) for details:
+See the [documentation](docs/index.md) for details:
 
-- [Installation](https://tirxharness.mlc.ai/docs/installation.html): prerequisites, other installation methods, and agent skills
-- [Quick Start](https://tirxharness.mlc.ai/docs/quick-start.html): optimize a kernel in your own project
-- [Optimization Runs](https://tirxharness.mlc.ai/docs/optimization-runs.html): run a registered workload
+- [Installation](docs/installation.md): prerequisites, other installation methods, and agent skills
+- [Quick Start](docs/quick-start.md): optimize a kernel in your own project
+- [Optimization Runs](docs/optimization-runs.md): run a registered workload
 
 The book [Agentic GPU Programming for MLSys](https://mlc.ai/agentic-gpu-programming-for-mlsys/)
 explains the design behind the harness and walks through an optimization workflow.
 
 ## Contributing
 
-- [Add a workload](https://tirxharness.mlc.ai/docs/development/add-workload.html): define a new optimization task
-- [Contribute a kernel](https://tirxharness.mlc.ai/docs/development/contribute-kernel.html): publish a kernel produced by a run
-- [Report and fix bugs](https://tirxharness.mlc.ai/docs/development/report-and-fix-bugs.html): reproduce and resolve a defect
+- [Add a workload](docs/development/add-workload.md): define a new optimization task
+- [Contribute a kernel](docs/development/contribute-kernel.md): publish a kernel produced by a run
+- [Report and fix bugs](docs/development/report-and-fix-bugs.md): reproduce and resolve a defect
 
 ## License
 
