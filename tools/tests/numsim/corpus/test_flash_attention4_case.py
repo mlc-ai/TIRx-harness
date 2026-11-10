@@ -93,7 +93,9 @@ def test_flash_attention_corpus_has_expected_full_launch_topologies():
     for label, clusters in expected_clusters.items():
         config = next(item for item in NUMSIM_CONFIGS if item["label"] == label)
         params = {key: value for key, value in config.items() if key not in {"label", "seed"}}
-        topology = analyze(get_kernel(**params)).topology
+        topology = analyze(
+            get_kernel(**params, backend_config={"cuda": {"arch": "sm_100a"}})
+        ).topology
         assert topology.clusters == clusters
         assert topology.ctas_per_cluster == 1
         assert topology.warps_per_cta == 16

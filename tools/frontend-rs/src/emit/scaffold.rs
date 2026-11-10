@@ -1,9 +1,10 @@
 //! Artifact split of large regions into private helpers.  Capture attempts,
 //! thresholds and restore points decide the emitted text.
 
+use tvm_tirx::tvm_ffi::object::ObjectIdentity;
 use tvm_tirx::ir::{ForObj, IfObj, RegionStmtObj, SeqStmtObj, Stmt, WhileObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore, String as FfiString};
+use tvm_tirx::tvm_ffi::{Map, ObjectRefCore, String as FfiString};
 use crate::analyze::util::scalar_bind;
 
 use super::super::analyze::util::{ffi_error, ffi_text, ident, int_imm, oref, AResult, Failure};
@@ -99,8 +100,8 @@ fn is_rust_identifier(text: &str) -> bool {
 
 /// Statement kinds that never join a captured run.
 fn is_run_excluded(stmt: &Stmt) -> bool {
-    stmt.as_node::<RegionStmtObj>().is_some()
-        || stmt.as_node::<SeqStmtObj>().is_some()
+    stmt.downcast_ref::<RegionStmtObj>().is_some()
+        || stmt.downcast_ref::<SeqStmtObj>().is_some()
         || scalar_bind(stmt).is_some()
 }
 
@@ -501,8 +502,8 @@ impl<'a> Emitter<'a> {
             return Ok(*cached);
         }
         let found = crate::post_order_nodes(key.clone())?.iter().any(|node| {
-            node.as_node::<ForObj>().is_some()
-                || node.as_node::<WhileObj>().is_some()
+            node.downcast_ref::<ForObj>().is_some()
+                || node.downcast_ref::<WhileObj>().is_some()
                 || self.suspend_source_nodes.contains(&node)
         });
         self.subtree_may_suspend_cache.insert(key, found);

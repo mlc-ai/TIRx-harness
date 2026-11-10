@@ -30,7 +30,9 @@ def _choose_deepgemm_config(M: int, N: int, K: int):
 
 def get_fp16_bf16_kernel(*, dtype: str, M: int, N: int, K: int):
     module = load_tirx_kernel("fp16_bf16_gemm")
-    return module.get_kernel(dtype=dtype, M=M, N=N, K=K)
+    return module.get_kernel(
+        backend_config={"cuda": {"arch": "sm_100a"}}, dtype=dtype, M=M, N=N, K=K
+    )
 
 
 def get_fp8_blockwise_kernel(*, M: int, N: int, K: int):
@@ -40,7 +42,7 @@ def get_fp8_blockwise_kernel(*, M: int, N: int, K: int):
 
 def get_nvfp4_kernel(*, M: int, N: int, K: int):
     module = load_tirx_kernel("nvfp4_gemm")
-    return module.get_kernel(M=M, N=N, K=K)
+    return module.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, M=M, N=N, K=K)
 
 
 def get_grouped_fp8_kernel(
@@ -1007,7 +1009,7 @@ def prepare_cudnn_dense_blockscaled_amax_case() -> NumSimCase:
     amax = np.zeros(1, dtype=np.float32)
     module = load_tirx_kernel("cudnn_sm100_dense_blockscaled_gemm_persistent_amax")
     return NumSimCase(
-        kernel=module.get_kernel(**config),
+        kernel=module.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config),
         args={
             "a": a.reshape(-1),
             "b": b.reshape(-1),

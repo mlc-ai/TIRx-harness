@@ -452,7 +452,7 @@ pub fn decoded_setmaxnreg_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<(boo
 
 /// Validates a raw (non-PTX) synchronization call.
 pub fn validate_raw_sync_call(node: &ObjectRef, op_name: &str) -> AResult<RawSyncCall> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Err(crate::analyze::util::Failure::Ffi(
             crate::analyze::util::ffi_error("sync lowerer requires a TIRx Call"),
         ));
@@ -467,7 +467,7 @@ pub fn validate_raw_sync_call(node: &ObjectRef, op_name: &str) -> AResult<RawSyn
         return unsupported(format!("{op_name} must have a void result"));
     }
     if raw == RawSyncCall::Printf {
-        if args.is_empty() || args[0].as_node::<StringImmObj>().is_none() {
+        if args.is_empty() || args[0].downcast_ref::<StringImmObj>().is_none() {
             return unsupported(format!("{op_name} requires a static format string"));
         }
         let supported = [
@@ -527,7 +527,7 @@ pub fn validate_raw_sync_call(node: &ObjectRef, op_name: &str) -> AResult<RawSyn
             // A shared-memory storage sync is a CTA barrier; a global one
             // synchronizes the grid and is not this lowering.
             let scope = args[0]
-                .as_node::<StringImmObj>()
+                .downcast_ref::<StringImmObj>()
                 .map(|scope| ffi_text(&scope.value));
             if !matches!(scope.as_deref(), Some("shared" | "shared.dyn")) {
                 return unsupported(format!(
@@ -746,7 +746,7 @@ pub fn decoded_bar_reduce_parts(decoded: &DecodedPtx) -> AResult<BarReduceParts>
     let aligned =
         op_name.starts_with("tirx.ptx.bar_") || decoded.modifier_or_empty("aligned") == "aligned";
     let destination = decoded.scalar_operand("d")?;
-    if destination.as_node::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
+    if destination.downcast_ref::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
         return unsupported(format!("{op_name} destination must be a uint32 TensorLoad"));
     }
     let barrier_id = decoded.scalar_operand("a")?;
@@ -894,7 +894,7 @@ pub fn decoded_mbarrier_statement_parts(decoded: &DecodedPtx) -> AResult<Mbarrie
             | "tirx.ptx.mbarrier_arrive_count_state"
     ) {
         let state = decoded.scalar_operand("state")?;
-        if state.as_node::<TensorLoadObj>().is_none() || sync_dtype(&state) != "uint64" {
+        if state.downcast_ref::<TensorLoadObj>().is_none() || sync_dtype(&state) != "uint64" {
             return unsupported(format!(
                 "{op_name}.state must be a uint64 TensorLoad lvalue"
             ));
@@ -970,7 +970,7 @@ pub fn decoded_mbarrier_statement_parts(decoded: &DecodedPtx) -> AResult<Mbarrie
             if base_name == "tirx.ptx.mbarrier_arrive_no_complete" {
                 let state = decoded.scalar_operand("state")?;
                 require_dtype(&state, &["uint64"], &format!("{op_name}.state"))?;
-                if state.as_node::<TensorLoadObj>().is_none() {
+                if state.downcast_ref::<TensorLoadObj>().is_none() {
                     return unsupported(format!("{op_name}.state must be a TensorLoad lvalue"));
                 }
                 state_destination = Some(state);
@@ -1104,7 +1104,7 @@ pub fn decoded_mbarrier_query_parts(decoded: &DecodedPtx) -> AResult<MbarrierQue
                 continue;
             }
             let output = decoded.scalar_operand(name)?;
-            if output.as_node::<TensorLoadObj>().is_none() || sync_dtype(&output) != dtype {
+            if output.downcast_ref::<TensorLoadObj>().is_none() || sync_dtype(&output) != dtype {
                 return unsupported(format!(
                     "{op_name}.{name} must be a {dtype} TensorLoad lvalue"
                 ));
@@ -1148,7 +1148,7 @@ pub fn decoded_mbarrier_query_parts(decoded: &DecodedPtx) -> AResult<MbarrierQue
         ));
     }
     let destination = decoded.scalar_operand("wait_complete")?;
-    if destination.as_node::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
+    if destination.downcast_ref::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
         return unsupported(format!(
             "{op_name}.wait_complete must be a uint32 TensorLoad lvalue"
         ));
@@ -1258,7 +1258,7 @@ pub struct CheckLayoutParts {
 pub fn check_layout_parts(decoded: &DecodedPtx) -> AResult<CheckLayoutParts> {
     let op_name = decoded.op_name.as_str();
     let destination = decoded.scalar_operand("matches")?;
-    if destination.as_node::<TensorLoadObj>().is_none()
+    if destination.downcast_ref::<TensorLoadObj>().is_none()
         || !matches!(
             sync_dtype(&destination).as_str(),
             "bool" | "uint32" | "int32"
@@ -1294,7 +1294,7 @@ pub fn pending_count_parts(decoded: &DecodedPtx) -> AResult<(ObjectRef, ObjectRe
     let op_name = decoded.op_name.as_str();
     let destination = decoded.scalar_operand("count")?;
     let state = decoded.scalar_operand("state")?;
-    if destination.as_node::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
+    if destination.downcast_ref::<TensorLoadObj>().is_none() || sync_dtype(&destination) != "uint32" {
         return unsupported(format!(
             "{op_name}.count requires a uint32 TensorLoad lvalue"
         ));
@@ -1749,7 +1749,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_debug_printf(&mut self, args: &[ObjectRef], source_op_id: i64) -> AResult<()> {
         for argument in args {
-            if argument.as_node::<StringImmObj>().is_some() {
+            if argument.downcast_ref::<StringImmObj>().is_some() {
                 continue;
             }
             let value = self.emit_expr(argument)?;
@@ -1770,7 +1770,7 @@ impl<'a> Emitter<'a> {
         source_op_id: i64,
     ) -> AResult<()> {
         let args: Vec<ObjectRef> = expr
-            .as_node::<CallObj>()
+            .downcast_ref::<CallObj>()
             .map(|call| call.args.iter().map(oref).collect())
             .unwrap_or_default();
         let (functions, specialization) = raw.engine_calls();

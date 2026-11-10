@@ -9,8 +9,8 @@ use tvm_tirx::tvm_ffi::ObjectRefCore;
 use super::util::{buffer_dtype, dtype_of, oref, static_int, unsupported, AResult};
 use super::Ctx;
 
-fn static_field(ctx: &Ctx, value: &Expr, field: &str) -> AResult<i64> {
-    static_int(&ctx.analyzer, value, field, "must be a static integer")
+fn static_field<T: Clone + Into<Expr>>(ctx: &Ctx, value: &T, field: &str) -> AResult<i64> {
+    static_int(&ctx.analyzer, &value.clone().into(), field, "must be a static integer")
 }
 
 pub fn classify_contiguous_ramp(
@@ -34,7 +34,7 @@ pub fn classify_contiguous_ramp(
     if stride != 1 {
         return unsupported(format!("Ramp stride must be contiguous 1, got {stride}"));
     }
-    if dtype_of(&oref(ramp.base_.clone()))? != "int32"
+    if dtype_of(&oref(ramp.base.clone()))? != "int32"
         || dtype_of(&oref(ramp.stride.clone()))? != "int32"
     {
         return unsupported("Ramp base and stride must both use int32");
@@ -46,7 +46,7 @@ pub fn classify_contiguous_ramp(
             &dtype
         ));
     }
-    Ok((oref(ramp.base_.clone()), lanes))
+    Ok((oref(ramp.base.clone()), lanes))
 }
 
 /// `Some(result_dtype)` for a vector load form, `None` for scalar loads.
@@ -61,11 +61,11 @@ pub fn classify_vector_buffer_load(
         return Ok(None);
     };
     let buffer_dtype = buffer_dtype(source);
-    let indices: Vec<Expr> = load.indices.iter().collect();
+    let indices: Vec<Expr> = load.indices.iter().map(|v| v.clone().into()).collect();
     let ramp_axes: Vec<usize> = indices
         .iter()
         .enumerate()
-        .filter(|(_, index)| oref((*index).clone()).as_node::<RampObj>().is_some())
+        .filter(|(_, index)| oref((*index).clone()).downcast_ref::<RampObj>().is_some())
         .map(|(axis, _)| axis)
         .collect();
     if buffer_dtype == result_dtype {
@@ -87,7 +87,7 @@ pub fn classify_vector_buffer_load(
         ));
     }
     let last = oref(indices[indices.len() - 1].clone());
-    let ramp = last.as_node::<RampObj>().expect("ramp");
+    let ramp = last.downcast_ref::<RampObj>().expect("ramp");
     classify_contiguous_ramp(ctx, &last, ramp, Some(lanes))?;
     Ok(Some(result_dtype))
 }
@@ -111,8 +111,8 @@ pub fn classify_vector_extract(
     node: &ObjectRef,
     shuffle: &ShuffleObj,
 ) -> AResult<VectorForm> {
-    let vectors: Vec<Expr> = shuffle.vectors.iter().collect();
-    let indices: Vec<Expr> = shuffle.indices.iter().collect();
+    let vectors: Vec<Expr> = shuffle.vectors.iter().map(|v| v.clone().into()).collect();
+    let indices: Vec<Expr> = shuffle.indices.iter().map(|v| v.clone().into()).collect();
     if vectors.len() == 1 && indices.len() == 1 {
         let vector = oref(vectors[0].clone());
         let vector_dtype = dtype_of(&vector)?;

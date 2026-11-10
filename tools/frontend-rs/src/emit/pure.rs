@@ -556,7 +556,7 @@ fn validate_timer_finalize_cuda(_ctx: &Ctx, s: &CallSignature) -> Result<bool, S
 /// `(signature, semantics, whether the signature alone fixes the form)`.
 
 fn static_string(argument: &ObjectRef, signature: &CallSignature, field: &str) -> AResult<String> {
-    match argument.as_node::<StringImmObj>() {
+    match argument.downcast_ref::<StringImmObj>() {
         Some(imm) => Ok(ffi_text(&imm.value)),
         None => unsupported(format!(
             "Call({}): {field} must be static",
@@ -566,7 +566,7 @@ fn static_string(argument: &ObjectRef, signature: &CallSignature, field: &str) -
 }
 
 fn address_of_parts(signature: &CallSignature, args: &[ObjectRef]) -> AResult<()> {
-    if args[0].as_node::<TensorLoadObj>().is_none() {
+    if args[0].downcast_ref::<TensorLoadObj>().is_none() {
         return unsupported(format!(
             "Call({}): address_of requires a concrete TensorLoad",
             signature.render()
@@ -586,7 +586,7 @@ fn cta_reduce_parts(signature: &CallSignature, args: &[ObjectRef]) -> AResult<(S
         ));
     }
     let Some(count) = args[2]
-        .as_node::<IntImmObj>()
+        .downcast_ref::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
     else {
         return unsupported(format!(
@@ -613,7 +613,7 @@ fn warp_reduce_parts(signature: &CallSignature, args: &[ObjectRef]) -> AResult<(
         ));
     }
     let Some(count) = args[2]
-        .as_node::<IntImmObj>()
+        .downcast_ref::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
     else {
         return unsupported(format!(
@@ -633,7 +633,7 @@ fn warp_reduce_parts(signature: &CallSignature, args: &[ObjectRef]) -> AResult<(
 
 fn fetch_register_parts(signature: &CallSignature, args: &[ObjectRef]) -> AResult<String> {
     let width = args[0]
-        .as_node::<IntImmObj>()
+        .downcast_ref::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok());
     let Some(bits) = width.filter(|bits| *bits == 32 || *bits == 64) else {
         return unsupported(format!(
@@ -718,13 +718,13 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_address_of(&mut self, args: &[ObjectRef]) -> AResult<RustValue> {
-        let Some(load) = args[0].as_node::<TensorLoadObj>() else {
+        let Some(load) = args[0].downcast_ref::<TensorLoadObj>() else {
             return unsupported("address_of currently requires a concrete TensorLoad operand");
         };
         let Some(source) = as_buffer(&oref(load.source.clone())) else {
             return not_covered("address_of source is not a typed buffer");
         };
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let pointer = self.emit_buffer_address(&source, &indices)?;
         let scope = buffer_scope(&source);
         if matches!(
@@ -3120,14 +3120,14 @@ pub fn shared_address_signature(
 }
 
 pub fn source_text(node: &ObjectRef) -> AResult<Option<String>> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call.args.len() != 1 || call_op_name(call)?.as_deref() != Some("tirx.address_of") {
         return Ok(None);
     }
-    let argument = oref(call.args.get(0)?);
-    if argument.as_node::<TensorLoadObj>().is_some() {
+    let argument = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
+    if argument.downcast_ref::<TensorLoadObj>().is_some() {
         return Ok(Some(format!(
             "T.address_of({})",
             crate::analyze::util::repr_text(&argument)?
@@ -3140,7 +3140,7 @@ pub fn source_text(node: &ObjectRef) -> AResult<Option<String>> {
 pub fn conditional_operands(
     node: &ObjectRef,
 ) -> AResult<Option<(ObjectRef, ObjectRef, ObjectRef)>> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("prim.if_then_else") {
@@ -3152,8 +3152,8 @@ pub fn conditional_operands(
         );
     }
     Ok(Some((
-        oref(call.args.get(0)?),
-        oref(call.args.get(1)?),
-        oref(call.args.get(2)?),
+        oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?),
+        oref(call.args.get(1).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?),
+        oref(call.args.get(2).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?),
     )))
 }

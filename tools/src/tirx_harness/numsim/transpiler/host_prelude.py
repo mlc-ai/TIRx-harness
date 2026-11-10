@@ -50,9 +50,8 @@ def dispatch_tile_operations(func: Function) -> Function:
     import tvm_tirx
 
     target = tvm_tirx.target.Target({"kind": "cuda", "arch": _cuda_arch(func)}, host="llvm")
-    with target:
-        module = tvm_tirx.IRModule({"main": func.with_attr("target", target)})
-        return tvm_tirx.tirx.transform.TileDispatch()(module)["main"]
+    module = tvm_tirx.IRModule({"main": func.with_attr("target", target)})
+    return tvm_tirx.tirx.transform.TileDispatch()(module)["main"]
 
 
 def normalize_host_tensor_map_prelude(func: Function) -> Function:

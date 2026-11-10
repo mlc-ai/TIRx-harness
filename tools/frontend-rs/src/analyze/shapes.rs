@@ -75,13 +75,13 @@ impl ShapeExpressionContext {
         }
         let mut controlled = IdSet::default();
         for statement in statements {
-            if statement.as_node::<IfObj>().is_some()
-                || statement.as_node::<ForObj>().is_some()
-                || statement.as_node::<WhileObj>().is_some()
+            if statement.downcast_ref::<IfObj>().is_some()
+                || statement.downcast_ref::<ForObj>().is_some()
+                || statement.downcast_ref::<WhileObj>().is_some()
             {
                 for child in crate::walk_statements(statement.clone())?.iter() {
-                    if child.as_node::<TensorStoreObj>().is_some() {
-                        controlled.add(oref(child));
+                    if child.downcast_ref::<TensorStoreObj>().is_some() {
+                        controlled.add(oref(child.clone()));
                     }
                 }
             }
@@ -89,12 +89,12 @@ impl ShapeExpressionContext {
         let stores: Vec<(ObjectRef, Var, Vec<Expr>, Expr)> = statements
             .iter()
             .filter_map(|statement| {
-                statement.as_node::<TensorStoreObj>().map(|store| {
+                statement.downcast_ref::<TensorStoreObj>().map(|store| {
                     Ok((
                         oref(statement.clone()),
                         tensor_var(&oref(store.dest.clone()))?,
-                        store.indices.iter().collect(),
-                        store.value.clone(),
+                        store.indices.iter().map(|v| v.clone().into()).collect(),
+                        store.value.clone().into(),
                     ))
                 })
             })
@@ -108,7 +108,7 @@ impl ShapeExpressionContext {
             if !["local", "local_scalar", "register", "reg"].contains(&scope.as_str()) {
                 continue;
             }
-            let shape: Vec<Expr> = buffer.tensor_type().shape.iter().collect();
+            let shape: Vec<Expr> = buffer.tensor_type().shape.iter().map(|v| v.clone().into()).collect();
             if shape.len() != 1 {
                 continue;
             }
@@ -193,8 +193,8 @@ impl ShapeExpressionContext {
         load: &TensorLoad,
         buffer_bindings: &BufferBindings,
     ) -> AResult<Any> {
-        let node = load.as_node::<TensorLoadObj>().expect("TensorLoad node");
-        if node.indices.len() == 1 && is_zero_index(analyzer, &node.indices.get(0)?)? {
+        let node = load.downcast_ref::<TensorLoadObj>().expect("TensorLoad node");
+        if node.indices.len() == 1 && is_zero_index(analyzer, &node.indices[0].clone().into())? {
             let source = oref(node.source.clone());
             if let Some(source_buffer) = as_buffer(&source) {
                 let mut matches = Vec::new();
@@ -217,7 +217,7 @@ impl ShapeExpressionContext {
 pub fn map_from_pairs<V: tvm_ffi::AnyCompatible + Clone>(
     pairs: impl IntoIterator<Item = (Var, V)>,
 ) -> Map<Var, V> {
-    let mut positions: std::collections::HashMap<tvm_ffi::ObjectIdentity, usize> =
+    let mut positions: std::collections::HashMap<tvm_ffi::object::ObjectIdentity, usize> =
         std::collections::HashMap::new();
     let mut entries: Vec<(Var, V)> = Vec::new();
     for (key, value) in pairs {

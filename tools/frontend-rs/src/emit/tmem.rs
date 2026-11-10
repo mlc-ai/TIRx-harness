@@ -4,12 +4,12 @@
 
 use tvm_tirx::sym::{Analyzer, ProofStrength};
 use tvm_tirx::ir::prim::sub;
-use tvm_tirx::ir::{Expr, Location, Range, Var};
+use tvm_tirx::ir::{Expr, Range, Var};
 use tvm_tirx::ir::{ForObj, TensorStoreObj};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{Array, Map, ObjectRefCore, String as FfiString};
-use crate::analyze::util::bind_ranges;
+use tvm_tirx::tvm_ffi::{Map, ObjectRefCore, String as FfiString};
+use crate::analyze::util::{bind_ranges, primitive};
 use crate::analyze::util::tensor_var;
 use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
@@ -56,12 +56,12 @@ impl<'a> TmemNaming<'a> {
         let substitutions = bindings.shape_expressions.substitutions();
         let mut loop_ranges = Vec::new();
         for statement in &emitter.plan.statements {
-            if let Some(loop_stmt) = statement.as_node::<ForObj>() {
+            if let Some(loop_stmt) = statement.downcast_ref::<ForObj>() {
                 let extent = sub(loop_stmt.end.clone(), loop_stmt.begin.clone())?;
                 loop_ranges.push((
-                    loop_stmt.var.clone(),
-                    bindings.resolve_expression_with(&loop_stmt.begin, &substitutions)?,
-                    bindings.resolve_expression_with(&extent, &substitutions)?,
+                    loop_stmt.var.clone().into(),
+                    bindings.resolve_expression_with(&loop_stmt.begin.clone().into(), &substitutions)?,
+                    bindings.resolve_expression_with(&extent.into(), &substitutions)?,
                 ));
             }
         }
@@ -118,7 +118,7 @@ impl<'a> TmemNaming<'a> {
         for (variable, minimum, extent) in &self.loop_ranges {
             ranges.push((
                 variable.clone(),
-                Range::from_min_extent(minimum.clone(), extent.clone(), Location::unknown())?,
+                Range::from_min_extent(primitive(minimum)?, primitive(extent)?, tvm_tirx::ir::UNKNOWN_LOC)?,
             ));
         }
         if bind_ranges(&analyzer, ranges).is_err() {
@@ -134,7 +134,7 @@ impl<'a> TmemNaming<'a> {
             expr_any(&inner_interval.1),
             expr_any(&outer_interval.1),
         )?;
-        Ok(analyzer.can_prove(&starts, ProofStrength::Default)? && analyzer.can_prove(&ends, ProofStrength::Default)?)
+        Ok(analyzer.can_prove(primitive(starts)?, ProofStrength::Default)? && analyzer.can_prove(primitive(ends)?, ProofStrength::Default)?)
     }
 }
 
@@ -237,13 +237,13 @@ impl<'a> Emitter<'a> {
         let Some(layout) = buffer.tensor_type().layout.clone() else {
             return not_covered("buffer without a layout");
         };
-        let coordinates = Array::new(indices.to_vec());
-        let mapped: Map<FfiString, Expr> = layout
+        let coordinates = indices.iter().map(crate::analyze::util::primitive).collect::<Result<Vec<_>, _>>()?;
+        let mapped: Map<FfiString, tvm_tirx::ir::PrimExpr> = layout
             .canonicalize()?
-            .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
+            .apply_with_shape(coordinates, &buffer.tensor_type().shape, &tvm_tirx::sym::Analyzer::new())?;
         let mut axes: Vec<(String, Expr)> = mapped
             .iter()
-            .map(|(axis, value)| (ffi_text(&axis), value))
+            .map(|(axis, value)| (ffi_text(&axis), value.into()))
             .collect();
         axes.sort_by(|left, right| left.0.cmp(&right.0));
         if axes
@@ -411,7 +411,7 @@ impl<'a> Emitter<'a> {
         buffer_ref: &str,
     ) -> AResult<()> {
         let buffer = tensor_var(&oref(stmt.dest.clone()))?;
-        let indices: Vec<Expr> = stmt.indices.iter().collect();
+        let indices: Vec<Expr> = stmt.indices.iter().map(|x| x.clone().into()).collect();
         let (lane, tcol, allocated_addr) = self.tmem_coordinates(&buffer, &indices, Some(op_id))?;
         let access_marker = self.tmem_access_marker(&buffer)?;
         let memory_dtype = if dtype == "float8_e4m3fn" || dtype == "float8_e8m0fnu" {

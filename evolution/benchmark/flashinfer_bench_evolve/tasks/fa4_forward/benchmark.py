@@ -91,10 +91,9 @@ def tirx_prepare(solution_module, q, k, v, causal, sm_scale):
 
     kernel = solution_module.tir_kernel(total_heads, seq_len, head_dim)
     target = tvm_tirx.target.Target("cuda")
-    with target:
-        executable = tvm_tirx.compile(
-            tvm_tirx.IRModule({"main": kernel}), target=target, tir_pipeline="tirx"
-        )
+    executable = tvm_tirx.compile(
+        tvm_tirx.IRModule({"main": kernel}), target=target, pipeline="tirx"
+    )
     kernel_args = (q_flat, k_flat, vt_flat, output, lse)
 
     def kernel_fn():

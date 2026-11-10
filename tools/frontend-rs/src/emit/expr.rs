@@ -1138,7 +1138,7 @@ impl<'a> Emitter<'a> {
             return not_covered("TensorLoad source is not a typed buffer");
         };
         let result_dtype = classify_vector_buffer_load(self.ctx, expr, load, &source)?;
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let register_access_mask = self.register_access_mask.clone();
         // `self.buffer_load(expr.source, indices, source_node=expr, ...)`: the
         // kernel emitter swaps the loader around tile and TMEM lowerings.
@@ -1172,7 +1172,7 @@ impl<'a> Emitter<'a> {
             return Err(util::Failure::Recorded);
         }
         let kind = kind_or_bail(expr)?;
-        if let Some(imm) = expr.as_node::<IntImmObj>() {
+        if let Some(imm) = expr.downcast_ref::<IntImmObj>() {
             let dtype = dtype_of(expr)?;
             let bits = int_bits(imm)?;
             if dtype == "bool" {
@@ -1197,7 +1197,7 @@ impl<'a> Emitter<'a> {
                 Uniformity::Uniform,
             ));
         }
-        if let Some(imm) = expr.as_node::<FloatImmObj>() {
+        if let Some(imm) = expr.downcast_ref::<FloatImmObj>() {
             let dtype = dtype_of(expr)?;
             if !matches!(
                 dtype.as_str(),
@@ -1238,7 +1238,7 @@ impl<'a> Emitter<'a> {
                 ..RustValue::new(code, rust_float, Uniformity::Uniform)
             });
         }
-        if let Some(let_expr) = expr.as_node::<LetObj>() {
+        if let Some(let_expr) = expr.downcast_ref::<LetObj>() {
             let value = self.emit_expr(&oref(let_expr.value.clone()))?;
             let value = self.materialize(value, "let_value")?;
             let binding_name = self.temp("let_binding");
@@ -1269,17 +1269,17 @@ impl<'a> Emitter<'a> {
                 )),
             };
         }
-        if let Some(ramp) = expr.as_node::<RampObj>() {
+        if let Some(ramp) = expr.downcast_ref::<RampObj>() {
             classify_contiguous_ramp(self.ctx, expr, ramp, None)?;
             return unsupported("Ramp is valid only as a contiguous vector buffer index");
         }
-        if let Some(shuffle) = expr.as_node::<ShuffleObj>() {
+        if let Some(shuffle) = expr.downcast_ref::<ShuffleObj>() {
             return self.emit_vector_extract(expr, shuffle);
         }
-        if let Some(load) = expr.as_node::<TensorLoadObj>() {
+        if let Some(load) = expr.downcast_ref::<TensorLoadObj>() {
             return self.emit_buffer_load_expr(expr, load);
         }
-        if let Some(cast) = expr.as_node::<CastObj>() {
+        if let Some(cast) = expr.downcast_ref::<CastObj>() {
             let value = self.emit_expr(&oref(cast.value.clone()))?;
             let target_dtype = dtype_of(expr)?;
             let result = self.coerce_dtype(value.clone(), &target_dtype, "cast")?;
@@ -1402,7 +1402,7 @@ impl<'a> Emitter<'a> {
             let (result, lhs) = self.emit_lazy_logical(&a, &b, kind)?;
             return self.instrument(expr, kind, &[&lhs], result);
         }
-        if let Some(not) = expr.as_node::<NotObj>() {
+        if let Some(not) = expr.downcast_ref::<NotObj>() {
             let value = self.emit_expr(&oref(not.a.clone()))?;
             if value.rust_type != "bool" {
                 return unsupported("Not requires a boolean operand");
@@ -1417,7 +1417,7 @@ impl<'a> Emitter<'a> {
             };
             return self.instrument(expr, kind, &[&value], result);
         }
-        if let Some(select) = expr.as_node::<SelectObj>() {
+        if let Some(select) = expr.downcast_ref::<SelectObj>() {
             let true_expr = oref(select.true_value.clone());
             let false_expr = oref(select.false_value.clone());
             let condition_expr = oref(select.condition.clone());

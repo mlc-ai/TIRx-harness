@@ -133,7 +133,9 @@ def prepare_cudnn_dense_gemm_persistent_swiglu_case() -> NumSimCase:
         return np.ascontiguousarray(bits.reshape(-1, order="F")).view(np.uint8)
 
     return NumSimCase(
-        kernel=dense_gemm_persistent_swiglu.get_kernel(**config),
+        kernel=dense_gemm_persistent_swiglu.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}}, **config
+        ),
         args={
             "a": _float32_to_bfloat16_bits(a).reshape(-1).view(np.uint8),
             "b": _float32_to_bfloat16_bits(b).reshape(-1).view(np.uint8),
@@ -203,7 +205,9 @@ def prepare_cudnn_dense_blockscaled_swiglu_quant_case() -> NumSimCase:
     input_scale_bytes = 2 * 2 * 512
     output_scale_bytes = 2 * 512
     return NumSimCase(
-        kernel=dense_blockscaled_gemm_persistent_swiglu_interleaved_quant.get_kernel(**config),
+        kernel=dense_blockscaled_gemm_persistent_swiglu_interleaved_quant.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}}, **config
+        ),
         args={
             "a": a.reshape(-1),
             "b": b.reshape(-1),
@@ -268,7 +272,9 @@ def prepare_cudnn_dense_blockscaled_srelu_quant_case() -> NumSimCase:
     expected_amax = np.array([np.max(d_values)], dtype=np.float32)
 
     return NumSimCase(
-        kernel=dense_blockscaled_gemm_persistent_srelu_quant.get_kernel(**config),
+        kernel=dense_blockscaled_gemm_persistent_srelu_quant.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}}, **config
+        ),
         args={
             "a": _pack_e2m1(a_codes).reshape(-1),
             "b": _pack_e2m1(b_codes).reshape(-1),
@@ -369,6 +375,7 @@ def prepare_cudnn_gemm_proj_rope_mxfp8_bf16in_case() -> NumSimCase:
     trig_shape = tokens * 64
     return NumSimCase(
         kernel=gemm_proj_rope_mxfp8_bf16in.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             tokens=tokens,
             k_dim=k_dim,
             num_heads=num_heads,
@@ -469,7 +476,9 @@ def prepare_cudnn_moe_dglu_dbias_case() -> NumSimCase:
     scale_bytes = 1 * 2 * 4 * 32 * 4 * 4
 
     return NumSimCase(
-        kernel=moe_blockscaled_grouped_gemm_dglu_dbias.get_kernel(**config),
+        kernel=moe_blockscaled_grouped_gemm_dglu_dbias.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}}, **config
+        ),
         args={
             "a": a.reshape(-1),
             "b": b.reshape(-1),
@@ -531,7 +540,9 @@ def prepare_cudnn_moe_bf16_dglu_dbias_case() -> NumSimCase:
     expected_dbias[0, :n] = np.float32(0.5)
 
     return NumSimCase(
-        kernel=moe_grouped_gemm_dglu_dbias.get_kernel(**config),
+        kernel=moe_grouped_gemm_dglu_dbias.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}}, **config
+        ),
         args={
             "a": _float32_to_bfloat16_bits(a).reshape(-1).view(np.uint8),
             "b": _float32_to_bfloat16_bits(b).reshape(-1).view(np.uint8),
@@ -826,7 +837,7 @@ def prepare_cudnn_kda_bprop_case() -> NumSimCase:
         "k1:scale": np.float32(1.0),
     }
     return NumSimCase(
-        kernel=kda_bprop_f16.get_kernel(**config),
+        kernel=kda_bprop_f16.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config),
         args=args,
         outputs={
             "dq": "k0:dq",
@@ -1094,7 +1105,7 @@ def prepare_cudnn_gdn_prefill_case() -> NumSimCase:
         )
     )
     return NumSimCase(
-        kernel=gdn_prefill_f16.get_kernel(**config),
+        kernel=gdn_prefill_f16.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config),
         args={
             **{f"k0:{name}": descriptor for name, descriptor in host_descriptors},
             "k0:descriptor_workspace": descriptor_workspace,
@@ -1208,7 +1219,7 @@ def prepare_cudnn_gdn_recompute_case() -> NumSimCase:
         )
     )
     return NumSimCase(
-        kernel=gdn_recompute_f16.get_kernel(**config),
+        kernel=gdn_recompute_f16.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config),
         args={
             **{f"k0:{name}": descriptor for name, descriptor in host_descriptors},
             "k0:descriptor_workspace": descriptor_workspace,
@@ -1331,6 +1342,7 @@ def prepare_cudnn_gdn2_recompute_case() -> NumSimCase:
     module = load_tirx_kernel("cudnn_sm100_gdn2_recompute_f16")
     return NumSimCase(
         kernel=module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             seq_lens=(tokens,),
             heads=1,
             num_sms=1,
@@ -1488,7 +1500,7 @@ def prepare_cudnn_gdn2_prefill_case() -> NumSimCase:
         )
     )
     return NumSimCase(
-        kernel=gdn2_prefill_f16.get_kernel(**config),
+        kernel=gdn2_prefill_f16.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config),
         args={
             **{f"k0:{name}": descriptor for name, descriptor in host_descriptors},
             "k0:descriptor_workspace": descriptor_workspace,
@@ -2332,6 +2344,7 @@ def prepare_cudnn_bsa_forward_combine_blk64_case() -> NumSimCase:
         "seqlen_div_s2": div_s2,
     }
     kernel = bsa_forward_combine_blk64.get_kernel(
+        backend_config={"cuda": {"arch": "sm_100a"}},
         batch=batch,
         num_heads=num_heads,
         seqlen_q=seqlen_q,

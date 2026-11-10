@@ -150,7 +150,7 @@ def _prepare_selective_state_update_case(
     schedule: str,
 ) -> NumSimCase:
     config = _config(tokens=tokens)
-    kernel = module.get_kernel(**config)
+    kernel = module.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config)
     if schedule == "stp_simple":
         dim_tiles = _DIM // 4
         substitutions = {

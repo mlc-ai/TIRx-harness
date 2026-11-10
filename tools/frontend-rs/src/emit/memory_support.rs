@@ -344,7 +344,7 @@ impl<'a> Emitter<'a> {
                 ),
             ));
         }
-        let Some(load) = destination.as_node::<TensorLoadObj>() else {
+        let Some(load) = destination.downcast_ref::<TensorLoadObj>() else {
             return unsupported(
                 "explicit instruction destination must be a concrete TensorLoad lvalue",
             );
@@ -355,7 +355,7 @@ impl<'a> Emitter<'a> {
             );
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let code = self.buffer_code(&buffer)?;
         let plan = self.plan_of(&code);
         let plan_name = plan.name.clone();
@@ -622,7 +622,7 @@ fn shared_conversion(
     expression: &ObjectRef,
     forms: &SharedAddressForms,
 ) -> AResult<Option<(ObjectRef, bool)>> {
-    if let Some(call) = expression.as_node::<CallObj>() {
+    if let Some(call) = expression.downcast_ref::<CallObj>() {
         let op_name = call_op_name(call)?.unwrap_or_default();
         let arguments: Vec<ObjectRef> = call.args.iter().map(oref).collect();
         if forms.cvta

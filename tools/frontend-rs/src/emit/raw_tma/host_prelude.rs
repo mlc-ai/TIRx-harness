@@ -1,7 +1,7 @@
 //! Promote canonical host-created TensorMaps to implicit device parameters.
 
+use crate::tvm_compat::TryCast;
 use crate::decode::{projected_buffer, tensor_decl, TensorDecl};
-use tvm_tirx::ir::Location;
 use tvm_tirx::tirx::{TensorMapTypeObj, TensorType};
 
 use std::collections::HashSet;
@@ -31,7 +31,7 @@ use tvm_tirx::tirx::Function;
 use crate::analyze::topology::{is_launch_entry, LAUNCH_THREAD};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
-    Any, DLDataType, DLDataTypeExt, Map, ObjectRefCast, ObjectRefCore, String as FfiString,
+    Any, DLDataType, DLDataTypeExt, Map, ObjectRefCore, String as FfiString,
 };
 
 use super::{implicit_tensor_map_metadata, scalar_parameters, IMPLICIT_TENSOR_MAP_ATTR};
@@ -45,7 +45,7 @@ struct Context<'a> {
 
 impl Context<'_> {
     fn simplify(&self, value: &ObjectRef) -> AResult<Expr> {
-        Ok(self.analyzer.simplify(&prim(value)?, 2)?)
+        crate::analyze::util::simplify(&self.analyzer, &prim(value)?)
     }
 
     fn serialize_integer(&self, value: &ObjectRef, field: &str) -> AResult<Json> {
@@ -87,17 +87,16 @@ impl Context<'_> {
     }
 
     fn tensor_map_alloca(&self, statement: &Stmt) -> AResult<Option<Var>> {
-        let Some(bind) = statement.as_node::<BindObj>() else {
+        let Some(bind) = statement.downcast_ref::<BindObj>() else {
             return Ok(None);
         };
-        let Some(call) = bind.value.as_node::<CallObj>() else {
+        let Some(call) = bind.value.downcast_ref::<CallObj>() else {
             return Ok(None);
         };
         if call_op_name(call)?.as_deref() != Some("tirx.stack_alloca")
             || call
                 .args
                 .get(0)
-                .ok()
                 .and_then(|value| string_imm(&value))
                 .as_deref()
                 != Some("tensormap")
@@ -117,8 +116,8 @@ impl Context<'_> {
         if !bind
             .var
             .ty
-            .as_node::<PtrTypeObj>()
-            .is_some_and(|pointer| pointer.element_type.as_node::<TensorMapTypeObj>().is_some())
+            .downcast_ref::<PtrTypeObj>()
+            .is_some_and(|pointer| pointer.element_type.downcast_ref::<TensorMapTypeObj>().is_some())
         {
             return unsupported(
                 "host TensorMap allocation must bind a variable with TensorMap type",
@@ -134,7 +133,7 @@ impl Context<'_> {
     ) -> AResult<(String, Json)> {
         let mut offsets: Vec<Expr> = Vec::new();
         let buffer = loop {
-            if let Some(call) = expression.as_node::<CallObj>() {
+            if let Some(call) = expression.downcast_ref::<CallObj>() {
                 if call_op_name(call)?.as_deref() == Some("tirx.handle_add_byte_offset")
                     && call.args.len() == 2
                 {
@@ -168,7 +167,7 @@ impl Context<'_> {
         let byte_offset = match offsets.next() {
             Some(mut value) => {
                 for offset in offsets {
-                    value = Add::new(value, offset, Location::unknown())?.into();
+                    value = Add::new(crate::analyze::util::primitive(value)?, crate::analyze::util::primitive(offset)?, tvm_tirx::ir::UNKNOWN_LOC)?.into();
                 }
                 oref(value)
             }
@@ -179,7 +178,7 @@ impl Context<'_> {
             .func
             .params
             .iter()
-            .any(|parameter| same(&parameter, &buffer))
+            .any(|parameter| same(parameter, &buffer))
         {
             Ok((ffi_text(&buffer.name), serialized))
         } else {
@@ -197,7 +196,7 @@ impl Context<'_> {
         variable: &Var,
     ) -> AResult<Json> {
         let args: Vec<_> = call.args.iter().collect();
-        if args.len() < 4 || !same(&args[1], variable) {
+        if args.len() < 4 || !same(args[1], variable) {
             return unsupported(format!(
                 "host TensorMap encode does not target allocation {:?}",
                 ffi_text(&variable.name)
@@ -282,14 +281,14 @@ impl Context<'_> {
 /// `(tensor, byte offset)` of `address_of(tensor[indices])` with static indices
 /// into a tensor with the default row-major layout.
 fn element_address(expression: &ObjectRef) -> AResult<Option<(Var, i64)>> {
-    let Some(call) = expression.as_node::<CallObj>() else {
+    let Some(call) = expression.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
         return Ok(None);
     }
-    let element = call.args.get(0)?;
-    let Some(load) = element.as_node::<TensorLoadObj>() else {
+    let element = call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?;
+    let Some(load) = element.downcast_ref::<TensorLoadObj>() else {
         return Ok(None);
     };
     let Some(source) = as_buffer(&oref(load.source.clone())) else {
@@ -321,18 +320,18 @@ fn element_address(expression: &ObjectRef) -> AResult<Option<(Var, i64)>> {
 
 fn string_imm(value: &Expr) -> Option<String> {
     value
-        .as_node::<StringImmObj>()
+        .downcast_ref::<StringImmObj>()
         .map(|value| ffi_text(&value.value))
 }
 
 fn is_device_entry(statement: &Stmt) -> bool {
-    statement.as_node::<RegionStmtObj>().is_some_and(|region| {
+    statement.downcast_ref::<RegionStmtObj>().is_some_and(|region| {
         is_launch_entry(region) || region.op.name.as_str() == LAUNCH_THREAD
     })
 }
 
 fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
-    let Some(evaluate) = statement.as_node::<EvaluateObj>() else {
+    let Some(evaluate) = statement.downcast_ref::<EvaluateObj>() else {
         return Ok(None);
     };
     let Ok(call) = evaluate.value.clone().try_cast::<Call>() else {
@@ -342,7 +341,7 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         let Some(attrs) = call
             .attrs
             .as_ref()
-            .and_then(|attrs| attrs.as_node::<TensorMapEncodeTiledAttrObj>())
+            .and_then(|attrs| attrs.downcast_ref::<TensorMapEncodeTiledAttrObj>())
         else {
             return unsupported("typed TensorMap encode requires TensorMapEncodeTiledAttr");
         };
@@ -363,12 +362,12 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         // Both public spellings use the same descriptor validation and metadata.
         // The typed op stores dtype/rank/modes in attrs instead of packed operands.
         let mut args: Vec<Expr> = vec![
-            StringImm::new("runtime.cuTensorMapEncodeTiled", Location::unknown()).into(),
+            StringImm::new("runtime.cuTensorMapEncodeTiled", tvm_tirx::ir::UNKNOWN_LOC).into(),
             call.args.get(0).expect("descriptor"),
-            StringImm::new(&dtype_text(attrs.descriptor_dtype), Location::unknown()).into(),
+            StringImm::new(&dtype_text(attrs.descriptor_dtype), tvm_tirx::ir::UNKNOWN_LOC).into(),
             int_const("int32", attrs.rank)?.into(),
         ];
-        args.extend(call.args.iter().skip(1));
+        args.extend(call.args.iter().skip(1).cloned());
         for mode in [
             attrs.interleave,
             attrs.swizzle,
@@ -391,7 +390,6 @@ fn encode_call(statement: &Stmt) -> AResult<Option<Call>> {
         && call
             .args
             .get(0)
-            .ok()
             .and_then(|value| string_imm(&value))
             .as_deref()
             == Some("runtime.cuTensorMapEncodeTiled")
@@ -413,8 +411,8 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         return Ok(func);
     }
     let body = function_body(&func)?;
-    let statements: Vec<Stmt> = match body.as_node::<SeqStmtObj>() {
-        Some(sequence) => sequence.seq.iter().collect(),
+    let statements: Vec<Stmt> = match body.downcast_ref::<SeqStmtObj>() {
+        Some(sequence) => sequence.seq.iter().cloned().collect(),
         None => vec![body],
     };
     let entries: Vec<_> = statements
@@ -479,7 +477,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         }
         let Some(call) = call else {
             let replacements = substitutions.iter().cloned().collect();
-            if let Some(assertion) = statement.as_node::<AssertStmtObj>() {
+            if let Some(assertion) = statement.downcast_ref::<AssertStmtObj>() {
                 let condition = crate::substitute(oref(assertion.condition.clone()), replacements)?;
                 if int_imm(&oref(context.simplify(&condition)?)).is_none_or(|value| value == 0) {
                     return unsupported(
@@ -516,7 +514,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         let Some(index) = allocations.iter().position(|candidate| {
             call.args
                 .get(1)
-                .is_ok_and(|target| same(&target, candidate))
+                .is_some_and(|target| same(&target, candidate))
         }) else {
             return unsupported("host TensorMap encode targets no preceding allocation");
         };
@@ -544,7 +542,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
     }
     let bindings = BufferBindings::build(
         &crate::walk_statements(function_body(&func)?)?
-            .iter()
+            .iter().cloned()
             .collect::<Vec<_>>(),
     )?;
     let substitutions: Map<Var, Expr> = substitutions.into_iter().collect();
@@ -565,7 +563,7 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         .iter()
         .map(|parameter| ffi_text(&parameter.name))
         .collect();
-    let mut params: Vec<Var> = func.params.iter().collect();
+    let mut params: Vec<Var> = func.params.iter().cloned().collect();
     let mut renames: Vec<(Var, Expr)> = Vec::new();
     for (variable, item) in allocations.iter().zip(&mut metadata) {
         let original = ffi_text(&variable.name);
@@ -605,10 +603,10 @@ pub fn normalize(func: Function, tvm_version: FfiString) -> AResult<Function> {
         FfiString::from(IMPLICIT_TENSOR_MAP_ATTR),
         FfiString::from(Json::Array(metadata).to_string()).into(),
     ));
-    let body = SeqStmt::new([entry.try_cast::<Stmt>()?], Location::unknown());
+    let body = SeqStmt::new([entry.try_cast::<Stmt>()?], tvm_tirx::ir::UNKNOWN_LOC);
     Ok(Function::new(
         params,
-        Some(&body),
+        &body,
         func.ret_type.clone(),
         DictAttrs::new(attrs.into_iter().collect::<Map<FfiString, Any>>()),
         func.loc.clone(),

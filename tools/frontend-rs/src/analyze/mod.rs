@@ -113,7 +113,7 @@ pub fn topology_operands(
     use tvm_tirx::tvm_ffi::ObjectRefCore;
     macro_rules! binary {
         ($($obj:ty),*) => {
-            $(if let Some(binary) = node.as_node::<$obj>() {
+            $(if let Some(binary) = node.downcast_ref::<$obj>() {
                 return Some((util::oref(binary.a.clone()), util::oref(binary.b.clone())));
             })*
         };

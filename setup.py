@@ -79,7 +79,9 @@ class RustBuildExt(build_ext):
             shutil.copy2(staging / "target" / "release" / library, output)
             version = tomllib.loads((staging / "Cargo.toml").read_text())["package"]["version"]
             lock = tomllib.loads((staging / "Cargo.lock").read_text())
-            bindings = next(p["version"] for p in lock["package"] if p["name"] == "tvm-tirx")
+            binding = next(p for p in lock["package"] if p["name"] == "tvm-tirx")
+            revision = binding["source"].rsplit("#", 1)[1]
+            bindings = f"{binding['version']}@{revision}"
             output.with_name("_tvm_rust_ext.identity").write_text(
                 f"{version}:tvm-tirx-{bindings}\n"
             )

@@ -24,7 +24,7 @@ pub fn is_address_query(name: &str) -> bool {
 }
 
 fn is_tensor_load(value: &ObjectRef) -> bool {
-    value.as_node::<TensorLoadObj>().is_some()
+    value.downcast_ref::<TensorLoadObj>().is_some()
 }
 
 pub struct MapaParts {

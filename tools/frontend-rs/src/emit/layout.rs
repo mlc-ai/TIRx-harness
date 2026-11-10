@@ -3,7 +3,7 @@
 
 use tvm_tirx::ir::{Expr, Var};
 
-use tvm_tirx::tvm_ffi::{Array, Map, String as FfiString};
+use tvm_tirx::tvm_ffi::{Map, String as FfiString};
 use crate::analyze::util::int_const;
 use crate::analyze::util::TensorVarExt;
 
@@ -18,13 +18,13 @@ impl<'a> Emitter<'a> {
         indices: &[Expr],
     ) -> AResult<Vec<(String, Expr)>> {
         let layout = buffer_layout(buffer)?;
-        let coordinates = Array::new(indices.to_vec());
-        let mapped: Map<FfiString, Expr> = layout
+        let coordinates = indices.iter().map(crate::analyze::util::primitive).collect::<Result<Vec<_>, _>>()?;
+        let mapped: Map<FfiString, tvm_tirx::ir::PrimExpr> = layout
             .canonicalize()?
-            .apply_with_shape(&coordinates, &buffer.tensor_type().shape)?;
+            .apply_with_shape(coordinates, &buffer.tensor_type().shape, &tvm_tirx::sym::Analyzer::new())?;
         let mut axes: Vec<(String, Expr)> = mapped
             .iter()
-            .map(|(axis, value)| (ffi_text(&axis), value))
+            .map(|(axis, value)| (ffi_text(&axis), value.into()))
             .collect();
         axes.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(axes)

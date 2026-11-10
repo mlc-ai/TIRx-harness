@@ -66,10 +66,10 @@ fn static_shape(decoded: &DecodedPtx) -> AResult<(i64, i64, i64, i64, i64)> {
 
 fn same_register(left: &ObjectRef, right: &ObjectRef) -> AResult<bool> {
     let left_load = left
-        .as_node::<TensorLoadObj>()
+        .downcast_ref::<TensorLoadObj>()
         .expect("validated TensorLoad");
     let right_load = right
-        .as_node::<TensorLoadObj>()
+        .downcast_ref::<TensorLoadObj>()
         .expect("validated TensorLoad");
     if !same(&left_load.source, &right_load.source) {
         return Ok(false);
@@ -117,7 +117,7 @@ pub fn resolve_ptx_spdecompress(decoded: &DecodedPtx) -> AResult<SpDecompressFor
     let compressed = present_lanes(decoded, "cdata")?;
     let named = named_registers(&data, &metadata, &compressed);
     for (name, value) in &named {
-        if value.as_node::<TensorLoadObj>().is_none() {
+        if value.downcast_ref::<TensorLoadObj>().is_none() {
             return unsupported(format!("{op_name}.{name} must be a TensorLoad register"));
         }
     }
@@ -197,7 +197,7 @@ impl<'a> Emitter<'a> {
         value: &ObjectRef,
     ) -> AResult<Option<RegisterLocation>> {
         let load = value
-            .as_node::<TensorLoadObj>()
+            .downcast_ref::<TensorLoadObj>()
             .expect("validated TensorLoad");
         let Some(buffer) = as_buffer(&oref(load.source.clone())) else {
             return not_covered("spdecompress register source is not a typed buffer");
@@ -208,7 +208,7 @@ impl<'a> Emitter<'a> {
         };
         let itemsize = plan.layout.itemsize;
         let elem_offset = plan.layout.elem_offset;
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let offset = self.physical_element_offset(&buffer, &indices)?;
         let shifted = op_binary("_OpAdd", expr_any(&offset), int_any(elem_offset))?;
         let scaled = op_binary("_OpMul", expr_any(&shifted), int_any(itemsize))?;
@@ -242,7 +242,7 @@ impl<'a> Emitter<'a> {
         }
         let analyzer = &self.ctx.analyzer;
         let prove = |name: &str, lhs: &Expr, rhs: &Expr| -> AResult<bool> {
-            Ok(analyzer.can_prove(&op_binary(name, expr_any(lhs), expr_any(rhs))?, ProofStrength::Default)?)
+            Ok(analyzer.can_prove(crate::analyze::util::primitive(op_binary(name, expr_any(lhs), expr_any(rhs))?)?, ProofStrength::Default)?)
         };
         if prove("_OpLE", &left.end, &right.start)? || prove("_OpLE", &right.end, &left.start)? {
             return Ok("disjoint");
@@ -265,7 +265,7 @@ impl<'a> Emitter<'a> {
         let mut same_owner = same_axes;
         if same_owner {
             for ((_, left_owner), (_, right_owner)) in left.owners.iter().zip(right.owners.iter()) {
-                if !analyzer.can_prove_equal(left_owner, right_owner)? {
+                if !analyzer.can_prove_equal(crate::analyze::util::primitive(left_owner)?, crate::analyze::util::primitive(right_owner)?)? {
                     same_owner = false;
                     break;
                 }

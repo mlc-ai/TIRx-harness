@@ -201,6 +201,7 @@ def prepare_flashinfer_rmsnorm_case() -> NumSimCase:
     output = np.full(values.shape, np.nan, dtype=np.float16)
     kernel = _specialize(
         module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             variant="rmsnorm",
             dtype="float16",
             M=1,
@@ -237,6 +238,7 @@ def prepare_flashinfer_layernorm_case() -> NumSimCase:
     output = np.full(value_bits.shape, 0x7FC0, dtype=np.uint16)
     kernel = _specialize(
         module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             M=1,
             H=128,
             input_layout="compact",
@@ -362,6 +364,7 @@ def prepare_flashinfer_qk_rmsnorm_case() -> NumSimCase:
     output = np.full(values.shape, np.nan, dtype=np.float16)
     kernel = _specialize(
         module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             variant="rmsnorm",
             dtype="float16",
             B=1,

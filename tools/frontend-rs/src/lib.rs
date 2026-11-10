@@ -1,5 +1,7 @@
 //! Compile-time TIRx services. Runtime kernels keep using the NumSim engine.
 
+use crate::tvm_compat::TryCast;
+use tvm_tirx::tvm_ffi::object::ObjectIdentity;
 mod analyze;
 mod decode;
 mod dtypes;
@@ -24,8 +26,7 @@ use tvm_tirx::tirx::{Function, Layout};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
     structural_map, structural_visit, tvm_ffi_dll_export_typed_func, Any, Array, Error, Map,
-    ObjectIdentity, ObjectRefCast, ObjectRefCore, Result, String, StructuralView, VisitCallbacks,
-    VisitContext, VisitInterrupt, WalkOrder, VALUE_ERROR,
+    ObjectRefCore, Result, String, AnyView, StructuralVisitorView, VisitInterrupt, WalkOrder, VALUE_ERROR,
 };
 
 fn identity() -> Result<String> {
@@ -41,74 +42,97 @@ pub(crate) fn layout_linear_offsets(layout: Layout, count: i64) -> Result<Array<
     let analyzer = Analyzer::new();
     let mut offsets = Vec::new();
     for index in 0..count {
-        let mapped = layout.apply_linear(Expr::from(int_const("int64", index)?))?;
+        let mapped = layout.apply_linear(int_const("int64", index)?, &analyzer)?;
         let offset = mapped
-            .get(&"m".into())?
+            .get("m")?
             .unwrap_or(int_const("int64", 0)?.into());
-        offsets.push(analyzer.simplify(&offset, 2)?);
+        offsets.push(analyzer.simplify(&offset, 2)?.into());
     }
-    Ok(Array::new(offsets))
+    Ok(Array::from_vec(offsets))
+}
+
+#[derive(Default)]
+struct StatementVisitor(Vec<Stmt>);
+
+#[tvm_ffi::dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
+impl StatementVisitor {
+    fn visit_any(
+        &mut self,
+        value: AnyView<'_>,
+        visitor: &mut StructuralVisitorView<'_, Self>,
+    ) -> Result<Option<VisitInterrupt>> {
+        if let Some(stmt) = value.downcast_ref::<Stmt>() {
+            self.0.push(stmt.clone());
+            return visitor.default_visit(self, value);
+        }
+        if value.downcast_ref::<Array<Stmt>>().is_some() {
+            return visitor.default_visit(self, value);
+        }
+        // Do not enter expressions, buffers, locations or annotation maps.
+        Ok(None)
+    }
 }
 
 pub(crate) fn walk_statements(stmt: Stmt) -> Result<Array<Stmt>> {
-    let mut visitor = VisitCallbacks::new(
-        Vec::<Stmt>::new(),
-        |value: &StructuralView,
-         visitor: &mut VisitContext<'_, Vec<Stmt>>|
-         -> Result<Option<VisitInterrupt>> {
-            if let Some(stmt) = value.cast::<Stmt>() {
-                visitor.state_mut().push(stmt);
-                return visitor.visit_children();
-            }
-            if value.cast::<Array<Stmt>>().is_some() {
-                return visitor.visit_children();
-            }
-            // Do not enter expressions, buffers, spans or annotation maps.
-            Ok(None)
-        },
-    );
+    let mut visitor = StatementVisitor::default();
     structural_visit(&stmt, &mut visitor)?;
-    Ok(Array::new(visitor.into_state()))
+    Ok(Array::from_vec(visitor.0))
 }
 
 pub(crate) fn buffer_parameters(func: Function) -> Result<Array<Var>> {
-    Ok(Array::new(
+    Ok(Array::from_vec(
         func.params
             .iter()
             .filter(|parameter| analyze::util::is_tensor_var(parameter))
+            .cloned()
             .collect::<Vec<_>>(),
     ))
 }
 
+#[derive(Default)]
+struct PostOrderVisitor {
+    nodes: Vec<ObjectRef>,
+    seen: HashSet<ObjectIdentity>,
+}
+
+#[tvm_ffi::dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
+impl PostOrderVisitor {
+    fn visit_any(
+        &mut self,
+        value: AnyView<'_>,
+        visitor: &mut StructuralVisitorView<'_, Self>,
+    ) -> Result<Option<VisitInterrupt>> {
+        if value.downcast_ref::<Expr>().is_none() && value.downcast_ref::<Stmt>().is_none() {
+            return visitor.default_visit(self, value);
+        }
+        let node = value
+            .downcast_ref::<ObjectRef>()
+            .cloned()
+            .ok_or_else(|| Error::new(VALUE_ERROR, "source node is not an object"))?;
+        if !self.seen.insert(ObjectIdentity::of(&node)) {
+            return Ok(None);
+        }
+        if let Some(interrupt) = visitor.default_visit(self, value)? {
+            return Ok(Some(interrupt));
+        }
+        self.nodes.push(node);
+        Ok(None)
+    }
+}
+
 pub(crate) fn post_order_nodes(node: ObjectRef) -> Result<Array<ObjectRef>> {
-    // One postorder entry per Expr or
-    // Stmt identity, shared subgraphs pruned before descent, and every other
-    // value walked by the default reflected traversal. Source op IDs and cache
-    // rebinding depend on exactly this ordering and DAG rule.
-    type State = (Vec<ObjectRef>, HashSet<ObjectIdentity>);
-    let mut visitor = VisitCallbacks::new(
-        (Vec::new(), HashSet::new()),
-        |value: &StructuralView,
-         visitor: &mut VisitContext<'_, State>|
-         -> Result<Option<VisitInterrupt>> {
-            if value.cast::<Expr>().is_none() && value.cast::<Stmt>().is_none() {
-                return visitor.visit_children();
-            }
-            let node = value
-                .cast::<ObjectRef>()
-                .ok_or_else(|| Error::new(VALUE_ERROR, "source node is not an object", ""))?;
-            if !visitor.state_mut().1.insert(ObjectIdentity::of(&node)) {
-                return Ok(None);
-            }
-            if let Some(interrupt) = visitor.visit_children()? {
-                return Ok(Some(interrupt));
-            }
-            visitor.state_mut().0.push(node);
-            Ok(None)
-        },
-    );
+    // Preserve postorder and prune shared Expr/Stmt identities before descent.
+    let mut visitor = PostOrderVisitor::default();
     structural_visit(&node, &mut visitor)?;
-    Ok(Array::new(visitor.into_state().0))
+    Ok(Array::from_vec(visitor.nodes))
 }
 
 pub(crate) fn substitute(node: ObjectRef, replacements: Map<Var, Expr>) -> Result<ObjectRef> {
@@ -134,7 +158,7 @@ fn ptx_call_parts(call: Call, modifier_count: i64) -> Result<Array<Any>> {
     let metadata_count = usize::try_from(modifier_count)
         .ok()
         .and_then(|count| count.checked_add(1))
-        .ok_or_else(|| Error::new(VALUE_ERROR, "invalid PTX modifier count", ""))?;
+        .ok_or_else(|| Error::new(VALUE_ERROR, "invalid PTX modifier count"))?;
     // Only unwrap the trailing metadata. Operand expressions retain their handles,
     // including StringImm operands. Python keeps the target TVM table validation.
     let tokens = call
@@ -143,15 +167,15 @@ fn ptx_call_parts(call: Call, modifier_count: i64) -> Result<Array<Any>> {
         .skip(call.args.len().saturating_sub(metadata_count))
         .map(|arg| {
             let token = arg
-                .as_node::<StringImmObj>()
+                .downcast_ref::<StringImmObj>()
                 .map(|value| value.value.clone());
             Any::from(token)
         })
         .collect::<Vec<_>>();
-    Ok(Array::new(vec![
+    Ok(Array::from_vec(vec![
         call.op.clone().try_cast::<Op>()?.name.clone().into(),
         call.args.clone().into(),
-        Array::new(tokens).into(),
+        Array::from_vec(tokens).into(),
         call.loc.clone().into(),
         call.ty.clone().into(),
     ]))
@@ -217,7 +241,7 @@ fn payload_value(value: Json) -> Any {
         },
         Json::String(value) => String::from(value).into(),
         Json::Array(values) => {
-            Array::new(values.into_iter().map(payload_value).collect::<Vec<_>>()).into()
+            Array::from_vec(values.into_iter().map(payload_value).collect::<Vec<_>>()).into()
         }
         Json::Object(fields) => fields
             .into_iter()
@@ -270,14 +294,14 @@ fn module_manifest(plans: Vec<analyze::frontend::KernelPlan>) -> (Vec<Any>, Host
     let mut nodes: Vec<Any> = Vec::new();
     for plan in plans {
         kernels.push(plan.manifest);
-        nodes.push(Array::new(plan.nodes).into());
+        nodes.push(Array::from_vec(plan.nodes).into());
     }
     let manifest = json_object(vec![("kernels", Json::Array(kernels))]);
     let contract = host_abi::contract(&manifest);
     (
         vec![
             String::from(manifest.to_string()).into(),
-            Array::new(nodes).into(),
+            Array::from_vec(nodes).into(),
         ],
         contract,
     )
@@ -291,7 +315,7 @@ fn analyze_module(funcs: Array<Function>, schema: Map<String, Any>) -> AResult<A
     let plans = analyze_kernels(&context, &funcs)?;
     let (mut result, contract) = module_manifest(plans);
     result.push(String::from(host_abi::facts_json(&contract).as_str()).into());
-    Ok(Array::new(result))
+    Ok(Array::from_vec(result))
 }
 
 /// `host_abi.build_host_abi(spec)`: the host binding facts `manifest`
@@ -301,9 +325,7 @@ fn module_host_abi(manifest: String) -> AResult<String> {
         serde_json::from_str::<analyze::util::Json>(manifest.as_str()).map_err(|error| {
             Error::new(
                 VALUE_ERROR,
-                &format!("invalid module spec manifest: {error}"),
-                "",
-            )
+                &format!("invalid module spec manifest: {error}"))
         })?;
     Ok(String::from(
         host_abi::facts_json(&host_abi::contract(&parsed)).as_str(),
@@ -366,13 +388,13 @@ fn compile_module(
     };
     let abi_version = match flags.get(&String::from("numsim_abi_version"))? {
         Some(value) => i64::try_from(value)?,
-        None => return Err(Error::new(VALUE_ERROR, "missing numsim_abi_version flag", "").into()),
+        None => return Err(Error::new(VALUE_ERROR, "missing numsim_abi_version flag").into()),
     };
     let analysis_checker = flag_str("analysis_checker")?
         .map(|value| value.as_str().to_owned())
         .filter(|value| !value.is_empty());
     let Some(split_thresholds) = flags.get(&String::from("split_thresholds"))? else {
-        return Err(Error::new(VALUE_ERROR, "missing split_thresholds flag", "").into());
+        return Err(Error::new(VALUE_ERROR, "missing split_thresholds flag").into());
     };
     let split_thresholds = emit::scaffold::SplitThresholds::parse(split_thresholds.try_into()?)?;
     let request = emit::module::ModuleRequest {
@@ -397,7 +419,7 @@ fn compile_module(
     result.push(String::from(host_abi::facts_json(&contract).as_str()).into());
     result.push(template.into());
     result.push(failure.unwrap_or_else(|| Option::<String>::None.into()));
-    Ok(Array::new(result))
+    Ok(Array::from_vec(result))
 }
 
 macro_rules! export_service {

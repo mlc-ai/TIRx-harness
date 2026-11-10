@@ -1,5 +1,8 @@
 //! Shared node access, text, identity and JSON helpers for the native analysis.
 
+use crate::tvm_compat::TryCast;
+use tvm_tirx::tvm_ffi::object::ObjectIdentity;
+use tvm_tirx::tvm_ffi::reflection::FieldGetter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tvm_tirx::ir::TensorRegionObj;
@@ -26,8 +29,7 @@ use tvm_tirx::tirx::Function;
 use tvm_tirx::tirx::TensorTypeObj;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
-    self, Any, AnyView, DLDataType, DLDataTypeExt, Error, FieldGetter, ObjectCore, ObjectIdentity,
-    ObjectRefCast, ObjectRefCore, String as FfiString,
+    self, Any, AnyView, DLDataType, DLDataTypeExt, Error, ObjectCore, ObjectRefCore, String as FfiString,
 };
 
 /// Failure of one native analysis.
@@ -88,12 +90,12 @@ pub fn not_covered<T>(message: impl Into<String>) -> AResult<T> {
 }
 
 pub fn ffi_error(message: &str) -> Error {
-    Error::new(tvm_ffi::VALUE_ERROR, message, "")
+    Error::new(tvm_ffi::VALUE_ERROR, message)
 }
 
 /// Upcast any object handle to a plain `ObjectRef`.
-pub fn oref<T: ObjectRefCast>(value: T) -> ObjectRef {
-    value.try_cast::<ObjectRef>().expect("object handle upcast")
+pub fn oref<T: tvm_ffi::IntoArg<ObjectRef>>(value: T) -> ObjectRef {
+    value.into_owned()
 }
 
 pub fn ident<T: ObjectRefCore>(value: &T) -> ObjectIdentity {
@@ -205,7 +207,7 @@ impl IdSet {
 pub fn kind(node: &ObjectRef) -> Option<&'static str> {
     macro_rules! kinds {
         ($($obj:ty => $name:literal),* $(,)?) => {
-            $(if node.as_node::<$obj>().is_some() { return Some($name); })*
+            $(if node.downcast_ref::<$obj>().is_some() { return Some($name); })*
         };
     }
     kinds!(
@@ -270,7 +272,7 @@ pub fn kind(node: &ObjectRef) -> Option<&'static str> {
 pub fn bitwise_expr(node: &ObjectRef) -> Option<(&'static str, Vec<ObjectRef>)> {
     macro_rules! binary {
         ($ty:ty, $name:literal) => {
-            if let Some(value) = node.as_node::<$ty>() {
+            if let Some(value) = node.downcast_ref::<$ty>() {
                 return Some(($name, vec![oref(value.a.clone()), oref(value.b.clone())]));
             }
         };
@@ -280,7 +282,7 @@ pub fn bitwise_expr(node: &ObjectRef) -> Option<(&'static str, Vec<ObjectRef>)> 
     binary!(BitwiseXorObj, "bitwise_xor");
     binary!(LShiftObj, "shift_left");
     binary!(RShiftObj, "shift_right");
-    node.as_node::<BitwiseNotObj>()
+    node.downcast_ref::<BitwiseNotObj>()
         .map(|value| ("bitwise_not", vec![oref(value.a.clone())]))
 }
 
@@ -322,20 +324,20 @@ pub fn repr_text(node: &ObjectRef) -> AResult<String> {
     Ok(ffi_text(&FfiString::try_from(printed)?))
 }
 
-pub fn repr_of<T: ObjectRefCast + Clone>(value: &T) -> AResult<String> {
-    repr_text(&oref(value.clone()))
+pub fn repr_of<T: ObjectRefCore + Clone>(value: &T) -> AResult<String> {
+    repr_text(&ObjectRef::try_from(Any::from(AnyView::from(value)))?)
 }
 
 pub fn expr_type(node: &ObjectRef) -> Option<Type> {
-    node.as_node::<ExprObj>().map(|expr| expr.ty.clone())
+    node.downcast_ref::<ExprObj>().map(|expr| expr.ty.clone())
 }
 
 pub fn is_pointer_type(ty: &Type) -> bool {
-    ty.as_node::<PtrTypeObj>().is_some()
+    ty.downcast_ref::<PtrTypeObj>().is_some()
 }
 
 pub fn prim_dtype(ty: &Type) -> Option<DLDataType> {
-    ty.as_node::<PrimTypeObj>().map(|prim| prim.dtype)
+    ty.downcast_ref::<PrimTypeObj>().map(|prim| prim.dtype)
 }
 
 /// `"handle"` for pointers, else `str(value.ty.dtype)`.
@@ -343,7 +345,7 @@ pub fn dtype_of(node: &ObjectRef) -> AResult<String> {
     // String immediates are metadata operands.  TVM now gives them the
     // shared ir.StringType; NumSim's call signatures have always represented
     // that non-numeric operand with the empty dtype.
-    if node.as_node::<StringImmObj>().is_some() {
+    if node.downcast_ref::<StringImmObj>().is_some() {
         return Ok(String::new());
     }
     let Some(ty) = expr_type(node) else {
@@ -355,12 +357,12 @@ pub fn dtype_of(node: &ObjectRef) -> AResult<String> {
     if let Some(dtype) = prim_dtype(&ty) {
         return Ok(dtype_text(dtype));
     }
-    if let Some(buffer) = ty.as_node::<TensorTypeObj>() {
+    if let Some(buffer) = ty.downcast_ref::<TensorTypeObj>() {
         // Python renders the PrimType object itself here.
         return repr_of(&buffer.dtype);
     }
     // tvm-tirx types a void call as Missing or None: no dtype, like a void call.
-    if ty.as_node::<MissingTypeObj>().is_some() || ty.as_node::<NoneTypeObj>().is_some() {
+    if ty.downcast_ref::<MissingTypeObj>().is_some() || ty.downcast_ref::<NoneTypeObj>().is_some() {
         return Ok(String::new());
     }
     not_covered("dtype_of on an expression with an opaque type")
@@ -379,28 +381,25 @@ pub trait TensorVarExt {
 impl TensorVarExt for Var {
     fn tensor_type(&self) -> &TensorTypeObj {
         self.ty
-            .as_node::<TensorTypeObj>()
+            .downcast_ref::<TensorTypeObj>()
             .expect("tensor variable type invariant was violated")
     }
 }
 
 /// Whether `var` is a tensor variable: a `Var` whose type is a `TensorType`.
 pub fn is_tensor_var(var: &Var) -> bool {
-    var.ty.as_node::<TensorTypeObj>().is_some()
+    var.ty.downcast_ref::<TensorTypeObj>().is_some()
 }
 
-/// The body of a function definition. A declaration has none, so it cannot be analyzed.
 /// `node` as a `Bind` of a scalar, not a tensor, variable.
 pub fn scalar_bind<T: ObjectRefCore>(node: &T) -> Option<&BindObj> {
-    node.as_node::<BindObj>()
+    node.downcast_ref::<BindObj>()
         .filter(|bind| !is_tensor_var(&bind.var))
 }
 
+/// rc0 functions always carry a sequence body.
 pub fn function_body(func: &Function) -> AResult<Stmt> {
-    match &func.body {
-        Some(body) => Ok(body.clone().into()),
-        None => unsupported("a function declaration has no body to analyze"),
-    }
+    Ok(func.body.clone().into())
 }
 
 pub fn as_buffer(node: &ObjectRef) -> Option<Var> {
@@ -412,9 +411,7 @@ pub fn tensor_var(node: &ObjectRef) -> AResult<Var> {
     as_buffer(node).ok_or_else(|| {
         Failure::Ffi(Error::new(
             tvm_ffi::TYPE_ERROR,
-            "expected a Var whose type is a TensorType",
-            "",
-        ))
+            "expected a Var whose type is a TensorType"))
     })
 }
 
@@ -449,13 +446,13 @@ pub fn prim(node: &ObjectRef) -> AResult<Expr> {
 
 /// An integer constant, checked as the old `IntImm::new(dtype, value)` was.
 pub fn int_const(dtype: &str, value: i64) -> tvm_ffi::Result<IntImm> {
-    IntImm::from_dtype(DLDataType::try_from_str(dtype)?, value, Location::unknown())
+    IntImm::new(prim_type(dtype)?, value, tvm_tirx::ir::UNKNOWN_LOC)
 }
 
 /// A floating-point constant, checked as the old `FloatImm::new(dtype, value)` was.
 /// The primitive type of `dtype`, checked as the old `PrimType::new(dtype)` was.
 pub fn prim_type(dtype: &str) -> tvm_ffi::Result<PrimType> {
-    PrimType::from_dtype(DLDataType::try_from_str(dtype)?)
+    PrimType::try_from(DLDataType::try_from_str(dtype)?)
 }
 
 /// `value` as a primitive expression: an `Expr` whose type is a `PrimType`.
@@ -464,9 +461,7 @@ pub fn prim_expr(value: impl Into<Any>) -> AResult<Expr> {
     if prim_dtype(&expr.ty).is_none() {
         return Err(Failure::Ffi(Error::new(
             tvm_ffi::TYPE_ERROR,
-            "expected an expression whose type is a PrimType",
-            "",
-        )));
+            "expected an expression whose type is a PrimType")));
     }
     Ok(expr)
 }
@@ -483,12 +478,12 @@ impl PrimExprExt for Expr {
 }
 
 pub fn int_imm(node: &ObjectRef) -> Option<i64> {
-    node.as_node::<IntImmObj>()
+    node.downcast_ref::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
 }
 
 pub fn int_imm_expr(expr: &Expr) -> Option<i64> {
-    expr.as_node::<IntImmObj>()
+    expr.downcast_ref::<IntImmObj>()
         .and_then(|imm| int_value(imm).ok())
 }
 
@@ -497,7 +492,7 @@ pub fn int_imm_expr(expr: &Expr) -> Option<i64> {
 /// tvm-tirx takes the ranges as one constraint context, which replaces the facts of any
 /// context synchronized before.
 pub fn bind_ranges(analyzer: &Analyzer, ranges: impl IntoIterator<Item = (Var, Range)>) -> AResult<()> {
-    let context: ObjectRef = tvm_ffi::cached_global_func!("sym.ConstraintContext")
+    let context: tvm_tirx::sym::ConstraintContext = tvm_ffi::cached_global_func!("sym.ConstraintContext")
         .call_tuple((None::<ObjectRef>, 0_i64))?
         .try_into()?;
     for (var, range) in ranges {
@@ -510,8 +505,9 @@ pub fn bind_ranges(analyzer: &Analyzer, ranges: impl IntoIterator<Item = (Var, R
     Ok(())
 }
 
-pub fn simplify(analyzer: &Analyzer, expr: &Expr) -> AResult<Expr> {
-    Ok(analyzer.simplify(expr, 2)?)
+pub fn simplify<T: ObjectRefCore>(analyzer: &Analyzer, expr: &T) -> AResult<Expr> {
+    let expr = tvm_tirx::ir::PrimExpr::try_from(Any::from(AnyView::from(expr)))?;
+    Ok(analyzer.simplify(&expr, 2)?.into())
 }
 
 pub fn static_int(
@@ -528,7 +524,7 @@ pub fn static_int(
 }
 
 pub fn static_string(value: &ObjectRef, field: &str) -> AResult<String> {
-    match value.as_node::<StringImmObj>() {
+    match value.downcast_ref::<StringImmObj>() {
         Some(imm) => Ok(ffi_text(&imm.value)),
         None => unsupported(format!(
             "{field} must be a static string, got {}",
@@ -540,7 +536,7 @@ pub fn static_string(value: &ObjectRef, field: &str) -> AResult<String> {
 /// Source span JSON as `source_map.source_span_from_tvm` serializes it.
 pub fn span_json(span: Option<&Location>) -> Option<Json> {
     let span = span?;
-    if span.as_node::<CallSiteLocObj>().is_some() {
+    if span.downcast_ref::<CallSiteLocObj>().is_some() {
         // A CallSiteLoc chain flattens to its source locations, outermost call site first.
         let mut leaves = Vec::new();
         call_site_leaves(span, &mut leaves);
@@ -552,7 +548,7 @@ pub fn span_json(span: Option<&Location>) -> Option<Json> {
             ("spans", Json::Array(leaves)),
         ]));
     }
-    let leaf = span.as_node::<SourceLocObj>()?;
+    let leaf = span.downcast_ref::<SourceLocObj>()?;
     let source_name = ffi_text(&leaf.source_name.name);
     if source_name.is_empty() {
         return None;
@@ -577,7 +573,7 @@ pub fn span_json(span: Option<&Location>) -> Option<Json> {
 }
 
 fn call_site_leaves(location: &Location, leaves: &mut Vec<Json>) {
-    if let Some(call_site) = location.as_node::<CallSiteLocObj>() {
+    if let Some(call_site) = location.downcast_ref::<CallSiteLocObj>() {
         call_site_leaves(&call_site.caller, leaves);
         call_site_leaves(&call_site.callee, leaves);
     } else if let Some(leaf) = span_json(Some(location)) {
@@ -586,10 +582,10 @@ fn call_site_leaves(location: &Location, leaves: &mut Vec<Json>) {
 }
 
 pub fn node_span(node: &ObjectRef) -> Option<Location> {
-    if let Some(expr) = node.as_node::<ExprObj>() {
+    if let Some(expr) = node.downcast_ref::<ExprObj>() {
         return Some(expr.loc.clone());
     }
-    node.as_node::<StmtObj>().map(|stmt| stmt.loc.clone())
+    node.downcast_ref::<StmtObj>().map(|stmt| stmt.loc.clone())
 }
 
 /// Python `str.capitalize()`.
@@ -634,4 +630,9 @@ pub fn sorted_unique<I: IntoIterator<Item = String>>(values: I) -> Vec<String> {
     items.sort();
     items.dedup();
     items
+}
+
+/// Require a scalar primitive expression at rc0's typed arithmetic boundary.
+pub fn primitive<T: tvm_ffi::IntoArg<Expr>>(value: T) -> tvm_ffi::Result<tvm_tirx::ir::PrimExpr> {
+    tvm_tirx::ir::PrimExpr::try_from(Any::from(value.into_owned()))
 }

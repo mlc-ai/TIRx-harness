@@ -3,10 +3,11 @@
 //! The text snapshots pin the emitted text, so temp-name counters, capture
 //! attempts and restore points keep their order.
 
+use tvm_tirx::tvm_ffi::object::ObjectIdentity;
 use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{Map, ObjectIdentity, ObjectRefCore};
+use tvm_tirx::tvm_ffi::{Map, ObjectRefCore};
 use crate::analyze::util::function_body;
 use crate::analyze::util::TensorVarExt;
 
@@ -331,7 +332,7 @@ impl<'a> Emitter<'a> {
         let nodes = &plan.nodes;
         let buffer_bindings = &plan.buffer_bindings;
         let bindings = bind_map(&plan.statements);
-        let params: Vec<Var> = func.params.iter().collect();
+        let params: Vec<Var> = func.params.iter().cloned().collect();
         let warps_per_warpgroup = plan.topology.warps_per_warpgroup;
         let warps_per_cta = plan.topology.warps_per_cta;
         // `LaunchTopology.threads_per_warpgroup` is a property, not a manifest field.
@@ -454,7 +455,7 @@ impl<'a> Emitter<'a> {
                 let Some(variable) = super::analyze::util::as_var(&extent_ref) else {
                     continue;
                 };
-                let axis_extent = buffer.tensor_type().shape.get(axis)?;
+                let axis_extent = buffer.tensor_type().shape.get(axis).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?;
                 let dtype = prim_dtype(&axis_extent.ty)
                     .map(dtype_text)
                     .unwrap_or_default();
@@ -802,7 +803,7 @@ fn validate_integer_expression(
         }
         return Ok(());
     }
-    if let Some(cast) = expression.as_node::<tvm_tirx::ir::prim::CastObj>() {
+    if let Some(cast) = expression.downcast_ref::<tvm_tirx::ir::prim::CastObj>() {
         return validate_integer_expression(&oref(cast.value.clone()), variable_allowed, field);
     }
     if !crate::schema::INTEGER_BINARY_NODE_KINDS.contains(&kind) {

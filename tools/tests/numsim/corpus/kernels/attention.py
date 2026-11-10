@@ -299,6 +299,7 @@ def prepare_flash_attention4_case(
     }
     return NumSimCase(
         kernel=flash_attention4.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             batch_size=batch_size,
             seq_len=seq_len,
             num_qo_heads=num_qo_heads,
@@ -392,6 +393,7 @@ def prepare_flash_attention_backward_case(*, is_causal: bool, seed: int = 0) -> 
     }
     return NumSimCase(
         kernel=flash_attention_backward.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             batch_size=batch_size,
             seq_len=seq_len,
             num_heads=num_heads,
@@ -445,6 +447,7 @@ def prepare_flash_attention_backward_persistent_analysis_case() -> NumSimCase:
     )
     return NumSimCase(
         kernel=flash_attention_backward.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             batch_size=batch_size,
             seq_len=seq_len,
             num_heads=num_heads,

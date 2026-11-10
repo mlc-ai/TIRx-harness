@@ -65,6 +65,7 @@ from tests.numsim.runtime.test_sparse_mma_forms import (
     sparse_tf32_m16n8k8,
 )
 from tirx_harness import numsim
+from tvm_tirx.ir import PrimType
 from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
@@ -317,7 +318,7 @@ _KERNELS = (
 
 
 def _zero_argument(parameter: Any) -> Any:
-    if parameter.is_scalar():
+    if isinstance(parameter.ty, PrimType) and parameter.ty.is_scalar():
         return 0
     return np.zeros(
         tuple(int(extent) for extent in parameter.shape),

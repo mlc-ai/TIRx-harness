@@ -15,7 +15,7 @@ use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 fn is_addr_call(value: &ObjectRef) -> AResult<bool> {
     use tvm_tirx::tvm_ffi::ObjectRefCore;
-    let Some(call) = value.as_node::<tvm_tirx::ir::CallObj>() else {
+    let Some(call) = value.downcast_ref::<tvm_tirx::ir::CallObj>() else {
         return Ok(false);
     };
     Ok(crate::analyze::buffers::call_op_name(call)?.as_deref() == Some("tirx.ptx.addr"))
@@ -28,7 +28,7 @@ pub fn ptx_addr_parts(
     node: &ObjectRef,
 ) -> AResult<(ObjectRef, ObjectRef, i64)> {
     use tvm_tirx::tvm_ffi::ObjectRefCore;
-    let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
+    let Some(call) = node.downcast_ref::<tvm_tirx::ir::CallObj>() else {
         return Err(Failure::Ffi(ffi_error(
             "PTX address wrapper expects a tirx Call",
         )));
@@ -164,7 +164,7 @@ pub fn consumed_calls(ctx: &Ctx, nodes: &[ObjectRef]) -> AResult<IdSet> {
                 continue;
             }
             for value in slot.values.iter().flatten() {
-                if let Some(inner) = value.as_node::<CallObj>() {
+                if let Some(inner) = value.downcast_ref::<CallObj>() {
                     if call_op_name(inner)?.as_deref() == Some("tirx.ptx.addr") {
                         consumed.add(value.clone());
                     }

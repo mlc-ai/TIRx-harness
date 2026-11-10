@@ -44,7 +44,7 @@ def _kernel_with_fixed_sm_count(name: str, **config: Any):
     previous = module._SM_COUNT_CACHE
     module._SM_COUNT_CACHE = 148
     try:
-        return module.get_kernel(**config)
+        return module.get_kernel(backend_config={"cuda": {"arch": "sm_100a"}}, **config)
     finally:
         module._SM_COUNT_CACHE = previous
 

@@ -26,7 +26,11 @@ def prepare_merge_state_case() -> NumSimCase:
     ).astype(dtype)
     return NumSimCase(
         kernel=module.get_kernel(
-            dtype=dtype.name, seq_len=shape[0], num_heads=shape[1], head_dim=shape[2]
+            backend_config={"cuda": {"arch": "sm_100a"}},
+            dtype=dtype.name,
+            seq_len=shape[0],
+            num_heads=shape[1],
+            head_dim=shape[2],
         ),
         args={
             "v_a": a.reshape(-1),

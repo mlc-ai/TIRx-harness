@@ -406,12 +406,11 @@ def _compile_gpu(prim_func: Any, *, arch: str) -> Any:
     import tvm_tirx
 
     target = tvm_tirx.target.Target({"kind": "cuda", "arch": arch})
-    with target:
-        return tvm_tirx.compile(
-            tvm_tirx.IRModule({"main": prim_func}),
-            target=target,
-            pipeline="tirx",
-        )
+    return tvm_tirx.compile(
+        tvm_tirx.IRModule({"main": prim_func}),
+        target=target,
+        pipeline="tirx",
+    )
 
 
 def run_gpu_primfunc(

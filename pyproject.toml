@@ -4,7 +4,7 @@ requires = [
   "setuptools-scm>=8",
   "apache-tvm-ffi==0.1.15.post2",
   # The tvm-tirx crate links libtvm_tirx_compiler, found through tvm-tirx-config.
-  "apache-tvm-tirx==0.1.0a5",
+  "apache-tvm-tirx==0.1.0rc0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -30,15 +30,15 @@ test = ["pytest>=8", "pytest-xdist>=3", "setuptools>=64", "pip>=25.1", "ml-dtype
 [dependency-groups]
 # Shared compiler/runtime requirements. Keep both installation groups standalone.
 common = [
-  "apache-tvm-tirx==0.1.0a5",
+  "apache-tvm-tirx==0.1.0rc0",
   "apache-tvm-ffi==0.1.15.post2",
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
   # The TVM IKET profile checks these exact versions.
   "nvidia-cuda-nvrtc==13.2.78",
   "nvidia-cuda-nvdisasm==13.3.73",
-  # No tvm-tirx based release is on PyPI yet, so this pins its main branch.
-  "tirx-kernels @ git+https://github.com/mlc-ai/tirx-kernels@7ab6f5252dcb27563680c3d140169e4cef6e49b3",
+  # Pin the rc0-compatible kernel migration until it is available upstream.
+  "tirx-kernels @ git+https://github.com/MasterJH5574/TIRx-kernels@185ee63fcf254a6edd2e6634772a41af159414ef",
   "kcoral>=0.1.0",
 ]
 # setup.py also publishes this group as the package's default dependencies.

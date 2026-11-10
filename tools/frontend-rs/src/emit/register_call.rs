@@ -177,7 +177,7 @@ pub fn require_register_call(decoded: &DecodedPtx, allow_sinks: bool) -> AResult
                 ));
             }
             if slot.rw == "w" || slot.rw == "rw" {
-                if value.as_node::<TensorLoadObj>().is_none() {
+                if value.downcast_ref::<TensorLoadObj>().is_none() {
                     return unsupported(format!(
                         "{op_name}.{} must be a TensorLoad lvalue",
                         slot.name

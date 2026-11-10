@@ -128,7 +128,11 @@ def _prepare(name, config, launch=None):
         )
         case = module.prepare_data(**config)
         expected = module._reference_output(case)
-        run = launch(module, case) if launch else module._launch_state(case)
+        run = (
+            launch(module, case)
+            if launch
+            else module._launch_state(case, backend_config={"cuda": {"arch": "sm_100a"}})
+        )
         calls.clear()
         run()
 
@@ -206,7 +210,9 @@ def prepare_native_msa_case(*, build_case=_prepare):
             kv_layout="flat",
             kv_dtype="bfloat16",
         ),
-        lambda module, case: module.setup(case, 32, 1),
+        lambda module, case: module.setup(
+            case, 32, 1, backend_config={"cuda": {"arch": "sm_100a"}}
+        ),
     )
 
 
