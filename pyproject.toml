@@ -37,9 +37,8 @@ common = [
   # The TVM IKET profile checks these exact versions.
   "nvidia-cuda-nvrtc==13.2.78",
   "nvidia-cuda-nvdisasm==13.3.73",
-  # Pin the rc0-compatible kernel migration until it is available upstream.
-  "tirx-kernels @ git+https://github.com/MasterJH5574/TIRx-kernels@185ee63fcf254a6edd2e6634772a41af159414ef",
-  "kcoral>=0.1.0",
+  "tirx-kernels==0.1.3rc0",
+  "kcoral>=0.1.2rc0",
 ]
 # setup.py also publishes this group as the package's default dependencies.
 harness = [

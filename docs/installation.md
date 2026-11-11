@@ -53,22 +53,6 @@ uv sync --locked
 source .venv/bin/activate
 ```
 
-### rc0 compiler migration
-
-This checkout pins `apache-tvm-tirx==0.1.0rc0`. Its Rust frontend uses the
-matching compiler source revision, since the published `tvm-tirx` Rust alpha
-crate does not contain the rc0 bindings despite sharing the same crate version.
-Rebuild the harness when updating that compiler or native frontend.
-
-The pinned `tirx-kernels` revision includes the matching explicit-target and
-backend-configuration changes. Installation currently fetches that revision
-from the migration fork until it is available upstream.
-
-The released `kcoral[server]` dependency also still selects full TVM. For an rc0
-server, use the updated kcoral checkout and its environment instead of the
-harness's `server` group until that kcoral update is released. The harness client
-can use that server remotely without installing server dependencies locally.
-
 ### Verify the installation
 
 After any of these methods, check imports (this does not run checks or GPU kernels):
@@ -78,9 +62,6 @@ python -c "import tvm_tirx, tvm_ffi, tirx_kernels.tirx_lite, tirx_harness; print
 ```
 
 ## Install kcoral server dependencies
-
-For rc0, use the updated kcoral checkout as described above. The following
-commands select the published server dependency, which still requires full TVM.
 
 From the repository root, run `python -m pip install --group server`, or
 `uv sync --locked --only-group server` and activate `.venv`. These install only
