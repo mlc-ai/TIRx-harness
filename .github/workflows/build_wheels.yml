@@ -103,7 +103,7 @@ jobs:
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: >-
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh &&
-            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.89.0
+            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.95.0
           CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH" CARGO_BUILD_JOBS="2"'
           # tvm_ffi and tvm_tirx load their own globally visible libraries before
           # the frontend, which links both without an rpath. Bundling another copy

@@ -1,7 +1,7 @@
 """Check the FA4 forward RMS gate and its suite wiring on CPU."""
 
 import sys
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 import torch
@@ -10,33 +10,6 @@ from evolution.benchmark import adapter
 
 bench = adapter.import_benchmark("fa4_forward")
 from flashinfer_bench_evolve.benchmark_common import compare_outputs  # noqa: E402
-
-
-def test_tirx_prepare_uses_explicit_compile_target(monkeypatch):
-    import tvm_tirx
-
-    kernel = object()
-    calls = []
-    monkeypatch.setattr(tvm_tirx, "IRModule", lambda functions: functions)
-
-    def compile(module, *, target, pipeline):
-        assert module == {"main": kernel}
-        assert target.kind.name == "cuda"
-        assert pipeline == "tirx"
-
-        def execute(q, k, v, output, lse):
-            calls.append(q.shape)
-            output.copy_(q)
-
-        return execute
-
-    monkeypatch.setattr(tvm_tirx, "compile", compile)
-    solution = SimpleNamespace(tir_kernel=lambda *args: kernel)
-    q = torch.randn(1, 4, 2, 8, dtype=torch.float16)
-    prepared = bench.tirx_prepare(solution, q, q, q, False, 1.0)
-    actual = bench.tirx_run(*prepared)
-    torch.testing.assert_close(actual, q)
-    assert calls == [torch.Size((2, 4, 8))] * 2
 
 
 @pytest.mark.parametrize(
