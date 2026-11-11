@@ -48,15 +48,15 @@ wheels = [
 
 [[package]]
 name = "apache-tvm-ffi"
-version = "0.1.15.post2"
+version = "0.1.16rc4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/8f/2fcd88ce2f43dd2c1945c6613356a9bc1f5fdbe6e37080d34d2b980ad9f6/apache_tvm_ffi-0.1.15.post2.tar.gz", hash = "sha256:909be9ef5af07726aa9afd38a3111abc4d86cfd5927ebedfa9166232ce7d287b", size = 3363431, upload-time = "2026-10-29T21:13:25.144Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/90/530056761f12601c143287834aaf6b9b18a9a58959db31b68943c849e59f/apache_tvm_ffi-0.1.16rc4.tar.gz", hash = "sha256:b3f096d007fb42d6d8d2a5b996dfa438dd4554d71862f16962361922f2b39608", size = 2365853, upload-time = "2026-11-09T08:50:59.481Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/26/5f33831621f3bb493556ad508ee419ba26e134356ecfdb2ca5415f9bbe5c/apache_tvm_ffi-0.1.15.post2-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:059eed9bfc94bcd41650fb8eefde74040a1bc7e7b1a6f0a8ff897b02b118875b", size = 3312304, upload-time = "2026-10-29T21:12:19.574Z" },
-    { url = "https://files.pythonhosted.org/packages/41/fb/70cc7fc2ab86b805089ff165e306a3ff550baa3672271a9d9a23f14ce6b6/apache_tvm_ffi-0.1.15.post2-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:eae72eb5bcbbddbc68d54eb6c16af860c628ca2f2b02cc4af2693e01a8186f73", size = 3310288, upload-time = "2026-10-29T21:12:29.641Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/57/09d0ac959b8ab3e8a1b32a417bb9912734aba11a45931c052ec0d67e1c66/apache_tvm_ffi-0.1.16rc4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6869c8c0004d1896910986b1ec1b6460225465ff340b72058278cd35d6f52629", size = 3533013, upload-time = "2026-11-09T08:50:06.546Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/86/0830a7f44efdf3ad7a73fc2062cec5c6535e2872b3f8ea2ea18b8bf2ce1b/apache_tvm_ffi-0.1.16rc4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ab931aa5f68575d38429ea646aec44cfb4febc1e7a299814530cca95dd46261e", size = 3531683, upload-time = "2026-11-09T08:50:14.366Z" },
 ]
 
 [package.optional-dependencies]
@@ -1502,7 +1502,7 @@ server = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
+    { name = "apache-tvm-ffi", specifier = "==0.1.16rc4" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0rc0" },
     { name = "kcoral", specifier = ">=0.1.2rc0" },
     { name = "ml-dtypes", marker = "extra == 'test'" },
@@ -1523,7 +1523,7 @@ provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 benchmark = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
+    { name = "apache-tvm-ffi", specifier = "==0.1.16rc4" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0rc0" },
     { name = "cupti-python", specifier = "==13.2.0" },
     { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },
@@ -1546,7 +1546,7 @@ benchmark = [
     { name = "triton", specifier = "==3.8.0" },
 ]
 common = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
+    { name = "apache-tvm-ffi", specifier = "==0.1.16rc4" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0rc0" },
     { name = "kcoral", specifier = ">=0.1.2rc0" },
     { name = "numpy", specifier = ">=2.5.3" },
@@ -1556,7 +1556,7 @@ common = [
     { name = "tirx-kernels", specifier = "==0.1.3rc0" },
 ]
 harness = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
+    { name = "apache-tvm-ffi", specifier = "==0.1.16rc4" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0rc0" },
     { name = "kcoral", specifier = ">=0.1.2rc0" },
     { name = "numpy", specifier = ">=2.5.3" },
@@ -1569,7 +1569,7 @@ harness = [
     { name = "tirx-kernels", specifier = "==0.1.3rc0" },
 ]
 server = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.15.post2" },
+    { name = "apache-tvm-ffi", specifier = "==0.1.16rc4" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0rc0" },
     { name = "cupti-python", specifier = "==13.2.0" },
     { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },

@@ -1,4 +1,4 @@
-//! Record the locked tvm-tirx version and revision for the frontend identity.
+//! Record the locked tvm-tirx version for the frontend identity.
 
 use std::env;
 use std::fs;
@@ -19,10 +19,5 @@ fn main() {
         })
     };
     let version = field("version").expect("tvm-tirx lock entry has no version");
-    let source = field("source").expect("tvm-tirx lock entry has no source");
-    let revision = source
-        .rsplit_once('#')
-        .map(|(_, revision)| revision)
-        .expect("tvm-tirx must be pinned to a git revision");
-    println!("cargo:rustc-env=NUMSIM_TVM_TIRX_VERSION={version}@{revision}");
+    println!("cargo:rustc-env=NUMSIM_TVM_TIRX_VERSION={version}");
 }

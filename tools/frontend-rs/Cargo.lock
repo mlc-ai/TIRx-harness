@@ -159,8 +159,9 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-tirx.git?rev=ba2310de3ca9607db77b369b0857f0f8d293d34b#ba2310de3ca9607db77b369b0857f0f8d293d34b"
+version = "0.1.16-rc4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ca522e16d293eca64cb68b79c9bce077b02ba5cd89503bfbf251b7f95900ad8"
 dependencies = [
  "linkme",
  "paste",
@@ -170,8 +171,9 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi-macros"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-tirx.git?rev=ba2310de3ca9607db77b369b0857f0f8d293d34b#ba2310de3ca9607db77b369b0857f0f8d293d34b"
+version = "0.1.16-rc4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83886b1859a46f3e3b8a62ca8955154e5617d8c9f66a75cc74b0f1ab1d9a8782"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -181,13 +183,15 @@ dependencies = [
 
 [[package]]
 name = "tvm-ffi-sys"
-version = "0.1.0-alpha.0"
-source = "git+https://github.com/apache/tvm-tirx.git?rev=ba2310de3ca9607db77b369b0857f0f8d293d34b#ba2310de3ca9607db77b369b0857f0f8d293d34b"
+version = "0.1.16-rc4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15c95844a6dc3de79fce2111c0bcafbe60e2dc7fa352efac2cb37b2a743cbca7"
 
 [[package]]
 name = "tvm-tirx"
-version = "0.1.0-alpha.5"
-source = "git+https://github.com/apache/tvm-tirx.git?rev=ba2310de3ca9607db77b369b0857f0f8d293d34b#ba2310de3ca9607db77b369b0857f0f8d293d34b"
+version = "0.1.0-rc1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6436170f2a675554bb1664d17cc3da49674b09622675fd06589a93dbef28d214"
 dependencies = [
  "tvm-ffi",
 ]

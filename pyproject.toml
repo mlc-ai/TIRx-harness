@@ -2,7 +2,7 @@
 requires = [
   "setuptools>=77.0.3",
   "setuptools-scm>=8",
-  "apache-tvm-ffi==0.1.15.post2",
+  "apache-tvm-ffi==0.1.16rc4",
   # The tvm-tirx crate links libtvm_tirx_compiler, found through tvm-tirx-config.
   "apache-tvm-tirx==0.1.0rc0",
 ]
@@ -30,8 +30,9 @@ test = ["pytest>=8", "pytest-xdist>=3", "setuptools>=64", "pip>=25.1", "ml-dtype
 [dependency-groups]
 # Shared compiler/runtime requirements. Keep both installation groups standalone.
 common = [
+  # rc0 and rc1 share compiler code; retain rc0 for kcoral[server] compatibility.
   "apache-tvm-tirx==0.1.0rc0",
-  "apache-tvm-ffi==0.1.15.post2",
+  "apache-tvm-ffi==0.1.16rc4",
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
   # The TVM IKET profile checks these exact versions.

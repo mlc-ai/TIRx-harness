@@ -41,8 +41,8 @@ def test_wheel_contains_the_runtime_rust_engine(tmp_path):
     # The frontend builds with --locked, so the archive must carry the lock that pins tvm-tirx.
     lock = tomllib.loads((project / "tools" / "frontend-rs" / "Cargo.lock").read_text())
     binding = next(p for p in lock["package"] if p["name"] == "tvm-tirx")
-    revision = binding["source"].rsplit("#", 1)[1]
-    bindings = f"{binding['version']}@{revision}"
+    assert binding["source"] == "registry+https://github.com/rust-lang/crates.io-index"
+    bindings = binding["version"]
 
     wheel_dir = tmp_path / "wheel"
     wheel_dir.mkdir()
