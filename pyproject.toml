@@ -2,9 +2,9 @@
 requires = [
   "setuptools>=77.0.3",
   "setuptools-scm>=8",
-  "apache-tvm-ffi==0.1.16rc4",
+  "apache-tvm-ffi==0.1.16",
   # The tvm-tirx crate links libtvm_tirx_compiler, found through tvm-tirx-config.
-  "apache-tvm-tirx==0.1.0rc0",
+  "apache-tvm-tirx==0.1.0rc2",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -30,23 +30,23 @@ test = ["pytest>=8", "pytest-xdist>=3", "setuptools>=64", "pip>=25.1", "ml-dtype
 [dependency-groups]
 # Shared compiler/runtime requirements. Keep both installation groups standalone.
 common = [
-  # rc0 and rc1 share compiler code; retain rc0 for kcoral[server] compatibility.
-  "apache-tvm-tirx==0.1.0rc0",
-  "apache-tvm-ffi==0.1.16rc4",
+  "apache-tvm-tirx==0.1.0rc2",
+  "apache-tvm-ffi==0.1.16",
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
   # The TVM IKET profile checks these exact versions.
   "nvidia-cuda-nvrtc==13.2.78",
   "nvidia-cuda-nvdisasm==13.3.73",
-  "tirx-kernels==0.1.3rc0",
-  "kcoral>=0.1.2rc0",
+  "tirx-kernels==0.1.3rc1",
+  "kcoral>=0.1.2rc1",
 ]
 # setup.py also publishes this group as the package's default dependencies.
 harness = [
   { include-group = "common" },
   "pypandoc-binary>=1.17",
   "pyyaml>=6.0.3",
-  "threadpoolctl>=3.6,<4",
+  # 3.8 makes OpenBLAS limits thread-owned; overlapping calls restore on another thread.
+  "threadpoolctl>=3.6,<3.8",
 ]
 benchmark = [
   { include-group = "common" },
