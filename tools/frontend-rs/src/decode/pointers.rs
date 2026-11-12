@@ -5,7 +5,7 @@ use tvm_tirx::tvm_ffi::object::ObjectRef;
 
 use super::ptx::DecodedPtx;
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::util::{oref, AResult};
+use crate::analyze::util::{ffi_error, oref, AResult};
 
 pub enum PointerCall {
     Address(ObjectRef),
@@ -18,7 +18,7 @@ pub enum PointerCall {
 pub fn address_operand(call: &CallObj) -> AResult<Option<ObjectRef>> {
     Ok(
         if call_op_name(call)?.as_deref() == Some("tirx.address_of") {
-            call.args.get(0).ok().map(oref)
+            call.args.get(0).map(oref)
         } else {
             None
         },
@@ -31,7 +31,7 @@ pub fn pointer_call(call: &CallObj) -> AResult<PointerCall> {
     let name = call_op_name(call)?;
     Ok(match name.as_deref() {
         Some("tirx.address_of") if call.args.len() == 1 => {
-            PointerCall::Address(oref(call.args.get(0)?))
+            PointerCall::Address(oref(call.args.get(0).ok_or_else(|| ffi_error("missing pointer argument 0"))?))
         }
         Some(
             "tirx.reinterpret"
@@ -41,9 +41,9 @@ pub fn pointer_call(call: &CallObj) -> AResult<PointerCall> {
             | "tirx.cuda.cvta_generic_to_shared"
             | "tirx.cuda.smem_addr_from_u64"
             | "tirx.cuda.sm100_mbarrier_addr",
-        ) if !call.args.is_empty() => PointerCall::Forward(oref(call.args.get(0)?)),
+        ) if !call.args.is_empty() => PointerCall::Forward(oref(call.args.get(0).ok_or_else(|| ffi_error("missing pointer argument 0"))?)),
         Some("prim.if_then_else") if call.args.len() == 3 => {
-            PointerCall::Select(oref(call.args.get(1)?), oref(call.args.get(2)?))
+            PointerCall::Select(oref(call.args.get(1).ok_or_else(|| ffi_error("missing pointer argument 1"))?), oref(call.args.get(2).ok_or_else(|| ffi_error("missing pointer argument 2"))?))
         }
         _ => PointerCall::Opaque,
     })
@@ -82,11 +82,11 @@ mod tests {
     use super::super::ptx::PtxOperand;
     use super::*;
     use crate::analyze::util::{int_const, prim_type, same};
-    use tvm_tirx::ir::{Call, Expr, Location, Op, Type};
+    use tvm_tirx::ir::{Call, Expr, Op, Type};
 
     fn call(name: &str, args: Vec<Expr>) -> Call {
         let ty: Type = prim_type("uint64").unwrap().into();
-        Call::new(Some(&ty), Op::get(name).unwrap(), args, None, Vec::<Type>::new(), Location::unknown())
+        Call::new(Some(&ty), Op::get(name).unwrap(), args, None, Vec::<Type>::new(), tvm_tirx::ir::UNKNOWN_LOC)
             .unwrap()
     }
 

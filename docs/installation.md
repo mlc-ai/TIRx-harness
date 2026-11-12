@@ -15,7 +15,7 @@ To run an exported kernel with `tvm-ffi`, follow
 - Linux x86_64, Python 3.12 or 3.13, and pip 25.1 or later.
 - The CUDA Toolkit (`nvcc`, `ptxas`) where GPU kernels are compiled, and a
   compatible NVIDIA driver where they are run.
-- Cargo, **Rust 1.89.0 or later**, and a C linker for numerical simulation and
+- Cargo, **Rust 1.95.0 or later**, and a C linker for numerical simulation and
   correctness checks with either installation method.
 
 ## Install Python packages

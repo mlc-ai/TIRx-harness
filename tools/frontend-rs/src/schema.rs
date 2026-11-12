@@ -62,14 +62,14 @@ fn vector_dtype_abis(
     let items = Map::<FfiString, Array<Any>>::try_from(value)?;
     let mut abis = HashMap::new();
     for (dtype, abi) in items.iter() {
-        let element_dtype = FfiString::try_from(abi.get(0)?)?;
+        let element_dtype = FfiString::try_from(abi.get(0).ok_or_else(|| ffi_error("vector dtype ABI requires four fields"))?)?;
         abis.insert(
             dtype.as_str().to_owned(),
             (
                 element_dtype.as_str().to_owned(),
-                i64::try_from(abi.get(1)?)?,
-                i64::try_from(abi.get(2)?)?,
-                i64::try_from(abi.get(3)?)?,
+                i64::try_from(abi.get(1).ok_or_else(|| ffi_error("vector dtype ABI requires four fields"))?)?,
+                i64::try_from(abi.get(2).ok_or_else(|| ffi_error("vector dtype ABI requires four fields"))?)?,
+                i64::try_from(abi.get(3).ok_or_else(|| ffi_error("vector dtype ABI requires four fields"))?)?,
             ),
         );
     }

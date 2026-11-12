@@ -75,6 +75,6 @@ impl ExpressionBindings {
                 );
             }
         }
-        Ok(Analyzer::new().simplify(&current, 2)?)
+        super::util::simplify(&Analyzer::new(), &current)
     }
 }

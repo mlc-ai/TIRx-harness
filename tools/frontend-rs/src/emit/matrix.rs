@@ -191,7 +191,7 @@ pub fn resolve_legacy_matrix_call(
     node: &ObjectRef,
     op_name: &str,
 ) -> AResult<LegacyMatrixCall> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Err(Failure::Ffi(ffi_error(&format!(
             "{op_name} lowering received a non-Call node"
         ))));
@@ -593,10 +593,10 @@ fn is_typed_positive_zero_literal(value: &ObjectRef, dtype: &str) -> AResult<boo
     if !allowed {
         return Ok(false);
     }
-    if let Some(imm) = value.as_node::<IntImmObj>() {
+    if let Some(imm) = value.downcast_ref::<IntImmObj>() {
         return Ok(int_value(imm)? == 0);
     }
-    if let Some(imm) = value.as_node::<FloatImmObj>() {
+    if let Some(imm) = value.downcast_ref::<FloatImmObj>() {
         let scalar = imm.value;
         return Ok(scalar == 0.0 && scalar.is_sign_positive());
     }
@@ -878,7 +878,7 @@ impl<'a> Emitter<'a> {
 
     fn matrix_named_pointer(&mut self, expression: &ObjectRef, label: &str) -> AResult<String> {
         let mut buffer = projected_buffer(expression)?;
-        if buffer.is_none() && expression.as_node::<VarObj>().is_some() {
+        if buffer.is_none() && expression.downcast_ref::<VarObj>().is_some() {
             for (candidate, _) in &self.buffers {
                 if same(&self.buffer_bindings.storage_key(candidate)?, expression) {
                     buffer = Some(candidate.clone());
@@ -915,13 +915,13 @@ impl<'a> Emitter<'a> {
 
     fn decoded_register_address(&mut self, register: &ObjectRef, label: &str) -> AResult<String> {
         let load = register
-            .as_node::<TensorLoadObj>()
+            .downcast_ref::<TensorLoadObj>()
             .expect("validated TensorLoad");
         let Some(buffer) = as_buffer(&oref(load.source.clone())) else {
             return crate::analyze::util::not_covered("MMA register source is not a typed buffer");
         };
         self.record_global_write(&buffer)?;
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let pointer = self.emit_buffer_address(&buffer, &indices)?;
         let pointer_name = self.control_name(label);
         self.emit_line(&format!("let {pointer_name} = {};", pointer.code));

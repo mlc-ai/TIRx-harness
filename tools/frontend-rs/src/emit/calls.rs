@@ -10,7 +10,7 @@ use super::{Emitter, RustValue};
 use crate::decode::Decoded;
 
 pub fn call_args(node: &ObjectRef) -> Vec<ObjectRef> {
-    node.as_node::<CallObj>()
+    node.downcast_ref::<CallObj>()
         .map(|call| call.args.iter().map(oref).collect())
         .unwrap_or_default()
 }

@@ -1,17 +1,16 @@
 //! Static buffer layout inspection.
 
 use tvm_tirx::ir::prim::{eq, floordiv, floormod};
+use tvm_tirx::ir::{Expr, PrimExpr, Var};
 use tvm_tirx::sym::{Analyzer, ProofStrength};
-use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::tirx::{Axis, ComposeLayout, Iter, Layout, TileLayout};
-use tvm_tirx::tvm_ffi::{
-    self, Any, Array, DLDataType, DLDataTypeExt, Map, ObjectRefCast, String as FfiString,
-};
+use tvm_tirx::tvm_ffi::object::ObjectRefCore;
+use tvm_tirx::tvm_ffi::{self, Any, Array, DLDataType, DLDataTypeExt, Map, String as FfiString};
 
 use super::util::{
-    buffer_dtype, buffer_name, buffer_scope, dtype_text, enum_name, ffi_text, int_const, int_imm_expr,
-    not_covered, oref, prim, prim_expr, repr_of, simplify, static_int as shared_static_int,
-    unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
+    buffer_dtype, buffer_name, buffer_scope, dtype_text, enum_name, ffi_text, int_const,
+    int_imm_expr, not_covered, oref, prim, prim_expr, repr_of, simplify,
+    static_int as shared_static_int, unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
 };
 use crate::schema::Schema;
 
@@ -19,15 +18,17 @@ const MAX_PARTIAL_ATOM_ENUMERATION: i64 = 1_000_000;
 
 /// Shared primitive operators used by the Python expression constructors.
 pub fn op_binary(name: &str, lhs: Any, rhs: Any) -> AResult<Expr> {
-    let operator = name.strip_prefix("_Op").expect("primitive constructor prefix");
+    let operator = name
+        .strip_prefix("_Op")
+        .expect("primitive constructor prefix");
     let full = format!("prim._Op{operator}");
     let function = tvm_ffi::Function::get_global(&full)?;
-    let result: Any = function.call_tuple((lhs, rhs, tvm_tirx::ir::Location::unknown()))?;
+    let result: Any = function.call_tuple((lhs, rhs, tvm_tirx::ir::UnknownLoc::new()))?;
     Ok(prim_expr(result)?)
 }
 
-pub fn expr_any(expr: &Expr) -> Any {
-    Any::from(expr.clone())
+pub fn expr_any<T: Clone + Into<Expr>>(expr: &T) -> Any {
+    Any::from(expr.clone().into())
 }
 
 pub fn int_any(value: i64) -> Any {
@@ -47,9 +48,13 @@ pub fn buffer_layout(buffer: &Var) -> AResult<Layout> {
         size = op_binary("_OpMul", expr_any(&size), expr_any(&extent))?;
     }
     Ok(TileLayout::new(
-        vec![Iter::new(size, one, Axis::get("m")?)],
+        vec![Iter::new(
+            PrimExpr::try_from(Any::from(size))?,
+            PrimExpr::try_from(Any::from(one))?,
+            Axis::get_or_register("m"),
+        )],
         Vec::<Iter>::new(),
-        &Map::new(),
+        Map::<Axis, PrimExpr>::new(),
     )
     .into())
 }
@@ -74,11 +79,11 @@ fn strided_view_strides(
     let Some(layout) = buffer.tensor_type().layout.clone() else {
         return Ok(None);
     };
-    let Ok(tile) = layout.try_cast::<TileLayout>() else {
+    let Ok(tile) = layout.downcast::<TileLayout>() else {
         return Ok(None);
     };
-    let shard: Vec<Iter> = tile.shard()?.iter().collect();
-    if shard.len() != shape.len() || !tile.replica()?.is_empty() || !tile.offset()?.is_empty() {
+    let shard: Vec<Iter> = tile.shard.iter().cloned().collect();
+    if shard.len() != shape.len() || !tile.replica.is_empty() || !tile.offset.is_empty() {
         return Ok(None);
     }
     let mut strides = Vec::with_capacity(shard.len());
@@ -86,10 +91,12 @@ fn strided_view_strides(
         let Extent::Static(extent) = extent else {
             return Ok(None);
         };
-        if axis_name(&iter.axis)? != "m" || int_imm_expr(&iter.extent) != Some(*extent) {
+        if axis_name(&iter.axis)? != "m"
+            || int_imm_expr(&iter.extent.clone().into()) != Some(*extent)
+        {
             return Ok(None);
         }
-        match int_imm_expr(&iter.stride) {
+        match int_imm_expr(&iter.stride.clone().into()) {
             Some(stride) if stride >= 0 => strides.push(stride),
             _ => return Ok(None),
         }
@@ -145,21 +152,22 @@ impl LayoutInfo {
     }
 }
 
-fn static_int(analyzer: &Analyzer, value: &Expr, field: &str) -> AResult<i64> {
+fn static_int<T: Clone + Into<Expr>>(analyzer: &Analyzer, value: &T, field: &str) -> AResult<i64> {
     shared_static_int(
         analyzer,
-        value,
+        &value.clone().into(),
         &format!("buffer:{field}:requires"),
         "a static integer",
     )
 }
 
-fn shape_extent(
+fn shape_extent<T: Clone + Into<Expr>>(
     analyzer: &Analyzer,
-    value: &Expr,
+    value: &T,
     field: &str,
     shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
 ) -> AResult<Extent> {
+    let value: Expr = value.clone().into();
     let value = if shape_bindings.is_empty() {
         value.clone()
     } else {
@@ -180,7 +188,14 @@ fn shape_extent(
     ))
 }
 
-fn prove_equal(analyzer: &Analyzer, lhs: &Expr, rhs: &Expr, field: &str) -> AResult<()> {
+fn prove_equal<L: Clone + Into<Expr>, R: Clone + Into<Expr>>(
+    analyzer: &Analyzer,
+    lhs: &L,
+    rhs: &R,
+    field: &str,
+) -> AResult<()> {
+    let lhs: &Expr = &lhs.clone().into();
+    let rhs: &Expr = &rhs.clone().into();
     let difference = op_binary("_OpSub", expr_any(lhs), expr_any(rhs))?;
     let simplified = simplify(analyzer, &difference)?;
     if int_imm_expr(&simplified) != Some(0) {
@@ -211,19 +226,20 @@ fn iter_signature(items: &Array<tvm_tirx::tirx::Iter>) -> AResult<String> {
 }
 
 pub fn layout_signature(layout: &Layout) -> AResult<String> {
-    match layout.clone().try_cast::<TileLayout>() {
+    match layout.clone().downcast::<TileLayout>() {
         Ok(tile) => {
             let canonical = Layout::from(tile.clone())
                 .canonicalize()?
-                .try_cast::<TileLayout>()?;
+                .downcast::<TileLayout>()
+                .map_err(|_| Failure::NotCovered("expected TileLayout".into()))?;
             Ok(format!(
                 "TileLayout(shard=[{}],replica=[{}])",
-                iter_signature(&canonical.shard()?)?,
-                iter_signature(&canonical.replica()?)?
+                iter_signature(&canonical.shard)?,
+                iter_signature(&canonical.replica)?
             ))
         }
         Err(_) => {
-            let kind = if layout.clone().try_cast::<ComposeLayout>().is_ok() {
+            let kind = if layout.clone().downcast::<ComposeLayout>().is_ok() {
                 "ComposeLayout"
             } else {
                 return not_covered("layout kind without a native binding");
@@ -238,7 +254,7 @@ fn validate_static_tile_mapping(
     layout: &TileLayout,
     name: &str,
 ) -> AResult<()> {
-    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard.iter().cloned().collect();
     for index in (1..shard.len()).rev() {
         let extent = static_int(
             analyzer,
@@ -266,7 +282,7 @@ fn validate_static_tile_mapping(
             ));
         }
     }
-    for (axis, offset) in layout.offset()?.iter() {
+    for (axis, offset) in layout.offset.iter() {
         if axis_name(&axis)? == "m" {
             let offset = prim_expr(offset)?;
             static_int(analyzer, &offset, &format!("{name}:layout m offset"))?;
@@ -276,7 +292,7 @@ fn validate_static_tile_mapping(
 }
 
 fn tile_repeat_stride(analyzer: &Analyzer, layout: &TileLayout, name: &str) -> AResult<i64> {
-    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard()?.iter().collect();
+    let shard: Vec<tvm_tirx::tirx::Iter> = layout.shard.iter().cloned().collect();
     if shard.is_empty() || axis_name(&shard[0].axis)? != "m" {
         return Ok(0);
     }
@@ -313,7 +329,7 @@ fn full_domain_physical_span(
         ));
     }
     let (tile, atom_size, atom_span, repeat_stride);
-    if let Ok(tile_layout) = layout.clone().try_cast::<TileLayout>() {
+    if let Ok(tile_layout) = layout.clone().downcast::<TileLayout>() {
         atom_size = static_int(
             analyzer,
             &layout.size(None)?,
@@ -326,10 +342,11 @@ fn full_domain_physical_span(
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
         tile = tile_layout;
-    } else if let Ok(compose) = layout.clone().try_cast::<ComposeLayout>() {
-        let tile_layout = Layout::from(compose.tile_layout()?)
+    } else if let Ok(compose) = layout.clone().downcast::<ComposeLayout>() {
+        let tile_layout = Layout::from(compose.tile_layout.clone())
             .canonicalize()?
-            .try_cast::<TileLayout>()?;
+            .downcast::<TileLayout>()
+            .map_err(|_| Failure::NotCovered("expected TileLayout".into()))?;
         atom_size = static_int(
             analyzer,
             &Layout::from(tile_layout.clone()).size(None)?,
@@ -341,10 +358,9 @@ fn full_domain_physical_span(
             &format!("{name}:layout atom span"),
         )?;
         repeat_stride = tile_repeat_stride(analyzer, &tile_layout, name)?;
-        let swizzle_period =
-            1i64 << (compose.per_element()? + compose.swizzle_len()? + compose.atom_len()?);
+        let swizzle_period = 1i64 << (compose.per_element + compose.swizzle_len + compose.atom_len);
         if logical_elements > atom_size
-            && compose.swizzle_len()? != 0
+            && compose.swizzle_len != 0
             && repeat_stride % swizzle_period != 0
         {
             return unsupported(format!(
@@ -483,13 +499,14 @@ pub fn inspect_buffer_layout(
                 }
                 None => {
                     let dtype = dtype_text(bytes.dtype());
-                    let element = Expr::from(int_const(&dtype, itemsize)?);
+                    let bytes = PrimExpr::try_from(Any::from(bytes))?;
+                    let element = PrimExpr::from(int_const(&dtype, itemsize)?);
                     let aligned = eq(
                         floormod(bytes.clone(), element.clone())?,
-                        Expr::from(int_const(&dtype, 0)?),
+                        PrimExpr::from(int_const(&dtype, 0)?),
                     )?;
                     if !analyzer.can_prove(&aligned, ProofStrength::Default)? {
-                        dynamic_elem_offset_alignment = Some(aligned);
+                        dynamic_elem_offset_alignment = Some(aligned.into());
                     }
                     (0, Some(simplify(analyzer, &floordiv(bytes, element)?)?))
                 }
@@ -553,30 +570,38 @@ pub fn inspect_buffer_layout(
         )?);
     }
     let expected_elements_expr = prim_expr(expected_elements_expr)?;
-    let zero_indices: Vec<Expr> = shape
+    let zero_indices: Vec<PrimExpr> = shape
         .iter()
         .map(|_| int_const("int32", 0).map(Into::into))
         .collect::<tvm_ffi::Result<_>>()?;
-    let zero_indices = Array::new(zero_indices);
+    let zero_indices = Array::from_vec(zero_indices);
     let zero_extent_shared_placeholder = static_shape
         && expected_elements == Some(0)
         && (scope == "shared" || scope == "shared.dyn");
     let apply_zero = |candidate: &Layout| -> AResult<Map<FfiString, Expr>> {
         if zero_extent_shared_placeholder {
-            Ok(candidate.apply(&zero_indices)?)
+            Ok(candidate
+                .apply(&zero_indices, analyzer)?
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone().into()))
+                .collect())
         } else {
-            Ok(candidate.apply_with_shape(&zero_indices, &buffer_type.shape)?)
+            Ok(candidate
+                .apply_with_shape(&zero_indices, &buffer_type.shape, analyzer)?
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone().into()))
+                .collect())
         }
     };
     let mapped_zero = apply_zero(&canonical)?;
     let mut mapped: Vec<(String, Expr)> = mapped_zero
         .iter()
-        .map(|(axis, value)| (ffi_text(&axis), value))
+        .map(|(axis, value)| (ffi_text(&axis), value.clone()))
         .collect();
     mapped.sort_by(|left, right| left.0.cmp(&right.0));
     let zero_axes: Vec<String> = mapped.iter().map(|(axis, _)| axis.clone()).collect();
     let mut dynamic_layout_elem_offset: Option<Expr> = None;
-    let is_compose = canonical.clone().try_cast::<ComposeLayout>().is_ok();
+    let is_compose = canonical.clone().downcast::<ComposeLayout>().is_ok();
     if let Some(mapped_m_zero) = map_get(&mapped_zero, "m")? {
         let simplified_m_zero = simplify(analyzer, &mapped_m_zero)?;
         if int_imm_expr(&simplified_m_zero).is_some() {
@@ -586,8 +611,10 @@ pub fn inspect_buffer_layout(
                 Layout::from(
                     canonical
                         .clone()
-                        .try_cast::<ComposeLayout>()?
-                        .tile_layout()?,
+                        .downcast::<ComposeLayout>()
+                        .map_err(|_| Failure::NotCovered("expected ComposeLayout".into()))?
+                        .tile_layout
+                        .clone(),
                 )
                 .canonicalize()?
             } else {
@@ -600,16 +627,14 @@ pub fn inspect_buffer_layout(
             let base_m_zero = simplify(analyzer, &base_m)?;
             if let Some(static_base) = int_imm_expr(&base_m_zero) {
                 let static_m_zero = if is_compose {
-                    let first = crate::layout_linear_offsets(canonical.clone(), 1)?.get(0)?;
+                    let first = crate::layout_linear_offsets(canonical.clone(), 1)?
+                        .get(0)
+                        .ok_or_else(|| Failure::NotCovered("empty layout offsets".into()))?;
                     static_int(analyzer, &first, &format!("{name}:layout m offset"))?
                 } else {
                     static_base
                 };
-                set_axis(
-                    &mut mapped,
-                    "m",
-                    int_const("int64", static_m_zero)?.into(),
-                );
+                set_axis(&mut mapped, "m", int_const("int64", static_m_zero)?.into());
             } else {
                 dynamic_layout_elem_offset = Some(base_m_zero);
             }
@@ -691,10 +716,13 @@ pub fn inspect_buffer_layout(
         }
     }
     let physical_elements: Option<i64>;
-    if let Ok(_tile) = layout.clone().try_cast::<TileLayout>() {
-        let canonical_tile = canonical.clone().try_cast::<TileLayout>()?;
-        let shard: Vec<tvm_tirx::tirx::Iter> = canonical_tile.shard()?.iter().collect();
-        let replica: Vec<tvm_tirx::tirx::Iter> = canonical_tile.replica()?.iter().collect();
+    if let Ok(_tile) = layout.clone().downcast::<TileLayout>() {
+        let canonical_tile = canonical
+            .clone()
+            .downcast::<TileLayout>()
+            .map_err(|_| Failure::NotCovered("expected TileLayout".into()))?;
+        let shard: Vec<tvm_tirx::tirx::Iter> = canonical_tile.shard.iter().cloned().collect();
+        let replica: Vec<tvm_tirx::tirx::Iter> = canonical_tile.replica.iter().cloned().collect();
         if !owner_axes.is_empty() {
             if explicit_strides.is_some() {
                 return unsupported(format!(
@@ -824,11 +852,8 @@ pub fn inspect_buffer_layout(
         physical_elements = Some(match &dynamic_layout_elem_offset {
             None => full_domain_physical_span(analyzer, &canonical, expected, &name)?,
             Some(offset) => {
-                let relative = op_binary(
-                    "_OpSub",
-                    expr_any(&canonical.span(None)?),
-                    expr_any(offset),
-                )?;
+                let relative =
+                    op_binary("_OpSub", expr_any(&canonical.span(None)?), expr_any(offset))?;
                 static_int(
                     analyzer,
                     &relative,
@@ -931,7 +956,7 @@ fn inspect_tmem(
         ));
     };
     let allocated_addr = prim(&oref(tmem_address))?;
-    let Ok(_) = layout.clone().try_cast::<TileLayout>() else {
+    let Ok(_) = layout.clone().downcast::<TileLayout>() else {
         return unsupported(format!(
             "buffer:{name}:TMEM requires a TileLayout, got {signature}"
         ));
@@ -945,12 +970,15 @@ fn inspect_tmem(
             &zero_axes
         ));
     }
-    let canonical_tile = canonical.clone().try_cast::<TileLayout>()?;
+    let canonical_tile = canonical
+        .clone()
+        .downcast::<TileLayout>()
+        .map_err(|_| Failure::NotCovered("expected TileLayout".into()))?;
     let mut unsupported_axes: Vec<String> = Vec::new();
     for item in canonical_tile
-        .shard()?
+        .shard
         .iter()
-        .chain(canonical_tile.replica()?.iter())
+        .chain(canonical_tile.replica.iter())
     {
         let axis = axis_name(&item.axis)?;
         if axis != "TLane" && axis != "TCol" && !unsupported_axes.contains(&axis) {
@@ -985,15 +1013,12 @@ fn inspect_tmem(
             "buffer:{name}:negative TMEM layout base (lane={zero_lane}, tcol={tcol}) is unsupported"
         ));
     }
-    let addr_static: Option<i64> = match static_int(
-        analyzer,
-        &allocated_addr,
-        &format!("{name}:allocated_addr"),
-    ) {
-        Ok(value) => Some(value),
-        Err(Failure::Unsupported { .. }) => None,
-        Err(error) => return Err(error),
-    };
+    let addr_static: Option<i64> =
+        match static_int(analyzer, &allocated_addr, &format!("{name}:allocated_addr")) {
+            Ok(value) => Some(value),
+            Err(Failure::Unsupported { .. }) => None,
+            Err(error) => return Err(error),
+        };
     if addr_static.is_some_and(|value| value < 0) {
         return unsupported(format!(
             "buffer:{name}:negative TMEM allocated_addr {}",

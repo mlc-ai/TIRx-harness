@@ -361,12 +361,12 @@ impl<'a> Emitter<'a> {
             "stmatrix",
             "stmatrix predicate must be bool or integer",
         )?;
-        let destination = match parts.destination.as_node::<CallObj>() {
+        let destination = match parts.destination.downcast_ref::<CallObj>() {
             Some(call)
                 if call_op_name(call)?.as_deref() == Some("tirx.cuda.cvta_generic_to_shared")
                     && call.args.len() == 1 =>
             {
-                oref(call.args.get(0)?)
+                oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?)
             }
             _ => parts.destination.clone(),
         };

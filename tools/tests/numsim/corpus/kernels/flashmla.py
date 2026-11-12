@@ -204,6 +204,7 @@ def prepare_sparse_prefill_case(
     lse = np.full((s_q, h_q), np.nan, dtype=np.float32)
 
     kernel = module.get_kernel(
+        backend_config={"cuda": {"arch": "sm_100a"}},
         s_q=s_q,
         s_kv=s_kv,
         topk=topk,
@@ -256,6 +257,7 @@ def prepare_sparse_decode_head64_case() -> NumSimCase:
         ),
     ):
         kernels = module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             model_type="MODEL1",
             b=1,
             s_q=1,

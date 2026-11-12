@@ -105,7 +105,7 @@ impl<'a> PointerTargets<'a> {
                     .bindings
                     .set(oref(bind.var.clone()), oref(bind.value.clone()));
             }
-            if let Some(store) = node.as_node::<TensorStoreObj>() {
+            if let Some(store) = node.downcast_ref::<TensorStoreObj>() {
                 let key = plan.buffer_bindings.storage_key(&tensor_var(&oref(store.dest.clone()))?)?;
                 if let Some(defs) = writes.get_mut(&key) {
                     defs.push(vec![oref(store.value.clone())]);
@@ -118,15 +118,15 @@ impl<'a> PointerTargets<'a> {
             }
             // Tile destinations can overwrite storage without a BufferStore
             // or explicit PTX register destination in the source IR.
-            if let Some(region) = node.as_node::<TensorRegionObj>() {
+            if let Some(region) = node.downcast_ref::<TensorRegionObj>() {
                 escaped.add(
                     plan.buffer_bindings
                         .storage_key(&tensor_var(&oref(region.source.clone()))?)?,
                 );
             }
-            if let Some(call) = node.as_node::<CallObj>() {
+            if let Some(call) = node.downcast_ref::<CallObj>() {
                 if let Some(value) = address_operand(call)? {
-                    if let Some(load) = value.as_node::<TensorLoadObj>() {
+                    if let Some(load) = value.downcast_ref::<TensorLoadObj>() {
                         if let Some(buffer) = as_buffer(&oref(load.source.clone())) {
                             escaped.add(plan.buffer_bindings.storage_key(&buffer)?);
                         }
@@ -142,7 +142,7 @@ impl<'a> PointerTargets<'a> {
                     continue;
                 }
                 for destination in slot.values.iter().flatten() {
-                    let Some(load) = destination.as_node::<TensorLoadObj>() else {
+                    let Some(load) = destination.downcast_ref::<TensorLoadObj>() else {
                         continue;
                     };
                     let Some(buffer) = as_buffer(&oref(load.source.clone())) else {
@@ -218,7 +218,7 @@ impl<'a> PointerTargets<'a> {
         if let Some(buffer) = projected_buffer(node)? {
             return self.buffer(&buffer, seen);
         }
-        if let Some(load) = node.as_node::<TensorLoadObj>() {
+        if let Some(load) = node.downcast_ref::<TensorLoadObj>() {
             if !matches!(dtype_of(node)?.as_str(), "handle" | "uint64" | "uint32") {
                 return Ok(Fact::Number);
             }
@@ -232,9 +232,9 @@ impl<'a> PointerTargets<'a> {
             if let Some(value) = self.bindings.get(node) {
                 return self.expr(value, seen);
             }
-            if let Some(index) = self.plan.func.params.iter().position(|p| same(&p, &var)) {
-                if let Some(pointer) = var.ty.as_node::<PtrTypeObj>() {
-                    if pointer.element_type.as_node::<TensorMapTypeObj>().is_some() {
+            if let Some(index) = self.plan.func.params.iter().position(|p| same(p, &var)) {
+                if let Some(pointer) = var.ty.downcast_ref::<PtrTypeObj>() {
+                    if pointer.element_type.downcast_ref::<TensorMapTypeObj>().is_some() {
                         return Ok(Fact::Unknown);
                     }
                     if enum_name(&*pointer.scope) == "global" {
@@ -248,32 +248,32 @@ impl<'a> PointerTargets<'a> {
                 Fact::Number
             });
         }
-        if let Some(add) = node.as_node::<AddObj>() {
+        if let Some(add) = node.downcast_ref::<AddObj>() {
             return Ok(self
                 .expr(&oref(add.a.clone()), seen)?
                 .offset(self.expr(&oref(add.b.clone()), seen)?, false));
         }
-        if let Some(sub) = node.as_node::<SubObj>() {
+        if let Some(sub) = node.downcast_ref::<SubObj>() {
             return Ok(self
                 .expr(&oref(sub.a.clone()), seen)?
                 .offset(self.expr(&oref(sub.b.clone()), seen)?, true));
         }
-        if let Some(cast) = node.as_node::<CastObj>() {
+        if let Some(cast) = node.downcast_ref::<CastObj>() {
             return Ok(self.expr(&oref(cast.value.clone()), seen)?.invalid());
         }
-        if let Some(select) = node.as_node::<SelectObj>() {
+        if let Some(select) = node.downcast_ref::<SelectObj>() {
             return Ok(self
                 .expr(&oref(select.true_value.clone()), seen)?
                 .join(self.expr(&oref(select.false_value.clone()), seen)?));
         }
-        if node.as_node::<LetObj>().is_some() {
+        if node.downcast_ref::<LetObj>().is_some() {
             // Uncommon expression-local bindings are conservatively unresolved.
             return Ok(Fact::Unknown);
         }
-        if let Some(call) = node.as_node::<CallObj>() {
+        if let Some(call) = node.downcast_ref::<CallObj>() {
             match pointer_call(call)? {
                 PointerCall::Address(value) => {
-                    if let Some(load) = value.as_node::<TensorLoadObj>() {
+                    if let Some(load) = value.downcast_ref::<TensorLoadObj>() {
                         if let Some(buffer) = as_buffer(&oref(load.source.clone())) {
                             return self.buffer(&buffer, seen);
                         }

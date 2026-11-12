@@ -123,17 +123,17 @@ pub fn static_value(
     environment: &IdMap<StaticValue>,
 ) -> AResult<StaticValue> {
     let node_kind = kind(node).unwrap_or("");
-    if let Some(imm) = node.as_node::<IntImmObj>() {
+    if let Some(imm) = node.downcast_ref::<IntImmObj>() {
         return cast_static_scalar(
             ctx,
             StaticValue::Int(i128::from(int_value(imm)?)),
             &dtype_of(node)?,
         );
     }
-    if let Some(imm) = node.as_node::<FloatImmObj>() {
+    if let Some(imm) = node.downcast_ref::<FloatImmObj>() {
         return cast_static_scalar(ctx, StaticValue::Float(imm.value), &dtype_of(node)?);
     }
-    if node.as_node::<VarObj>().is_some() {
+    if node.downcast_ref::<VarObj>().is_some() {
         if let Some(value) = environment.get(node) {
             return Ok(*value);
         }
@@ -264,12 +264,12 @@ pub fn static_value(
             lhs || rhs
         }));
     }
-    if let Some(not) = node.as_node::<NotObj>() {
+    if let Some(not) = node.downcast_ref::<NotObj>() {
         return Ok(StaticValue::Bool(
             !static_value(ctx, &oref(not.a.clone()), environment)?.truthy(),
         ));
     }
-    let branches = if let Some(select) = node.as_node::<SelectObj>() {
+    let branches = if let Some(select) = node.downcast_ref::<SelectObj>() {
         Some((
             oref(select.condition.clone()),
             oref(select.true_value.clone()),
@@ -286,7 +286,7 @@ pub fn static_value(
         };
         return static_value(ctx, &branch, environment);
     }
-    if let Some(cast) = node.as_node::<CastObj>() {
+    if let Some(cast) = node.downcast_ref::<CastObj>() {
         let value = static_value(ctx, &oref(cast.value.clone()), environment)?;
         return cast_static_scalar(ctx, value, &dtype_of(node)?);
     }
@@ -430,7 +430,7 @@ pub fn launch_values(region: &RegionStmtObj) -> AResult<Vec<(String, Expr)>> {
     if fields.len() != region.args.len() {
         return unsupported("device_entry launch fields must describe every launch operand");
     }
-    Ok(fields.iter().map(|field| ffi_text(&field)).zip(region.args.iter()).collect())
+    Ok(fields.iter().map(|field| ffi_text(&field)).zip(region.args.iter().cloned()).collect())
 }
 
 /// A `tirx.device_entry` region's `cuda.kernel_attrs`.
@@ -448,13 +448,13 @@ fn visit(
     constraints: &mut Constraints,
     environment: &mut IdMap<StaticValue>,
 ) -> AResult<()> {
-    if let Some(sequence) = node.as_node::<SeqStmtObj>() {
+    if let Some(sequence) = node.downcast_ref::<SeqStmtObj>() {
         for child in sequence.seq.iter() {
             visit(ctx, &child, constraints, environment)?;
         }
         return Ok(());
     }
-    if let Some(region) = node.as_node::<RegionStmtObj>() {
+    if let Some(region) = node.downcast_ref::<RegionStmtObj>() {
         match ffi_text(&region.op.name).as_str() {
             DEVICE_ENTRY | DEVICE_SCOPE => {
                 for (field, value) in launch_values(region)? {
@@ -487,14 +487,14 @@ fn visit(
                 }
             }
             LAUNCH_THREAD => {
-                let tag = static_string(&oref(region.args.get(0)?), "launch_thread tag")?;
+                let tag = static_string(&oref(region.args.get(0).ok_or_else(|| super::util::Failure::NotCovered("missing launch_thread tag".into()))?), "launch_thread tag")?;
                 let Some((_, constraint)) = LAUNCH_THREAD_TAGS.iter().find(|(name, _)| *name == tag) else {
                     return unsupported(format!(
                         "NumSim does not support direct launch thread tag {:?}",
                         &tag
                     ));
                 };
-                let extent = static_int(ctx, &oref(region.args.get(1)?), environment)?;
+                let extent = static_int(ctx, &oref(region.args.get(1).ok_or_else(|| super::util::Failure::NotCovered("missing launch_thread extent".into()))?), environment)?;
                 constraints.constrain(constraint, i64::try_from(extent).unwrap_or(i64::MAX))?;
             }
             _ => {}
@@ -613,16 +613,16 @@ const KERNEL_ATTRS: &[&str] = &[
 pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
     let op_name = ffi_text(&region.op.name);
     if op_name == LAUNCH_THREAD {
-        let tag = region.args.get(0).ok().and_then(|tag| static_string(&oref(tag), "tag").ok());
+        let tag = region.args.get(0).and_then(|tag| static_string(&oref(tag), "tag").ok());
         if !tag.as_deref().is_some_and(|tag| LAUNCH_THREAD_TAGS.iter().any(|(name, _)| *name == tag)) {
             return Ok(Some(format!(
                 "RegionStmt(tirx.launch_thread) has unsupported thread tag {:?}",
                 tag.unwrap_or_default()
             )));
         }
-        let extent = region.args.get(1).ok().and_then(|extent| int_imm(&oref(extent)));
+        let extent = region.args.get(1).and_then(|extent| int_imm(&oref(extent)));
         let int32_var = region.body_params.len() == 1
-            && dtype_of(&oref(region.body_params.get(0)?))? == "int32";
+            && dtype_of(&oref(region.body_params[0].clone()))? == "int32";
         if extent.is_none_or(|value| value <= 0) || !int32_var {
             return Ok(Some(
                 "RegionStmt(tirx.launch_thread) must bind an int32 variable to a positive IntImm"
@@ -696,8 +696,8 @@ pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
 }
 
 pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
-    let kind_value = loop_stmt.kind;
-    if kind_value != ForKind::Default as i32 && kind_value != ForKind::Unrolled as i32 {
+    let kind_value = loop_stmt.kind.as_raw();
+    if kind_value != ForKind::Default.as_raw() && kind_value != ForKind::Unrolled.as_raw() {
         let kind_name = match kind_value {
             1 => "PARALLEL".to_owned(),
             2 => "VECTORIZED".to_owned(),
@@ -715,7 +715,7 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
         .iter()
         .map(|(key, _)| (key).to_string())
         .collect();
-    if kind_value == ForKind::Unrolled as i32 {
+    if kind_value == ForKind::Unrolled.as_raw() {
         if !annotations.is_empty() {
             return Ok(Some(format!(
                 "For(kind=UNROLLED) has unsupported annotations {:?}",

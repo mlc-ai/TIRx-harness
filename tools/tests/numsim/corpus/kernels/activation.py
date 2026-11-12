@@ -37,7 +37,13 @@ def prepare_act_and_mul_case() -> NumSimCase:
     expected = ((x_f32 / denominator) * y_f32).astype(np.float16)[None, :]
 
     return NumSimCase(
-        kernel=module.get_kernel(act="silu", dtype="float16", num_tokens=1, d=256),
+        kernel=module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
+            act="silu",
+            dtype="float16",
+            num_tokens=1,
+            d=256,
+        ),
         args={
             "input_global": input_data,
             "out_global": output,

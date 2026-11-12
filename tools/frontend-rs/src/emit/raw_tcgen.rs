@@ -309,7 +309,7 @@ pub fn decoded_ldst_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<LdstParts>
                 "{op_name}.r[{index}] must be a 32-bit {role}, got PTX_SINK"
             ));
         };
-        if (instruction == "ld" && register.as_node::<TensorLoadObj>().is_none())
+        if (instruction == "ld" && register.downcast_ref::<TensorLoadObj>().is_none())
             || !matches!(dtype_of(register)?.as_str(), "int32" | "uint32" | "float32")
         {
             return unsupported(format!(
@@ -1603,13 +1603,13 @@ impl<'a> Emitter<'a> {
                 continue;
             }
             let load = register
-                .as_node::<TensorLoadObj>()
+                .downcast_ref::<TensorLoadObj>()
                 .expect("validated TensorLoad");
             let Some(buffer) = as_buffer(&oref(load.source.clone())) else {
                 return not_covered("tcgen05 register source is not a typed buffer");
             };
             self.record_global_write(&buffer)?;
-            let indices: Vec<Expr> = load.indices.iter().collect();
+            let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
             let pointer = self.emit_buffer_address(&buffer, &indices)?;
             let pointer_name = self.control_name(&format!("raw_tcgen_{instruction}_register"));
             self.emit_line(&format!("let {pointer_name} = {};", pointer.code));
@@ -2168,7 +2168,7 @@ pub fn emit_mma(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustVal
         TcgenMmaParts::Block(decoded_tcgen_block_mma_parts(decoded)?)
     } else {
         let parts = decoded_tcgen_dense_mma_parts(decoded)?;
-        if let Some(imm) = parts.instruction.as_node::<IntImmObj>() {
+        if let Some(imm) = parts.instruction.downcast_ref::<IntImmObj>() {
             dense_mma_variant(
                 &decoded.op_name,
                 &parts.kind,

@@ -455,7 +455,7 @@ fn static_int(ctx: &Ctx, value: &ObjectRef, field: &str, requirement: &str) -> A
 }
 
 fn null_handle(ctx: &Ctx, expression: &ObjectRef) -> AResult<bool> {
-    let Some(call) = expression.as_node::<CallObj>() else {
+    let Some(call) = expression.downcast_ref::<CallObj>() else {
         return Ok(false);
     };
     if call_op_name(call)?.as_deref() != Some("tirx.reinterpret") {
@@ -466,7 +466,7 @@ fn null_handle(ctx: &Ctx, expression: &ObjectRef) -> AResult<bool> {
     }
     match static_int(
         ctx,
-        &oref(call.args.get(0)?),
+        &oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?),
         "null handle",
         "must be a static integer",
     ) {
@@ -495,7 +495,7 @@ pub fn parse_tcgen_descriptor_call(
     ctx: &Ctx,
     node: &ObjectRef,
 ) -> AResult<Option<TcgenDescriptorCall>> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     let Some(op_name) = call_op_name(call)? else {
@@ -526,7 +526,7 @@ pub fn parse_tcgen_descriptor_call(
     require_signature(&op_name, &args, &["handle"])?;
     let attrs = call.attrs.as_ref();
     let encoded = if let Some(dense) =
-        attrs.and_then(|attrs| attrs.as_node::<TCGen05InstrDescriptorAttrsObj>())
+        attrs.and_then(|attrs| attrs.downcast_ref::<TCGen05InstrDescriptorAttrsObj>())
     {
         encode_dense_instr_descriptor_fields(
             &ffi_text(&dense.d_dtype),
@@ -544,7 +544,7 @@ pub fn parse_tcgen_descriptor_call(
             dense.is_sparse,
         )?
     } else if let Some(block) =
-        attrs.and_then(|attrs| attrs.as_node::<TCGen05InstrDescriptorBlockScaledAttrsObj>())
+        attrs.and_then(|attrs| attrs.downcast_ref::<TCGen05InstrDescriptorBlockScaledAttrsObj>())
     {
         encode_block_scaled_instr_descriptor_fields(
             &ffi_text(&block.d_dtype),

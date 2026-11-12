@@ -3,7 +3,7 @@
 use crate::analyze::util::{
     enum_name, function_body, is_tensor_var, json_object, json_strings, tensor_var, TensorVarExt,
 };
-use tvm_tirx::ir::Location;
+
 use tvm_tirx::ir::StringImm;
 use tvm_tirx::ir::{CallObj, PtrTypeObj, TensorLoadObj, Var};
 use tvm_tirx::ir::prim::{CastObj, RampObj, ShuffleObj};
@@ -44,13 +44,13 @@ fn is_supported_buffer_dtype(ctx: &Ctx, buffer: &Var) -> bool {
     let shape: Vec<_> = buffer.tensor_type().shape.iter().collect();
     ["local", "local_scalar", "register", "reg"].contains(&scope.as_str())
         && shape.len() == 1
-        && super::util::int_imm_expr(&shape[0]) == Some(1)
+        && super::util::int_imm_expr(&shape[0].clone().into()) == Some(1)
 }
 
 /// A statement header with every child statement rendered as `...`.
 fn elided_statement_text(node: &ObjectRef) -> AResult<String> {
     // Child statements have their own source entries.
-    let placeholder: Stmt = Evaluate::new(StringImm::new("...", Location::unknown()), Location::unknown()).into();
+    let placeholder: Stmt = Evaluate::new(StringImm::new("...", tvm_tirx::ir::UNKNOWN_LOC), tvm_tirx::ir::UNKNOWN_LOC).into();
     let root = node.clone();
     let rendered: ObjectRef = structural_map(
         node.clone(),
@@ -73,13 +73,13 @@ fn elided_statement_text(node: &ObjectRef) -> AResult<String> {
 }
 
 fn node_text(node: &ObjectRef) -> AResult<String> {
-    if let Some(seq) = node.as_node::<SeqStmtObj>() {
+    if let Some(seq) = node.downcast_ref::<SeqStmtObj>() {
         return Ok(format!("SeqStmt({} statements)", seq.seq.len()));
     }
-    let mut text = if node.as_node::<RegionStmtObj>().is_some()
-        || node.as_node::<ForObj>().is_some()
-        || node.as_node::<WhileObj>().is_some()
-        || node.as_node::<IfObj>().is_some()
+    let mut text = if node.downcast_ref::<RegionStmtObj>().is_some()
+        || node.downcast_ref::<ForObj>().is_some()
+        || node.downcast_ref::<WhileObj>().is_some()
+        || node.downcast_ref::<IfObj>().is_some()
     {
         elided_statement_text(node)?
     } else if let Some(text) = crate::emit::pure::source_text(node)? {
@@ -105,11 +105,11 @@ fn node_text(node: &ObjectRef) -> AResult<String> {
 /// surface spelling from its operand count, which two table entries can share
 /// (`mbarrier.try_wait.parity` with a report and with a hint); the op is unique.
 fn call_text(node: &ObjectRef) -> AResult<Option<String>> {
-    let call_node = match node.as_node::<EvaluateObj>() {
+    let call_node = match node.downcast_ref::<EvaluateObj>() {
         Some(evaluate) => oref(evaluate.value.clone()),
         None => node.clone(),
     };
-    let Some(call) = call_node.as_node::<CallObj>() else {
+    let Some(call) = call_node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     let Some(op_name) = call_op_name(call)? else {
@@ -117,7 +117,7 @@ fn call_text(node: &ObjectRef) -> AResult<Option<String>> {
     };
     let mut operands = Vec::with_capacity(call.args.len());
     for operand in call.args.iter() {
-        let text = repr_text(&oref(operand))?.trim().to_owned();
+        let text = repr_text(&oref(operand.clone()))?.trim().to_owned();
         if looks_like_address_printer(&text) {
             return Ok(None);
         }
@@ -193,13 +193,15 @@ pub struct ParameterSpec {
 pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
     let statements: Vec<Stmt> = crate::walk_statements(function_body(func)?)?
         .iter()
+        .cloned()
         .collect();
     let nodes: Vec<ObjectRef> = crate::post_order_nodes(oref(function_body(func)?))?
         .iter()
+        .cloned()
         .collect();
     let buffer_bindings = BufferBindings::build(&statements)?;
     ctx.record_tensor_decls(&buffer_bindings)?;
-    let params: Vec<Var> = func.params.iter().collect();
+    let params: Vec<Var> = func.params.iter().cloned().collect();
 
     let mut facts = KernelFacts::default();
     let memory =
@@ -378,17 +380,17 @@ fn check_node(
             }
         }
     }
-    if let Some(region) = node.as_node::<RegionStmtObj>() {
+    if let Some(region) = node.downcast_ref::<RegionStmtObj>() {
         if let Some(error) = validate_region(region)? {
             unsupported.push(format!("op#{op_id}:{error}"));
         }
     }
-    if let Some(loop_stmt) = node.as_node::<ForObj>() {
+    if let Some(loop_stmt) = node.downcast_ref::<ForObj>() {
         if let Some(error) = validate_for(ctx, loop_stmt)? {
             unsupported.push(format!("op#{op_id}:{error}"));
         }
     }
-    if let Some(store) = node.as_node::<TensorStoreObj>() {
+    if let Some(store) = node.downcast_ref::<TensorStoreObj>() {
         let buffer = tensor_var(&oref(store.dest.clone()))?;
         if !is_supported_buffer_dtype(ctx, &buffer) {
             unsupported.push(format!(
@@ -397,7 +399,7 @@ fn check_node(
             ));
         }
     }
-    if let Some(load) = node.as_node::<TensorLoadObj>() {
+    if let Some(load) = node.downcast_ref::<TensorLoadObj>() {
         let Some(source) = as_buffer(&oref(load.source.clone())) else {
             return not_covered("TensorLoad source is not a typed buffer");
         };
@@ -413,7 +415,7 @@ fn check_node(
             unsupported.push(format!("op#{op_id}:{message}"));
         }
     }
-    if let Some(ramp) = node.as_node::<RampObj>() {
+    if let Some(ramp) = node.downcast_ref::<RampObj>() {
         match classify_contiguous_ramp(ctx, node, ramp, None) {
             Ok(_) => {}
             Err(Failure::Unsupported { message, .. }) => {
@@ -422,7 +424,7 @@ fn check_node(
             Err(error) => return Err(error),
         }
     }
-    if let Some(shuffle) = node.as_node::<ShuffleObj>() {
+    if let Some(shuffle) = node.downcast_ref::<ShuffleObj>() {
         match classify_vector_extract(ctx, node, shuffle) {
             Ok(_) => {}
             Err(Failure::Unsupported { message, .. }) => {
@@ -450,7 +452,7 @@ fn check_node(
             ));
         }
     }
-    if let Some(cast) = node.as_node::<CastObj>() {
+    if let Some(cast) = node.downcast_ref::<CastObj>() {
         let source_dtype = dtype_of(&oref(cast.value.clone()))?;
         let target_dtype = dtype_of(node)?;
         if !ctx.schema.supported_cast_dtypes.contains(&source_dtype)
@@ -490,7 +492,7 @@ fn source_entry(node: &ObjectRef, kind: &str, op_id: i64) -> AResult<Json> {
             span_json(node_span(node).as_ref()).unwrap_or(Json::Null),
         ),
     ];
-    if let Some(call) = node.as_node::<CallObj>() {
+    if let Some(call) = node.downcast_ref::<CallObj>() {
         if let Some(name) = call_op_name(call)? {
             entry.push((
                 "op_name",
@@ -517,7 +519,7 @@ fn buffer_entries(
         buffer_names.push(name.clone());
         let mut shape_texts = Vec::new();
         for value in buffer_type.shape.iter() {
-            shape_texts.push(repr_of(&value)?);
+            shape_texts.push(repr_of(value)?);
         }
         let dtype = buffer_dtype(&buffer);
         let layout = match &buffer_type.layout {
@@ -561,7 +563,7 @@ fn scalar_and_pointer_entries(
         if is_tensor_var(parameter) {
             continue;
         }
-        if let Some(pointer) = parameter.ty.as_node::<PtrTypeObj>() {
+        if let Some(pointer) = parameter.ty.downcast_ref::<PtrTypeObj>() {
             let Some(element) = prim_dtype(&pointer.element_type) else {
                 continue;
             };

@@ -9,8 +9,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 serde_json = "1"
-# An exact pin: the bindings mirror the object layouts of one apache-tvm-tirx release.
-tvm-tirx = "=0.1.0-alpha.5"
+tvm-tirx = "=0.1.0-rc1"
+
+# The dispatch macro resolves ::tvm_ffi; match tvm-tirx's registry dependency.
+tvm-ffi = "0.1.16-rc4"
 
 [dev-dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }

@@ -54,7 +54,7 @@ pub fn payload_schema() -> tvm_ffi::Result<Map<FfiString, Array<FfiString>>> {
     .map(|(name, fields)| {
         (
             FfiString::from(name),
-            Array::new(fields.iter().map(|field| FfiString::from(*field)).collect()),
+            Array::from_vec(fields.iter().map(|field| FfiString::from(*field)).collect()),
         )
     })
     .collect())
@@ -321,7 +321,7 @@ fn int_field(entry: &Json, key: &str) -> AResult<i64> {
 
 fn argument_at(node: &ObjectRef, index: i64) -> AResult<ObjectRef> {
     use tvm_tirx::tvm_ffi::ObjectRefCore;
-    let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
+    let Some(call) = node.downcast_ref::<tvm_tirx::ir::CallObj>() else {
         return Err(Failure::Ffi(ffi_error("PTX payload names a non-call node")));
     };
     let Ok(position) = usize::try_from(index) else {
@@ -334,7 +334,7 @@ fn argument_at(node: &ObjectRef, index: i64) -> AResult<ObjectRef> {
             "PTX payload argument index is out of range",
         )));
     }
-    Ok(crate::analyze::util::oref(call.args.get(position)?))
+    Ok(crate::analyze::util::oref(call.args.get(position).ok_or_else(|| ffi_error("PTX payload argument index is out of range"))?))
 }
 
 fn parse_entry(node: &ObjectRef, entry: &Json) -> AResult<PtxDecode> {

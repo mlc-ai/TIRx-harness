@@ -42,7 +42,7 @@ fn width(suffix: &str) -> Option<u32> {
 
 fn word_suffix(pointer: &ObjectRef, requested: &ObjectRef, name: &str) -> AResult<String> {
     let ty = expr_type(pointer);
-    let Some(pointer) = ty.as_ref().and_then(|ty| ty.as_node::<PtrTypeObj>()) else {
+    let Some(pointer) = ty.as_ref().and_then(|ty| ty.downcast_ref::<PtrTypeObj>()) else {
         return unsupported(format!("{name} ptr must point at the synchronization word"));
     };
     let dtype = prim_dtype(&pointer.element_type)
@@ -73,13 +73,13 @@ fn word_suffix(pointer: &ObjectRef, requested: &ObjectRef, name: &str) -> AResul
 fn raw_load(spelling: &str, operands: &[ObjectRef]) -> AResult<DecodedPtx> {
     let builder = tvm_ffi::Function::get_global("numsim.frontend.build_ptx_call")?;
     let result: Any =
-        builder.call_tuple((FfiString::from(spelling), Array::new(operands.to_vec())))?;
+        builder.call_tuple((FfiString::from(spelling), Array::from_vec(operands.to_vec())))?;
     let result = Array::<Any>::try_from(result)?;
-    let error = FfiString::try_from(result.get(1)?)?;
+    let error = FfiString::try_from(result.get(1).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?)?;
     if !error.as_str().is_empty() {
         return unsupported(format!("{spelling}: {}", error.as_str()));
     }
-    let node = ObjectRef::try_from(result.get(0)?)?;
+    let node = ObjectRef::try_from(result.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?)?;
     Ok(decode_call(&node)?.decoded()?.clone())
 }
 
@@ -146,10 +146,10 @@ impl<'a, 'b> Predicate<'a, 'b> {
     fn depends_on_destination(&self, node: &ObjectRef) -> AResult<bool> {
         let destination = self
             .destination
-            .as_node::<TensorLoadObj>()
+            .downcast_ref::<TensorLoadObj>()
             .expect("wait destination was validated as TensorLoad");
         for candidate in crate::post_order_nodes(node.clone())?.iter() {
-            if let Some(load) = candidate.as_node::<TensorLoadObj>() {
+            if let Some(load) = candidate.downcast_ref::<TensorLoadObj>() {
                 if same(&load.source, &destination.source) {
                     return Ok(true);
                 }
@@ -161,7 +161,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
     fn destination_coordinates(&self, source: &tvm_tirx::ir::Var) -> AResult<Option<Vec<i64>>> {
         let destination = self
             .destination
-            .as_node::<TensorLoadObj>()
+            .downcast_ref::<TensorLoadObj>()
             .expect("wait destination was validated as TensorLoad");
         if !same(source, &destination.source) {
             return Ok(None);
@@ -170,7 +170,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         for index in destination.indices.iter() {
             let value = static_int(
                 &self.emitter.ctx.analyzer,
-                &index,
+                &index.clone().into(),
                 "wait_until destination index",
                 "must be static when its buffer is indexed by the candidate word",
             )?;
@@ -196,7 +196,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         for dimension in source.tensor_type().shape.iter() {
             let extent = static_int(
                 &self.emitter.ctx.analyzer,
-                &dimension,
+                &dimension.clone().into(),
                 "candidate-indexed wait predicate local-buffer shape",
                 "must be static",
             )?;
@@ -290,7 +290,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
             );
         }
         let (shape, values) = self.capture_buffer(&source)?;
-        let indices: Vec<Expr> = load.indices.iter().collect();
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
         let index = self.flat_index(&indices, &shape)?;
         let arms = values
             .iter()
@@ -316,13 +316,13 @@ impl<'a, 'b> Predicate<'a, 'b> {
     fn emit(&mut self, node: &ObjectRef) -> AResult<String> {
         let dtype = dtype_of(node)?;
         let rust = expr_rust_type(self.emitter.ctx.schema, &dtype)?;
-        if let Some(load) = node.as_node::<TensorLoadObj>() {
+        if let Some(load) = node.downcast_ref::<TensorLoadObj>() {
             if Self::deep_equal(node, &self.destination)? {
                 return Ok(format!("(candidate as {rust})"));
             }
             let destination = self
                 .destination
-                .as_node::<TensorLoadObj>()
+                .downcast_ref::<TensorLoadObj>()
                 .expect("wait destination was validated as TensorLoad");
             let candidate_indexed = same(&load.source, &destination.source)
                 || load
@@ -338,7 +338,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
                 return self.dynamic_local_load(load, &rust);
             }
         }
-        if let Some(value) = node.as_node::<IntImmObj>() {
+        if let Some(value) = node.downcast_ref::<IntImmObj>() {
             let bits = int_bits(value)?;
             return Ok(if dtype == "bool" {
                 (bits != 0).to_string()
@@ -355,7 +355,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         if matches!(kind, "Var" | "TensorLoad") {
             return self.freeze(node);
         }
-        if let Some(cast) = node.as_node::<CastObj>() {
+        if let Some(cast) = node.downcast_ref::<CastObj>() {
             let value = oref(cast.value.clone());
             let operand = self.emit(&value)?;
             return Ok(if dtype == "bool" {
@@ -382,7 +382,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
         }
         macro_rules! binary {
             ($ty:ty, $format:literal) => {
-                if let Some(binary) = node.as_node::<$ty>() {
+                if let Some(binary) = node.downcast_ref::<$ty>() {
                     let a = self.emit(&oref(binary.a.clone()))?;
                     let b = self.emit(&oref(binary.b.clone()))?;
                     return Ok(format!($format, a, b));
@@ -397,10 +397,10 @@ impl<'a, 'b> Predicate<'a, 'b> {
         binary!(GEObj, "({} >= {})");
         binary!(AndObj, "({} && {})");
         binary!(OrObj, "({} || {})");
-        if let Some(not) = node.as_node::<NotObj>() {
+        if let Some(not) = node.downcast_ref::<NotObj>() {
             return Ok(format!("(!{})", self.emit(&oref(not.a.clone()))?));
         }
-        if let Some(select) = node.as_node::<SelectObj>() {
+        if let Some(select) = node.downcast_ref::<SelectObj>() {
             return Ok(format!(
                 "(if {} {{ {} }} else {{ {} }})",
                 self.emit(&oref(select.condition.clone()))?,
@@ -415,7 +415,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
                 .collect::<AResult<Vec<_>>>()?;
             return Ok(format!("({})", render_bitwise(name, &codes)));
         }
-        if let Some(call) = node.as_node::<CallObj>() {
+        if let Some(call) = node.downcast_ref::<CallObj>() {
             let name = call_op_name(call)?.unwrap_or_default();
             let name = name.rsplit('.').next().unwrap_or_default();
             let args: Vec<ObjectRef> = call.args.iter().map(oref).collect();
@@ -430,7 +430,7 @@ impl<'a, 'b> Predicate<'a, 'b> {
                 }
                 ("large_uint_imm", [high, low]) => {
                     let part = |value: &ObjectRef| -> AResult<u64> {
-                        match value.as_node::<IntImmObj>() {
+                        match value.downcast_ref::<IntImmObj>() {
                             Some(value) => Ok(int_bits(value)? & 0xffffffff),
                             None => Ok(0),
                         }
@@ -455,7 +455,7 @@ pub fn emit(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>>
     };
     let suffix = word_suffix(pointer, requested, name)?;
     let local = destination
-        .as_node::<TensorLoadObj>()
+        .downcast_ref::<TensorLoadObj>()
         .and_then(|load| as_buffer(&oref(load.source.clone())))
         .is_some_and(|buffer| {
             matches!(

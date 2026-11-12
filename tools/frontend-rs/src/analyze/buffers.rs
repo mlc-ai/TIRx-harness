@@ -1,12 +1,12 @@
 //! Typed buffer identities and their explicit physical-data bindings.
 
+use crate::tvm_compat::TryCast;
 use crate::decode::{data_source, resolve_tmem_address, tensor_decl, TensorDecl};
 use std::cell::RefCell;
-use tvm_tirx::ir::prim::add;
+use super::layout::{op_binary, expr_any};
 use tvm_tirx::ir::{CallObj, Expr, Op, Stmt, Var};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 
-use tvm_tirx::tvm_ffi::ObjectRefCast;
 
 use super::util::{as_buffer, buffer_name, buffer_ref, ffi_text, oref, same, unsupported, AResult, IdMap};
 
@@ -108,7 +108,7 @@ impl BufferBindings {
             };
             for offset in offsets {
                 total = Some(match total {
-                    Some(sum) => add(sum, offset)?,
+                    Some(sum) => op_binary("_OpAdd", expr_any(&sum), expr_any(&offset))?,
                     None => offset,
                 });
             }

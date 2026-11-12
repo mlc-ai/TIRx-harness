@@ -343,8 +343,7 @@ from vector_add import kernel
 from tvm_tirx.target import Target
 
 target = Target({"kind": "cuda", "arch": "sm_100a"})
-with target:
-    compiled = kernel.compile(target=target)
+compiled = kernel.compile(target=target)
 print(inspect_candidate(compiled, "artifacts/vector-add"))
 ```
 

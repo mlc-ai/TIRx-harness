@@ -15,12 +15,10 @@ pub const CUDA_ARCH_FIELD: &str = "backend_config[\"cuda\"][\"arch\"]";
 pub fn cuda_arch(func: &Function) -> AResult<Option<String>> {
     let key = FfiString::from("backend_config");
     let mut configs: Vec<Any> = Vec::new();
-    if let Some(body) = &func.body {
-        for statement in body.seq.iter() {
-            if let Some(region) = statement.as_node::<RegionStmtObj>() {
-                if is_launch_entry(region) {
-                    configs.extend(region.attrs.dict.get(&key)?);
-                }
+    for statement in func.body.seq.iter() {
+        if let Some(region) = statement.downcast_ref::<RegionStmtObj>() {
+            if is_launch_entry(region) {
+                configs.extend(region.attrs.dict.get(&key)?);
             }
         }
     }

@@ -20,7 +20,7 @@ pub struct CachePolicyParts {
 fn cache_policy_parts(decoded: &DecodedPtx) -> AResult<CachePolicyParts> {
     let op_name = decoded.op_name.as_str();
     let destination = decoded.scalar_operand("cache_policy")?;
-    if destination.as_node::<TensorLoadObj>().is_none() || dtype_of(&destination)? != "uint64" {
+    if destination.downcast_ref::<TensorLoadObj>().is_none() || dtype_of(&destination)? != "uint64" {
         return unsupported(format!("{op_name} requires a uint64 destination lvalue"));
     }
     let kind = decoded.modifier("kind")?;

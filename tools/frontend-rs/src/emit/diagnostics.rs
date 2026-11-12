@@ -1,13 +1,12 @@
 //! Collect source-located failures during the ordinary emission walk.
 
-use tvm_tirx::ir::Location;
+use crate::tvm_compat::TryCast;
 use tvm_tirx::ir::{CallObj, Expr};
 use tvm_tirx::ir::prim::LetObj;
 use tvm_tirx::ir::{BindObj, Evaluate, ForObj, RegionStmtObj, Stmt, WhileObj};
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::{
-    structural_visit, Any, Array, ObjectRefCast, ObjectRefCore, Result, StructuralView,
-    VisitCallbacks, VisitContext, VisitInterrupt,
+    structural_visit, Any, Array, ObjectRefCore, Result, AnyView, StructuralVisitorView, VisitInterrupt,
 };
 
 use super::{EmitOptions, Emitter};
@@ -24,67 +23,96 @@ pub struct State {
     pub(super) visited_statements: IdSet,
 }
 
-// Stop at direct executed children. In particular, never enter type/layout
-// metadata or a region's attributes and parameters.
+// Stop at direct executed children, without entering metadata or region attributes.
+struct ChildVisitor {
+    root: ObjectRef,
+    children: Vec<ObjectRef>,
+}
+
+#[tvm_ffi::dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
+impl ChildVisitor {
+    fn visit_any(
+        &mut self,
+        value: AnyView<'_>,
+        visitor: &mut StructuralVisitorView<'_, Self>,
+    ) -> Result<Option<VisitInterrupt>> {
+        if let Some(node) = value.downcast_ref::<ObjectRef>() {
+            if same(node, &self.root) {
+                return visitor.default_visit(self, value);
+            }
+            if value.downcast_ref::<Expr>().is_some() || value.downcast_ref::<Stmt>().is_some() {
+                self.children.push(node.clone());
+                return Ok(None);
+            }
+        }
+        if value.downcast_ref::<Array<Any>>().is_some() {
+            return visitor.default_visit(self, value);
+        }
+        Ok(None)
+    }
+}
+
 fn statement_children(stmt: &Stmt) -> Result<Vec<ObjectRef>> {
-    if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+    if let Some(region) = stmt.downcast_ref::<RegionStmtObj>() {
         let mut children: Vec<ObjectRef> = region.args.iter().map(oref).collect();
         children.push(oref(region.body.clone()));
         return Ok(children);
     }
-    let root = oref(stmt.clone());
-    let mut visitor = VisitCallbacks::new(
-        Vec::new(),
-        |value: &StructuralView,
-         visitor: &mut VisitContext<'_, Vec<ObjectRef>>|
-         -> Result<Option<VisitInterrupt>> {
-            if let Some(node) = value.cast::<ObjectRef>() {
-                if same(&node, &root) {
-                    return visitor.visit_children();
-                }
-                if value.cast::<Expr>().is_some() || value.cast::<Stmt>().is_some() {
-                    visitor.state_mut().push(node);
-                    return Ok(None);
-                }
-            }
-            if value.cast::<Array<Any>>().is_some() {
-                return visitor.visit_children();
-            }
-            Ok(None)
-        },
-    );
+    let mut visitor = ChildVisitor {
+        root: oref(stmt.clone()),
+        children: Vec::new(),
+    };
     structural_visit(stmt, &mut visitor)?;
-    Ok(visitor.into_state())
+    Ok(visitor.children)
+}
+
+#[derive(Default)]
+struct ExpressionVisitor {
+    calls: Vec<Expr>,
+    bindings: Vec<ObjectRef>,
+    seen: IdSet,
+}
+
+#[tvm_ffi::dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
+impl ExpressionVisitor {
+    fn visit_any(
+        &mut self,
+        value: AnyView<'_>,
+        visitor: &mut StructuralVisitorView<'_, Self>,
+    ) -> Result<Option<VisitInterrupt>> {
+        if let Some(expr) = value.downcast_ref::<Expr>().cloned() {
+            let node = oref(expr.clone());
+            if !self.seen.add(node.clone()) || as_var(&node).is_some() {
+                return Ok(None);
+            }
+            if let Some(binding) = expr.downcast_ref::<LetObj>() {
+                self.bindings.push(oref(binding.var.clone()));
+            }
+            if let Some(interrupt) = visitor.default_visit(self, value)? {
+                return Ok(Some(interrupt));
+            }
+            if expr.downcast_ref::<CallObj>().is_some() {
+                self.calls.push(expr);
+            }
+        } else if value.downcast_ref::<Array<Any>>().is_some() {
+            return visitor.default_visit(self, value);
+        }
+        Ok(None)
+    }
 }
 
 fn expression_calls(expression: &ObjectRef) -> Result<(Vec<Expr>, Vec<ObjectRef>)> {
-    type State = (Vec<Expr>, Vec<ObjectRef>, IdSet);
-    let mut visitor = VisitCallbacks::new(
-        (Vec::new(), Vec::new(), IdSet::default()),
-        |value: &StructuralView,
-         visitor: &mut VisitContext<'_, State>|
-         -> Result<Option<VisitInterrupt>> {
-            if let Some(expr) = value.cast::<Expr>() {
-                let node = oref(expr.clone());
-                if !visitor.state_mut().2.add(node.clone()) || as_var(&node).is_some() {
-                    return Ok(None);
-                }
-                if let Some(binding) = expr.as_node::<LetObj>() {
-                    visitor.state_mut().1.push(oref(binding.var.clone()));
-                }
-                visitor.visit_children()?;
-                if expr.as_node::<CallObj>().is_some() {
-                    visitor.state_mut().0.push(expr);
-                }
-            } else if value.cast::<Array<Any>>().is_some() {
-                return visitor.visit_children();
-            }
-            Ok(None)
-        },
-    );
+    let mut visitor = ExpressionVisitor::default();
     structural_visit(expression, &mut visitor)?;
-    let (calls, bindings, _) = visitor.into_state();
-    Ok((calls, bindings))
+    Ok((visitor.calls, visitor.bindings))
 }
 
 impl<'a> Emitter<'a> {
@@ -141,7 +169,7 @@ impl<'a> Emitter<'a> {
             emitter.nested_load_site = nested_load_site.clone();
         };
         restore(self);
-        if let Some(bind) = stmt.as_node::<BindObj>() {
+        if let Some(bind) = stmt.downcast_ref::<BindObj>() {
             self.diagnostics.invalid_values.add(oref(bind.var.clone()));
         }
         let result = self.emit_unvisited_children(stmt);
@@ -151,13 +179,13 @@ impl<'a> Emitter<'a> {
 
     fn emit_unvisited_children(&mut self, stmt: &Stmt) -> AResult<()> {
         let invalid_values = self.diagnostics.invalid_values.clone();
-        if let Some(loop_stmt) = stmt.as_node::<ForObj>() {
+        if let Some(loop_stmt) = stmt.downcast_ref::<ForObj>() {
             // Its bounds failed, so the loop variable has no emitted value.
             self.diagnostics
                 .invalid_values
                 .add(oref(loop_stmt.var.clone()));
         }
-        let is_loop = stmt.as_node::<ForObj>().is_some() || stmt.as_node::<WhileObj>().is_some();
+        let is_loop = stmt.downcast_ref::<ForObj>().is_some() || stmt.downcast_ref::<WhileObj>().is_some();
         if is_loop {
             self.loop_depth += 1;
             // Only the enclosing-loop identity is needed for break/continue.
@@ -185,7 +213,7 @@ impl<'a> Emitter<'a> {
                     }
                     for call in calls {
                         if !self.diagnostics.visited_calls.contains(&oref(call.clone())) {
-                            self.emit_stmt(&Evaluate::new(call, Location::unknown()).into(), None)?;
+                            self.emit_stmt(&Evaluate::new(call, tvm_tirx::ir::UNKNOWN_LOC).into(), None)?;
                         }
                     }
                     self.diagnostics.invalid_values = invalid;

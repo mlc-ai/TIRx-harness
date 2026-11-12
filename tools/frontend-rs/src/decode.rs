@@ -1,12 +1,13 @@
 //! The shared decoding boundary for registry dispatch.
 
+use crate::tvm_compat::TryCast;
 use std::cell::RefCell;
 
 use tvm_tirx::ir::prim::{add, AddObj, CastObj};
-use tvm_tirx::ir::{BindObj, CallObj, Expr, Op, Stmt, TupleObj, Var};
+use tvm_tirx::ir::{BindObj, CallObj, Expr, Op, PrimExpr, Stmt, TupleObj, Var};
 
 use tvm_tirx::tvm_ffi::object::ObjectRef;
-use tvm_tirx::tvm_ffi::{ObjectRefCast, ObjectRefCore};
+use tvm_tirx::tvm_ffi::{ObjectRefCore};
 
 use crate::analyze::buffers::call_op_name;
 pub mod ptx;
@@ -53,7 +54,7 @@ impl<'a> Decoded<'a> {
         params: Option<&'a [Var]>,
         op_id: Option<i64>,
     ) -> AResult<Self> {
-        let Some(call) = node.as_node::<CallObj>() else {
+        let Some(call) = node.downcast_ref::<CallObj>() else {
             return Err(Failure::Ffi(ffi_error("call decoding expects a TIRx Call")));
         };
         let Some(raw_name) = call_op_name(call)? else {
@@ -74,7 +75,7 @@ impl<'a> Decoded<'a> {
             node,
             call,
             op_name,
-            args: call.args.iter().map(oref).collect(),
+            args: call.args.iter().cloned().map(oref).collect(),
             result_dtype: dtype_of(node)?,
             ptx,
             params,
@@ -122,7 +123,7 @@ pub fn canonical_op_name(name: &str) -> String {
 
 /// Canonical registry name without decoding the instruction's operand payload.
 pub fn call_name(node: &ObjectRef) -> AResult<Option<String>> {
-    match node.as_node::<CallObj>() {
+    match node.downcast_ref::<CallObj>() {
         Some(call) => Ok(call_op_name(call)?.map(|name| canonical_op_name(&name))),
         None => Ok(None),
     }
@@ -139,7 +140,7 @@ impl Cache {
         if let Some(decode) = self.0.borrow().get(node) {
             return Ok(Some(decode.clone()));
         }
-        let Some(call) = node.as_node::<tvm_tirx::ir::CallObj>() else {
+        let Some(call) = node.downcast_ref::<tvm_tirx::ir::CallObj>() else {
             return Ok(None);
         };
         let is_table_call = call_op_name(call)?
@@ -166,13 +167,13 @@ pub const DECL_TENSOR: &str = "tirx.decl_tensor";
 
 /// The tensor whose data pointer `tirx.tensor_data_ptr` reads.
 pub fn projected_buffer(node: &ObjectRef) -> AResult<Option<Var>> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some(TENSOR_DATA_PTR) || call.args.len() != 1 {
         return Ok(None);
     }
-    Ok(as_buffer(&oref(call.args.get(0)?)))
+    Ok(as_buffer(&oref(call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?)))
 }
 
 /// How a `Bind` of a tensor variable introduces it.
@@ -188,21 +189,21 @@ pub enum TensorDecl {
 
 /// The tensor `stmt` binds and how, or `None` for any other statement.
 pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
-    let Some(bind) = stmt.as_node::<BindObj>() else {
+    let Some(bind) = stmt.downcast_ref::<BindObj>() else {
         return Ok(None);
     };
     if !is_tensor_var(&bind.var) {
         return Ok(None);
     }
-    let call = bind.value.as_node::<CallObj>();
+    let call = bind.value.downcast_ref::<CallObj>();
     let op = call.and_then(|call| call.op.clone().try_cast::<Op>().ok());
     let decl = match (op.map(|op| ffi_text(&op.name)).as_deref(), call) {
         (Some("tirx.alloc_tensor"), Some(call)) if call.args.is_empty() => TensorDecl::Alloc,
         // A placed TMEM allocation names columns `tcgen05.alloc` already owns.
         (Some("tirx.alloc_tensor"), Some(call)) => {
-            let placement = call.args.get(0)?;
-            let fields: Vec<Expr> = match placement.as_node::<TupleObj>() {
-                Some(tuple) => tuple.fields.iter().collect(),
+            let placement = call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?;
+            let fields: Vec<Expr> = match placement.downcast_ref::<TupleObj>() {
+                Some(tuple) => tuple.fields.iter().cloned().collect(),
                 None => Vec::new(),
             };
             match fields.as_slice() {
@@ -216,10 +217,10 @@ pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
             }
         }
         (Some(DECL_TENSOR), Some(call)) if call.args.len() == 1 => {
-            TensorDecl::View(call.args.get(0)?)
+            TensorDecl::View(call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?)
         }
         (Some("tirx.cuda.decl_tmem"), Some(call)) if call.args.len() == 1 => {
-            TensorDecl::Tmem(call.args.get(0)?)
+            TensorDecl::Tmem(call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?)
         }
         _ => {
             return unsupported(format!(
@@ -236,12 +237,12 @@ pub fn tensor_decl(stmt: &Stmt) -> AResult<Option<(Var, TensorDecl)>> {
 fn strip_byte_offsets(data: &Expr) -> AResult<(Expr, Vec<Expr>)> {
     let mut current = data.clone();
     let mut offsets = Vec::new();
-    while let Some(call) = current.as_node::<CallObj>() {
+    while let Some(call) = current.downcast_ref::<CallObj>() {
         if call_op_name(call)?.as_deref() != Some("tirx.ptr_byte_offset") || call.args.len() != 2 {
             break;
         }
-        let base = call.args.get(0)?;
-        offsets.push(call.args.get(1)?);
+        let base = call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?;
+        offsets.push(call.args.get(1).ok_or_else(|| ffi_error("missing call argument 1"))?);
         current = base;
     }
     Ok((current, offsets))
@@ -280,14 +281,14 @@ fn element_address(expr: &Expr) -> AResult<Option<(Var, Expr)>> {
     use tvm_tirx::ir::TensorLoadObj;
     use tvm_tirx::tvm_ffi::{Any, DLDataType, DLDataTypeExt};
 
-    let Some(call) = expr.as_node::<CallObj>() else {
+    let Some(call) = expr.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
         return Ok(None);
     }
-    let element = call.args.get(0)?;
-    let Some(load) = element.as_node::<TensorLoadObj>() else {
+    let element = call.args.get(0).ok_or_else(|| ffi_error("missing call argument 0"))?;
+    let Some(load) = element.downcast_ref::<TensorLoadObj>() else {
         return Ok(None);
     };
     let Some(tensor) = as_buffer(&oref(load.source.clone())) else {
@@ -312,11 +313,11 @@ fn element_address(expr: &Expr) -> AResult<Option<(Var, Expr)>> {
     let mut linear: Option<Expr> = None;
     for (index, extent) in load.indices.iter().zip(ty.shape.iter()) {
         linear = Some(match linear {
-            None => index,
+            None => index.clone().into(),
             Some(outer) => op(
                 "_OpAdd",
-                Any::from(op("_OpMul", Any::from(outer), Any::from(extent))?),
-                Any::from(index),
+                Any::from(op("_OpMul", Any::from(outer), Any::from(extent.clone()))?),
+                Any::from(index.clone()),
             )?,
         });
     }
@@ -330,9 +331,9 @@ fn element_address(expr: &Expr) -> AResult<Option<(Var, Expr)>> {
 /// `address` with `uint32(reinterpret(tensor_data_ptr(parent), uint64))`, the column
 /// address of `parent`, replaced by the address recorded for `parent`.
 pub fn resolve_tmem_address(address: &Expr, known: &[(Var, Expr)]) -> AResult<Option<Expr>> {
-    if let Some(sum) = address.as_node::<AddObj>() {
-        return match resolve_tmem_address(&sum.a, known)? {
-            Some(base) => Ok(Some(add(base, sum.b.clone())?)),
+    if let Some(sum) = address.downcast_ref::<AddObj>() {
+        return match resolve_tmem_address(&sum.a.clone().into(), known)? {
+            Some(base) => Ok(Some(add(PrimExpr::try_from(base)?, sum.b.clone())?.into())),
             None => Ok(None),
         };
     }
@@ -348,10 +349,10 @@ pub fn resolve_tmem_address(address: &Expr, known: &[(Var, Expr)]) -> AResult<Op
 
 /// The tensor whose data pointer `expr` reinterprets as a TMEM column address.
 fn data_pointer_tensor(expr: &Expr) -> AResult<Option<Var>> {
-    let Some(cast) = expr.as_node::<CastObj>() else {
+    let Some(cast) = expr.downcast_ref::<CastObj>() else {
         return Ok(None);
     };
-    let Some(reinterpret) = cast.value.as_node::<CallObj>() else {
+    let Some(reinterpret) = cast.value.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(reinterpret)?.as_deref() != Some("tirx.reinterpret") {
@@ -360,7 +361,7 @@ fn data_pointer_tensor(expr: &Expr) -> AResult<Option<Var>> {
     let Some(pointer) = reinterpret.args.iter().next() else {
         return Ok(None);
     };
-    let Some(data_pointer) = pointer.as_node::<CallObj>() else {
+    let Some(data_pointer) = pointer.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(data_pointer)?.as_deref() != Some("tirx.tensor_data_ptr") {
@@ -370,5 +371,5 @@ fn data_pointer_tensor(expr: &Expr) -> AResult<Option<Var>> {
         .args
         .iter()
         .next()
-        .and_then(|tensor| as_buffer(&oref(tensor))))
+        .and_then(|tensor| as_buffer(&oref(tensor.clone()))))
 }

@@ -283,6 +283,7 @@ def prepare_msa_sparse_atten_fwd_combine_case() -> NumSimCase:
     module = load_tirx_kernel("msa_sparse_atten_fwd_combine_sm100")
     kernel = _specialize(
         module.get_kernel(
+            backend_config={"cuda": {"arch": "sm_100a"}},
             topk=topk,
             partial_dtype="float32",
             temperature=False,

@@ -12,7 +12,7 @@ use crate::emit::{abi, Emitter, RustValue, Uniformity};
 use crate::tables::{json_string, MEM_LD, MEM_ST};
 use crate::tvm_compat::int_value;
 use tvm_tirx::ir::StringImmObj;
-use tvm_tirx::ir::{CallObj, IntImmObj, Location, PtrTypeObj, TensorLoadObj};
+use tvm_tirx::ir::{CallObj, IntImmObj, PtrTypeObj, TensorLoadObj};
 use tvm_tirx::ir::prim::Cast;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
@@ -402,7 +402,7 @@ const float* __restrict__ accum, const float* __restrict__ weights) {{
 }
 
 fn string_imm(value: &ObjectRef, field: &str) -> AResult<String> {
-    match value.as_node::<StringImmObj>() {
+    match value.downcast_ref::<StringImmObj>() {
         Some(imm) => Ok(ffi_text(&imm.value)),
         None => unsupported(format!("{field} must be a static string")),
     }
@@ -417,7 +417,7 @@ fn helper_dtype(node: &ObjectRef) -> String {
     let Some(ty) = expr_type(node) else {
         return String::new();
     };
-    if ty.as_node::<PtrTypeObj>().is_some() {
+    if ty.downcast_ref::<PtrTypeObj>().is_some() {
         return "handle".to_owned();
     }
     prim_dtype(&ty).map(dtype_text).unwrap_or_default()
@@ -425,14 +425,14 @@ fn helper_dtype(node: &ObjectRef) -> String {
 
 /// `address_of(TensorLoad)` with exactly one argument: the load node.
 fn address_of_load(value: &ObjectRef) -> AResult<Option<ObjectRef>> {
-    let Some(call) = value.as_node::<CallObj>() else {
+    let Some(call) = value.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
         return Ok(None);
     }
-    let argument = oref(call.args.get(0)?);
-    if argument.as_node::<TensorLoadObj>().is_none() {
+    let argument = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
+    if argument.downcast_ref::<TensorLoadObj>().is_none() {
         return Ok(None);
     }
     Ok(Some(argument))
@@ -440,7 +440,7 @@ fn address_of_load(value: &ObjectRef) -> AResult<Option<ObjectRef>> {
 
 fn pointer_scope_and_dtype(value: &ObjectRef) -> Option<(String, String)> {
     let ty = expr_type(value)?;
-    let pointer = ty.as_node::<PtrTypeObj>()?;
+    let pointer = ty.downcast_ref::<PtrTypeObj>()?;
     let dtype = prim_dtype(&pointer.element_type)
         .map(dtype_text)
         .unwrap_or_default();
@@ -461,7 +461,7 @@ fn require_local_f32_array_address(
         Some((scope, dtype)) if scope == "local" && dtype == "float32" => {}
         _ => return unsupported(format!("{field} must be a local float32 pointer")),
     }
-    let load = load_node.as_node::<TensorLoadObj>().expect("tensor load");
+    let load = load_node.downcast_ref::<TensorLoadObj>().expect("tensor load");
     let Some(source) = as_buffer(&oref(load.source.clone())) else {
         return unsupported(format!("{field} must address local float32 storage"));
     };
@@ -472,7 +472,7 @@ fn require_local_f32_array_address(
     let Some(last) = indices.last() else {
         return unsupported(format!("{field} final array index must be a static zero"));
     };
-    let Some(base) = last.as_node::<IntImmObj>().and_then(|imm| int_value(imm).ok()) else {
+    let Some(base) = last.downcast_ref::<IntImmObj>().and_then(|imm| int_value(imm).ok()) else {
         return unsupported(format!("{field} final array index must be a static zero"));
     };
     let shape: Vec<ObjectRef> = source.tensor_type().shape.iter().map(oref).collect();
@@ -495,7 +495,7 @@ fn require_local_u64_address(value: &ObjectRef, field: &str) -> AResult<()> {
     let Some(load_node) = address_of_load(value)? else {
         return unsupported(format!("{field} must be address_of local uint64 storage"));
     };
-    let load = load_node.as_node::<TensorLoadObj>().expect("tensor load");
+    let load = load_node.downcast_ref::<TensorLoadObj>().expect("tensor load");
     let source = as_buffer(&oref(load.source.clone()));
     let pointer_ok = matches!(
         pointer_scope_and_dtype(value),
@@ -535,7 +535,7 @@ fn parse_indexed(name: &str, prefix: &str, max: i64) -> Option<i64> {
 
 /// `classify_known_cuda_func_call`: `None` for every other call.
 pub fn classify_known_cuda_func_call(node: &ObjectRef) -> AResult<Option<KnownCudaFuncCall>> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("tirx.cuda.func_call") {
@@ -544,7 +544,7 @@ pub fn classify_known_cuda_func_call(node: &ObjectRef) -> AResult<Option<KnownCu
     let arguments: Vec<ObjectRef> = call.args.iter().map(oref).collect();
     let function_name = match arguments
         .first()
-        .and_then(|first| first.as_node::<StringImmObj>())
+        .and_then(|first| first.downcast_ref::<StringImmObj>())
     {
         Some(imm) => ffi_text(&imm.value),
         None => "<non-static>".to_owned(),
@@ -851,7 +851,7 @@ pub const DPS_HELPERS: &[(&str, &[&str], usize)] = &[
 ];
 
 pub fn validate_dps_helper(node: &ObjectRef, op_name: &str) -> AResult<()> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Err(crate::analyze::util::Failure::Ffi(
             crate::analyze::util::ffi_error("destination-passing lowering expects a TIRx Call"),
         ));
@@ -1025,8 +1025,8 @@ impl<'a> Emitter<'a> {
                     } else {
                         "uint64"
                     })?,
-                    prim(&parsed.arguments[1])?,
-                    Location::unknown(),
+                    crate::analyze::util::primitive(prim(&parsed.arguments[1])?)?,
+                    tvm_tirx::ir::UNKNOWN_LOC,
                 )?;
                 let value =
                     self.v2_register_operand(&oref(operand), "u64", "tensor_map_replace_value")?;
@@ -1736,7 +1736,7 @@ impl<'a> Emitter<'a> {
         source_op_id: i64,
     ) -> AResult<()> {
         let args: Vec<ObjectRef> = expr
-            .as_node::<tvm_tirx::ir::CallObj>()
+            .downcast_ref::<tvm_tirx::ir::CallObj>()
             .map(|call| call.args.iter().map(crate::analyze::util::oref).collect())
             .unwrap_or_default();
         match op_name {
@@ -1781,8 +1781,8 @@ pub fn emit_dps(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustVal
     let destination = DPS_HELPERS.iter()
         .find(|(name, _, _)| *name == call.op_name)
         .expect("validated DPS helper").2;
-    let node = call.node.as_node::<CallObj>().expect("validated call");
-    emitter.record_pointer_write(&oref(node.args.get(destination)?), "")?;
+    let node = call.node.downcast_ref::<CallObj>().expect("validated call");
+    emitter.record_pointer_write(&oref(node.args.get(destination).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?), "")?;
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_dps_statement(call.node, &call.op_name, source_op_id)?;
     Ok(None)

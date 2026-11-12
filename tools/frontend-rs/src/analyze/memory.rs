@@ -137,9 +137,9 @@ pub fn referenced_buffers(
         }
     };
     for node in nodes {
-        if let Some(store) = node.as_node::<TensorStoreObj>() {
+        if let Some(store) = node.downcast_ref::<TensorStoreObj>() {
             append(Some(tensor_var(&oref(store.dest.clone()))?), &mut seen, &mut referenced);
-        } else if let Some(region) = node.as_node::<TensorRegionObj>() {
+        } else if let Some(region) = node.downcast_ref::<TensorRegionObj>() {
             append(
                 super::util::as_buffer(&oref(region.source.clone())),
                 &mut seen,
@@ -147,7 +147,7 @@ pub fn referenced_buffers(
             );
         }
         if include_tensor_load_sources {
-            if let Some(load) = node.as_node::<TensorLoadObj>() {
+            if let Some(load) = node.downcast_ref::<TensorLoadObj>() {
                 append(
                     super::util::as_buffer(&oref(load.source.clone())),
                     &mut seen,
@@ -155,7 +155,7 @@ pub fn referenced_buffers(
                 );
             }
         }
-        if node.as_node::<CallObj>().is_some() {
+        if node.downcast_ref::<CallObj>().is_some() {
             append(projected_buffer(node)?, &mut seen, &mut referenced);
         }
     }
@@ -216,7 +216,7 @@ fn append_buffer(builder: &mut BackingBuilder, buffer: &Var, is_parameter: bool)
 fn dynamic_shared_capacity(statements: &[Stmt]) -> AResult<Option<i64>> {
     let mut capacity: Option<i64> = None;
     for statement in statements {
-        let Some(region) = statement.as_node::<RegionStmtObj>() else {
+        let Some(region) = statement.downcast_ref::<RegionStmtObj>() else {
             continue;
         };
         if !is_launch_entry(region) {
@@ -554,7 +554,7 @@ pub(in crate::analyze) fn build_memory_plan(
                         view_end_expression.any(),
                         owner_end_expression.any(),
                     )?;
-                    proven = analyzer.can_prove(&condition, ProofStrength::Default)?;
+                    proven = analyzer.can_prove(tvm_tirx::ir::PrimExpr::try_from(Any::from(condition))?, ProofStrength::Default)?;
                 }
                 if !proven && !(runtime_sized_global_alias || launch_bounded_global_alias) {
                     return unsupported(format!(

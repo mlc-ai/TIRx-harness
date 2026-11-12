@@ -20,7 +20,7 @@ use crate::emit::memory_support::{shared_pointer_source, SharedAddressForms};
 use crate::emit::{abi, ControlProvenance, Emitter, RustValue, Uniformity, Variables};
 use crate::tables::is_integer_dtype;
 use crate::tables::{json_string, phase_binding_name};
-use tvm_tirx::ir::{Call, CallObj, Expr, Location, Op, PtrTypeObj, Type, Var};
+use tvm_tirx::ir::{Call, CallObj, Expr, Op, PtrTypeObj, Type, Var};
 use tvm_tirx::ir::prim::SelectObj;
 use tvm_tirx::tirx::Function;
 use tvm_tirx::tvm_ffi::object::ObjectRef;
@@ -391,8 +391,8 @@ fn is_s2g(name: &str) -> bool {
 fn is_typed_tensor_map_var(variable: &Var) -> bool {
     variable
         .ty
-        .as_node::<PtrTypeObj>()
-        .is_some_and(|pointer| pointer.element_type.as_node::<TensorMapTypeObj>().is_some())
+        .downcast_ref::<PtrTypeObj>()
+        .is_some_and(|pointer| pointer.element_type.downcast_ref::<TensorMapTypeObj>().is_some())
 }
 
 fn call_args(call: &CallObj) -> Vec<ObjectRef> {
@@ -404,14 +404,14 @@ pub fn tensor_map_selector_branches(
     ctx: &Ctx,
     expression: &ObjectRef,
 ) -> AResult<Option<(ObjectRef, ObjectRef, ObjectRef)>> {
-    if let Some(select) = expression.as_node::<SelectObj>() {
+    if let Some(select) = expression.downcast_ref::<SelectObj>() {
         return Ok(Some((
             oref(select.condition.clone()),
             oref(select.true_value.clone()),
             oref(select.false_value.clone()),
         )));
     }
-    let Some(call) = expression.as_node::<CallObj>() else {
+    let Some(call) = expression.downcast_ref::<CallObj>() else {
         return Ok(None);
     };
     if call_op_name(call)?.as_deref() != Some("prim.if_then_else") {
@@ -450,7 +450,7 @@ pub fn tensor_map_parameters(
     }
 
     fn walk(ctx: &Ctx, node: &ObjectRef, params: Option<&[Var]>) -> AResult<Vec<Var>> {
-        if let Some(call) = node.as_node::<CallObj>() {
+        if let Some(call) = node.downcast_ref::<CallObj>() {
             let name = call_op_name(call)?.unwrap_or_default();
             let signature = match name.as_str() {
                 "tirx.address_of" => super::pure::address_of_signature(ctx, node, call),
@@ -1343,8 +1343,8 @@ pub fn scalar_parameters(func: &Function) -> Vec<Var> {
         .iter()
         .filter(|parameter| {
             !is_tensor_var(parameter)
-                && parameter.ty.as_node::<PtrTypeObj>().is_none()
-        })
+                && parameter.ty.downcast_ref::<PtrTypeObj>().is_none()
+        }).cloned()
         .collect()
 }
 
@@ -1514,7 +1514,7 @@ pub(super) fn reinterpret(dtype: &str, value: &ObjectRef) -> AResult<ObjectRef> 
         vec![Expr::try_from(Any::from(value.clone()))?],
         None,
         Vec::<Type>::new(),
-        Location::unknown(),
+        tvm_tirx::ir::UNKNOWN_LOC,
     )?;
     Ok(oref(call))
 }
@@ -1615,9 +1615,9 @@ impl<'a> Emitter<'a> {
         require_uniform_selector: bool,
         source_op_id: i64,
     ) -> AResult<String> {
-        if let Some(call) = expression.as_node::<CallObj>() {
+        if let Some(call) = expression.downcast_ref::<CallObj>() {
             if call_op_name(call)?.as_deref() == Some("tirx.reinterpret") && call.args.len() == 1 {
-                let inner = oref(call.args.get(0)?);
+                let inner = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
                 return self.raw_tma_tensor_map(
                     &inner,
                     expected_parameters,
@@ -1662,7 +1662,7 @@ impl<'a> Emitter<'a> {
             ));
             return Ok(result);
         }
-        if !expected_parameters.is_empty() && expression.as_node::<CallObj>().is_some() {
+        if !expected_parameters.is_empty() && expression.downcast_ref::<CallObj>().is_some() {
             let parameters = tensor_map_parameters(self.ctx, expression, Some(&self.params))?;
             if parameters.len() != 1
                 || !expected_parameters
@@ -2113,9 +2113,9 @@ impl<'a> Emitter<'a> {
         expression: &ObjectRef,
         active_mask: &str,
     ) -> AResult<Vec<(String, ObjectRef)>> {
-        if let Some(call) = expression.as_node::<CallObj>() {
+        if let Some(call) = expression.downcast_ref::<CallObj>() {
             if call_op_name(call)?.as_deref() == Some("tirx.reinterpret") {
-                let inner = oref(call.args.get(0)?);
+                let inner = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
                 return self.raw_tma_descriptor_selections(&inner, active_mask);
             }
         }
@@ -2909,10 +2909,10 @@ fn is_tensor_map_parameter(node: &ObjectRef, params: Option<&[Var]>) -> bool {
     let Some(variable) = as_var(node) else {
         return false;
     };
-    let Some(pointer) = variable.ty.as_node::<PtrTypeObj>() else {
+    let Some(pointer) = variable.ty.downcast_ref::<PtrTypeObj>() else {
         return false;
     };
-    if pointer.element_type.as_node::<TensorMapTypeObj>().is_none() {
+    if pointer.element_type.downcast_ref::<TensorMapTypeObj>().is_none() {
         return false;
     }
     match params {
@@ -2935,7 +2935,7 @@ pub fn is_tensor_map_address_call(
         Err(Failure::Unsupported { .. }) | Err(Failure::Unmodeled { .. }) => return Ok(false),
         Err(error) => return Err(error),
     }
-    let argument = oref(call.args.get(0)?);
+    let argument = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
     // Selector branches (Select / if_then_else) never reach here: address_of
     // takes its parameter directly.
     Ok(is_tensor_map_parameter(&argument, params))
@@ -2959,7 +2959,7 @@ pub struct TensorMapFacts {
 pub fn scan_tensor_maps(ctx: &Ctx, nodes: &[ObjectRef], params: &[Var]) -> AResult<TensorMapFacts> {
     let mut facts = TensorMapFacts::default();
     for node in nodes {
-        if let Some(call) = node.as_node::<CallObj>() {
+        if let Some(call) = node.downcast_ref::<CallObj>() {
             if is_tensor_map_address_call(ctx, node, call, Some(params))? {
                 let record = record_address_call(ctx, node, params)?;
                 facts.parameter_indices.extend(record.parameter_indices);

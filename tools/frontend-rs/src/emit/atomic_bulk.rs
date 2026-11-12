@@ -217,7 +217,7 @@ fn check_atomic_destinations(
         other => other,
     };
     let compatible = match destination {
-        Some(node) if node.as_node::<TensorLoadObj>().is_some() => {
+        Some(node) if node.downcast_ref::<TensorLoadObj>().is_some() => {
             let dtype = dtype_of(node)?;
             if atom_cas_type(ptx_type).is_some() {
                 ptx_atomic_value_dtypes(ptx_type).contains(&dtype.as_str())
@@ -314,7 +314,7 @@ pub fn resolve_cuda_atomic_call(
     node: &ObjectRef,
     op_name: &str,
 ) -> AResult<CudaAtomicCall> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Err(crate::analyze::util::Failure::Ffi(
             crate::analyze::util::ffi_error("atomic lowering expects a TIRx Call"),
         ));
@@ -678,7 +678,7 @@ pub fn decoded_vector_atomic_parts(decoded: &DecodedPtx) -> AResult<VectorAtomic
     let mut destinations_valid = true;
     for lane in &destination_lanes {
         match lane {
-            Some(node) if node.as_node::<TensorLoadObj>().is_some() => {
+            Some(node) if node.downcast_ref::<TensorLoadObj>().is_some() => {
                 if dtype_of(node)? != carrier {
                     destinations_valid = false;
                 }

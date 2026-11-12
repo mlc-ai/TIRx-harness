@@ -95,7 +95,7 @@ pub fn resolve_legacy_memory_call(
     node: &ObjectRef,
     op_name: &str,
 ) -> AResult<LegacyMemoryCall> {
-    let Some(call) = node.as_node::<CallObj>() else {
+    let Some(call) = node.downcast_ref::<CallObj>() else {
         return Err(crate::analyze::util::Failure::Ffi(
             crate::analyze::util::ffi_error("raw memory lowering expects a TIRx Call"),
         ));
@@ -291,7 +291,7 @@ pub fn decoded_load_parts(decoded: &DecodedPtx) -> AResult<LoadParts> {
     let op_name = decoded.op_name.as_str();
     decoded.require_void()?;
     let destination = decoded.scalar_operand("d")?;
-    if destination.as_node::<TensorLoadObj>().is_none() {
+    if destination.downcast_ref::<TensorLoadObj>().is_none() {
         return unsupported(format!("{op_name}.d must be a TensorLoad lvalue"));
     }
     let result_dtype = memory_carrier_dtype(decoded, "d")?;
@@ -366,7 +366,7 @@ pub fn decoded_vector_load_parts(decoded: &DecodedPtx) -> AResult<VectorLoadPart
     }
     if concrete
         .iter()
-        .any(|value| value.as_node::<TensorLoadObj>().is_none())
+        .any(|value| value.downcast_ref::<TensorLoadObj>().is_none())
     {
         return unsupported(format!(
             "{op_name} destinations must be TensorLoad lvalues or explicit sinks"
@@ -467,7 +467,7 @@ pub fn decoded_ldmatrix_parts(decoded: &DecodedPtx) -> AResult<LdmatrixParts> {
                 "{op_name} destinations must be uint32 TensorLoad lvalues"
             ));
         };
-        if destination.as_node::<TensorLoadObj>().is_none() || dtype_of(destination)? != "uint32" {
+        if destination.downcast_ref::<TensorLoadObj>().is_none() || dtype_of(destination)? != "uint32" {
             return unsupported(format!(
                 "{op_name} destinations must be uint32 TensorLoad lvalues"
             ));
@@ -750,21 +750,21 @@ impl<'a> Emitter<'a> {
     /// The logical buffer of an exact address-of.
     pub(super) fn address_logical_buffer(&mut self, address: &ObjectRef) -> AResult<Option<String>> {
         let mut address = address.clone();
-        if let Some(call) = address.as_node::<CallObj>() {
+        if let Some(call) = address.downcast_ref::<CallObj>() {
             if call_op_name(call)?.as_deref() == Some("tirx.cuda.cvta_generic_to_shared")
                 && call.args.len() == 1
             {
-                address = oref(call.args.get(0)?);
+                address = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
             }
         }
-        let Some(call) = address.as_node::<CallObj>() else {
+        let Some(call) = address.downcast_ref::<CallObj>() else {
             return Ok(None);
         };
         if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
             return Ok(None);
         }
-        let argument = oref(call.args.get(0)?);
-        let Some(load) = argument.as_node::<TensorLoadObj>() else {
+        let argument = oref(call.args.get(0).ok_or_else(|| crate::analyze::util::ffi_error("array index out of bounds"))?);
+        let Some(load) = argument.downcast_ref::<TensorLoadObj>() else {
             return Ok(None);
         };
         let Some(source) = as_buffer(&oref(load.source.clone())) else {

@@ -58,7 +58,7 @@ pub fn semantic_ir_json(value: ObjectRef, tvm_version: FfiString) -> Result<FfiS
     .into_iter()
     .collect();
     stripped_nodes.push(unknown_node.into());
-    let graph = replace(graph, "nodes", Array::new(stripped_nodes).into());
+    let graph = replace(graph, "nodes", Array::from_vec(stripped_nodes).into());
     let stripped: Any =
         tvm_tirx::tvm_ffi::cached_global_func!("ffi.FromJSONGraph").call_tuple((graph,))?;
     // Loading and saving removes SourceLoc/SourceName nodes disconnected above.

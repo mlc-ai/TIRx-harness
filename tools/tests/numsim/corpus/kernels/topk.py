@@ -131,7 +131,13 @@ def _topk_case(name: str, *, length: int, k: int, expected_order: str) -> NumSim
         }
     elif name == "filtered_topk":
         kernel = module.get_kernel(
-            dtype="float32", mode="basic", num_rows=1, length=length, k=k, pattern="random"
+            backend_config={"cuda": {"arch": "sm_100a"}},
+            dtype="float32",
+            mode="basic",
+            num_rows=1,
+            length=length,
+            k=k,
+            pattern="random",
         )
         aux = np.zeros((1,), dtype=np.int32)
         row_lengths = np.full((1,), length, dtype=np.int32)
@@ -189,7 +195,14 @@ def prepare_fast_topk_clusters_case() -> NumSimCase:
         "values": values,
         "overflow": overflow,
     }
-    kernel = module.get_kernel(dtype="float32", batch=1, seq_len=length, k=k, mode="plain")
+    kernel = module.get_kernel(
+        backend_config={"cuda": {"arch": "sm_100a"}},
+        dtype="float32",
+        batch=1,
+        seq_len=length,
+        k=k,
+        mode="plain",
+    )
     kernel = _name_buffer_parameters(kernel, ("logits", "indices", "values", "overflow"))
     # The production path only uses overflow as a spill buffer.  With k=2 and
     # this strictly ordered input no candidate spills, so its complete mutated
@@ -219,7 +232,13 @@ def prepare_stable_sort_topk_by_value_case() -> NumSimCase:
     indices = np.array([11, 7], dtype=np.int32)
     original_values = values.copy()
     original_indices = indices.copy()
-    kernel = module.get_kernel(dtype="float32", num_rows=1, k=2, pattern="tie_heavy")
+    kernel = module.get_kernel(
+        backend_config={"cuda": {"arch": "sm_100a"}},
+        dtype="float32",
+        num_rows=1,
+        k=2,
+        pattern="tie_heavy",
+    )
     expected_order = np.argsort(-original_values, kind="stable")
     expected = {
         "out_idx": original_indices[expected_order],

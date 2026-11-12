@@ -67,7 +67,7 @@ fn warp_load_plan(dtype: &str, space: MemorySpace) -> AResult<WarpLoadPlan> {
 /// The pointee dtype of an expression's declared type.
 pub(super) fn pointer_pointee_dtype(node: &ObjectRef) -> Option<String> {
     let ty = expr_type(node)?;
-    let pointer = ty.as_node::<PtrTypeObj>()?;
+    let pointer = ty.downcast_ref::<PtrTypeObj>()?;
     prim_dtype(&pointer.element_type).map(dtype_text)
 }
 
@@ -617,7 +617,7 @@ impl<'a> Emitter<'a> {
             }
             if indices
                 .iter()
-                .any(|index| oref(index.clone()).as_node::<RampObj>().is_some())
+                .any(|index| oref(index.clone()).downcast_ref::<RampObj>().is_some())
             {
                 return unsupported(format!("{dtype} element load requires scalar indices"));
             }
@@ -781,18 +781,18 @@ impl<'a> Emitter<'a> {
             ));
         }
         let last = indices.last().map(|index| oref(index.clone()));
-        let Some(last) = last.filter(|node| node.as_node::<RampObj>().is_some()) else {
+        let Some(last) = last.filter(|node| node.downcast_ref::<RampObj>().is_some()) else {
             return unsupported(format!("{result_dtype} load requires a final Ramp index"));
         };
         if indices[..indices.len() - 1]
             .iter()
-            .any(|index| oref(index.clone()).as_node::<RampObj>().is_some())
+            .any(|index| oref(index.clone()).downcast_ref::<RampObj>().is_some())
         {
             return unsupported(format!(
                 "{result_dtype} load permits a Ramp only on the final axis"
             ));
         }
-        let ramp = last.as_node::<RampObj>().expect("ramp");
+        let ramp = last.downcast_ref::<RampObj>().expect("ramp");
         let (base, _) = classify_contiguous_ramp(self.ctx, &last, ramp, Some(lanes))?;
         let space = {
             let code = self.buffer_code(buffer)?;
@@ -869,11 +869,11 @@ impl<'a> Emitter<'a> {
             return Ok(*cached);
         }
         let kind = kind_or_bail(&key)?;
-        let result = if stmt.as_node::<BreakObj>().is_some()
-            || stmt.as_node::<ContinueObj>().is_some()
+        let result = if stmt.downcast_ref::<BreakObj>().is_some()
+            || stmt.downcast_ref::<ContinueObj>().is_some()
         {
             true
-        } else if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
+        } else if let Some(sequence) = stmt.downcast_ref::<SeqStmtObj>() {
             let mut found = false;
             for child in sequence.seq.iter() {
                 if self.contains_current_loop_transfer(&child)? {
@@ -882,9 +882,9 @@ impl<'a> Emitter<'a> {
                 }
             }
             found
-        } else if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+        } else if let Some(region) = stmt.downcast_ref::<RegionStmtObj>() {
             self.contains_current_loop_transfer(&Stmt::from(region.body.clone()))?
-        } else if let Some(branch) = stmt.as_node::<IfObj>() {
+        } else if let Some(branch) = stmt.downcast_ref::<IfObj>() {
             self.contains_current_loop_transfer(&Stmt::from(branch.then_case.clone()))?
                 || match &branch.else_case {
                     Some(else_case) => self.contains_current_loop_transfer(&Stmt::from(else_case.clone()))?,
@@ -942,14 +942,14 @@ impl<'a> Emitter<'a> {
     ) -> AResult<()> {
         let node = oref(stmt.clone());
         let kind = kind_or_bail(&node)?;
-        if let Some(region) = stmt.as_node::<RegionStmtObj>() {
+        if let Some(region) = stmt.downcast_ref::<RegionStmtObj>() {
             if ffi_text(&region.op.name) == LAUNCH_THREAD {
                 return self.emit_launch_thread(region, previous_sequence_stmt);
             }
             return self.emit_stmt(&Stmt::from(region.body.clone()), previous_sequence_stmt);
         }
-        if let Some(sequence) = stmt.as_node::<SeqStmtObj>() {
-            let statements: Vec<Stmt> = sequence.seq.iter().collect();
+        if let Some(sequence) = stmt.downcast_ref::<SeqStmtObj>() {
+            let statements: Vec<Stmt> = sequence.seq.iter().cloned().collect();
             if self.control_depth == 0 {
                 return self.emit_root_sequence(&statements, previous_sequence_stmt);
             }
@@ -981,7 +981,7 @@ impl<'a> Emitter<'a> {
                 TensorDecl::Alloc | TensorDecl::Tmem(_) => Ok(()),
             };
         }
-        if let Some(bind) = stmt.as_node::<BindObj>() {
+        if let Some(bind) = stmt.downcast_ref::<BindObj>() {
             let value = self.emit_expr(&oref(bind.value.clone()))?;
             let mut value = self.materialize(value, "bound")?;
             let var_ref = oref(bind.var.clone());
@@ -1005,12 +1005,12 @@ impl<'a> Emitter<'a> {
             self.variables.set(var_ref, value);
             return Ok(());
         }
-        if let Some(evaluate) = stmt.as_node::<EvaluateObj>() {
+        if let Some(evaluate) = stmt.downcast_ref::<EvaluateObj>() {
             let value = oref(evaluate.value.clone());
-            if value.as_node::<IntImmObj>().is_some() {
+            if value.downcast_ref::<IntImmObj>().is_some() {
                 return Ok(());
             }
-            if value.as_node::<tvm_tirx::ir::CallObj>().is_some() {
+            if value.downcast_ref::<tvm_tirx::ir::CallObj>().is_some() {
                 if projected_buffer(&value)?.is_some() {
                     return Ok(());
                 }
@@ -1029,20 +1029,20 @@ impl<'a> Emitter<'a> {
             }
             return Ok(());
         }
-        if let Some(branch) = stmt.as_node::<IfObj>() {
+        if let Some(branch) = stmt.downcast_ref::<IfObj>() {
             return self.emit_if(stmt, branch, previous_sequence_stmt);
         }
-        if let Some(assertion) = stmt.as_node::<AssertStmtObj>() {
+        if let Some(assertion) = stmt.downcast_ref::<AssertStmtObj>() {
             return self.emit_assert(&node, assertion);
         }
-        if let Some(loop_stmt) = stmt.as_node::<ForObj>() {
+        if let Some(loop_stmt) = stmt.downcast_ref::<ForObj>() {
             if let Some(helper) = self.try_capture_inner_for_statement_split(stmt, loop_stmt)? {
                 self.emit_split_call(&helper, None);
                 return Ok(());
             }
             return self.emit_for(stmt, loop_stmt);
         }
-        if let Some(loop_stmt) = stmt.as_node::<WhileObj>() {
+        if let Some(loop_stmt) = stmt.downcast_ref::<WhileObj>() {
             return self.emit_while(&node, loop_stmt);
         }
         if kind == "Break" {
@@ -1051,10 +1051,10 @@ impl<'a> Emitter<'a> {
         if kind == "Continue" {
             return self.emit_continue();
         }
-        if let Some(ret) = stmt.as_node::<ReturnObj>() {
+        if let Some(ret) = stmt.downcast_ref::<ReturnObj>() {
             return self.emit_return(ret);
         }
-        if let Some(store) = stmt.as_node::<TensorStoreObj>() {
+        if let Some(store) = stmt.downcast_ref::<TensorStoreObj>() {
             return self.emit_store(&node, store);
         }
         unsupported(format!(
@@ -1190,7 +1190,7 @@ impl<'a> Emitter<'a> {
         region: &RegionStmtObj,
         previous_sequence_stmt: Option<&Stmt>,
     ) -> AResult<()> {
-        let (Ok(tag), Ok(variable)) = (region.args.get(0), region.body_params.get(0)) else {
+        let (Some(tag), Some(variable)) = (region.args.get(0), region.body_params.get(0)) else {
             return not_covered("launch_thread without a tag and a thread variable");
         };
         let thread_tag = static_string(&oref(tag), "launch_thread tag")?;
@@ -1838,7 +1838,7 @@ impl<'a> Emitter<'a> {
                 "float4 BufferStore requires an explicit packed-byte frontend lowering",
             );
         }
-        let indices: Vec<Expr> = stmt.indices.iter().collect();
+        let indices: Vec<Expr> = stmt.indices.iter().map(|x| x.clone().into()).collect();
         let index = self.physical_index(&buffer, &indices)?;
         let access_mask = self.physical_access_mask(&buffer, &indices, "ctx.active_mask()")?;
         let space_marker = if dynamic {
