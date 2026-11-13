@@ -52,7 +52,7 @@ def _cases():
     for cta_group, tmem_a in ((1, False), (2, True)):
         yield (
             f"mxf8f6f4-k64-explicit-{cta_group}-tmem_a={tmem_a}",
-            first_two(block_tmem_case, cta_group, 0, 1, tmem_a=tmem_a, k=64),
+            first_two(block_tmem_case, cta_group, 3 if tmem_a else 0, 1, tmem_a=tmem_a, k=64),
         )
     for tmem_a in (False, True):
         yield f"mxf4-implicit-tmem_a={tmem_a}", first_two(fp4_tmem_case, tmem_a)
@@ -196,8 +196,32 @@ def _written_outputs(kernel, arguments):
     )
 
 
+# Recorded on an SM107 GPU (NVIDIA VR NVL72 ES, CUDA 13.4): these sparse K=128
+# kernels raise an illegal-instruction fault, which poisons the CUDA context,
+# while NumSim accepts them. Plain f8f6f4 traps for every operand format and
+# block-scaled mxf8f6f4 for 8-bit operands; 6-bit and 4-bit mxf8f6f4 run and
+# match. The violated constraint is not yet identified.
+HARDWARE_TRAPS = {
+    "sparse_k128-(1, False, 0, 1, False, False)",
+    "sparse_k128-(1, False, 1, 0, True, True)",
+    "sparse_k128-(2, True, 3, 1, False, True)",
+    *(f"sparse_narrow_k128-{case}" for case in SPARSE_NARROW_K128_CASES),
+}
+
+
 @pytest.mark.numsim_gpu
-@pytest.mark.parametrize("case", sorted(CASES))
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            case,
+            marks=pytest.mark.xfail(run=False, reason="illegal instruction on SM107 hardware"),
+        )
+        if case in HARDWARE_TRAPS
+        else case
+        for case in sorted(CASES)
+    ],
+)
 def test_sm107_tcgen05_form_matches_gpu(case, pytestconfig, tmp_path):
     require_numsim_gpu(pytestconfig, min_nvrtc=(13, 4))
     import torch
