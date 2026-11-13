@@ -3853,11 +3853,15 @@ pub(crate) fn raw_tcgen05_lut_b_tmem_footprints(
     if first + cta_group > context.topology().ctas_per_cluster() {
         return Err(EngineError::message("LUT-B has no paired CTA"));
     }
-    let mut accesses = Vec::with_capacity(rows / 8 * 2 * cta_group);
+    let groups = cta_group * rows / 8;
+    let mut accesses = Vec::with_capacity(LUT_B_SUBPARTITIONS * groups * 2 * cta_group);
     for cta in first..first + cta_group {
-        for group in 0..rows / 8 {
+        for (quarter, group) in (0..LUT_B_SUBPARTITIONS)
+            .flat_map(|quarter| (0..groups).map(move |group| (quarter, group)))
+        {
             for word in 0..2 {
-                let (row, col) = raw_tcgen05_lut_b_location(address, group, word)?;
+                let (row, col) =
+                    raw_tcgen05_lut_b_location(address, 32 * quarter + group, word)?;
                 accesses.push((
                     issuing_lane,
                     issuing_lane,
@@ -3872,6 +3876,13 @@ pub(crate) fn raw_tcgen05_lut_b_tmem_footprints(
     }
     Ok(accesses)
 }
+
+/// SM107 hardware (NVIDIA VR NVL72 ES) decompresses LUT-B separately for each
+/// 32-lane TMEM subpartition of the accumulator: rows in subpartition q read
+/// their table from lanes `base + 32 * q + group`, so kernels replicate it.
+/// Under cta_group::2 each CTA reads its own TMEM, indexing `group` by the
+/// joint N row group, so both CTAs hold the full joint table.
+const LUT_B_SUBPARTITIONS: usize = 4;
 
 #[allow(clippy::too_many_arguments)]
 fn raw_tcgen05_gather_lut_b(
@@ -3891,22 +3902,43 @@ fn raw_tcgen05_gather_lut_b(
     let first_cta = context.cta_id_in_cluster() & !(cta_group - 1);
     let (_, column) = raw_tcgen05_lut_b_location(lookup_address, 0, 0)?;
     let mut values = Vec::with_capacity(rows * 64 * cta_group);
+    let mut views = Vec::with_capacity(cta_group);
     for cta in first_cta..first_cta + cta_group {
         validate_raw_tcgen05_tmem_columns(lifecycle, access_mode, context, cta, column, 2)?;
-        let view = raw_tcgen05_tmem_view(physical, context, anchor, cta)?;
-        for group in 0..rows / 8 {
+        views.push(raw_tcgen05_tmem_view(physical, context, anchor, cta)?);
+    }
+    for (half, cta) in (first_cta..first_cta + cta_group).enumerate() {
+        for local_group in 0..rows / 8 {
+            let group = half * (rows / 8) + local_group;
             let mut lookup = [0_u8; 8];
-            for word in 0..2 {
-                let (row, column) = raw_tcgen05_lut_b_location(lookup_address, group, word)?;
-                physical.tmem().read_cell_bytes_into(
-                    &view,
-                    row,
-                    column,
-                    0,
-                    &mut lookup[word * 4..word * 4 + 4],
-                )?;
+            for (table_index, (view, quarter)) in views
+                .iter()
+                .flat_map(|view| (0..LUT_B_SUBPARTITIONS).map(move |quarter| (view, quarter)))
+                .enumerate()
+            {
+                let mut table = [0_u8; 8];
+                for word in 0..2 {
+                    let (row, column) =
+                        raw_tcgen05_lut_b_location(lookup_address, 32 * quarter + group, word)?;
+                    physical.tmem().read_cell_bytes_into(
+                        view,
+                        row,
+                        column,
+                        0,
+                        &mut table[word * 4..word * 4 + 4],
+                    )?;
+                }
+                if table_index == 0 {
+                    lookup = table;
+                } else if table != lookup {
+                    // Tables that differ by subpartition or CTA give accumulator
+                    // rows different B values; the shared-B MMA core cannot.
+                    return Err(EngineError::analysis_incomplete(
+                        "tcgen_lut_b_distinct_subpartition_tables_unmodeled",
+                    ));
+                }
             }
-            for row in group * 8..group * 8 + 8 {
+            for row in local_group * 8..local_group * 8 + 8 {
                 let mut compressed = [0_u8; 48];
                 let mut done = 0;
                 raw_tcgen05_lut_b_row_accesses(source, descriptor, row, |offset, count| {

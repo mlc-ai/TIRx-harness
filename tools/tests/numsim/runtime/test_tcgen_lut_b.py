@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
-from tests.numsim.support.execution import run_checked
+from tests.numsim.support.execution import assert_rejected, run_checked
 from tirx_harness import racecheck
 
 
@@ -55,6 +55,13 @@ def lut_b_case(group=1, tmem=False, segment=0, half=False, block=False, **option
                 packed = sum(int(index) << (3 * i) for i, index in enumerate(indices))
                 b_bits[global_row, :48] = np.frombuffer(packed.to_bytes(48, "little"), np.uint8)
                 b[global_row] = values[indices[segment * 64 : (segment + 1) * 64]]
+    # SM107 hardware reads the table separately for each 32-lane accumulator
+    # subpartition (lanes 32 * q + group) and, under cta_group::2, from each
+    # CTA's own TMEM indexed by the joint N group: every CTA and subpartition
+    # holds the full joint table.
+    joint = lookup[:group, :2].reshape(2 * group, 8).copy()
+    for quarter in range(4):
+        lookup[:group, 32 * quarter : 32 * quarter + 2 * group] = joint
     seed = np.full((m, n), 0.5, np.float32)
     metadata = lookup.view(np.uint32).reshape(2, 128, 2)
     if block:
@@ -130,3 +137,18 @@ def test_block_lut_b_scales_and_packed_tmem(group, tmem, segment, tmp_path):
         args["zero_mask"][0] = np.uint64(1 << 63 if disabled else 0)
         outputs = run_checked(kernel, args, cache_dir=tmp_path).outputs
         np.testing.assert_array_equal(outputs["out"], args["seed"] if disabled else expected)
+
+
+def test_lut_b_distinct_subpartition_tables_are_an_explicit_gap(tmp_path):
+    # Hardware gives each 32-lane accumulator quarter the table in its own
+    # lanes; a table that differs by quarter is reported, not approximated.
+    kernel, args, _ = lut_b_case()
+    args["zero_mask"][0] = np.uint64(0)
+    args["metadata"][0, 64] ^= np.uint32(0x01000000)
+    assert_rejected(
+        kernel,
+        args,
+        "tcgen_lut_b_distinct_subpartition_tables_unmodeled",
+        verdict="incomplete",
+        cache_dir=tmp_path,
+    )
