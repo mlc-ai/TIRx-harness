@@ -18,8 +18,11 @@ def kernel(output: T.Tensor((5, 32), "uint32"), selected: T.uint32):
     active = (selected & (T.uint32(1) << T.Cast("uint32", lane))) != T.uint32(0)
     src = T.alloc_local((5,), "uint32")
     dst = T.alloc_local((5,), "uint32")
+    # ptxas 13.4 (sm_107a) aborts with an internal compiler error (C7907)
+    # when set.u8x4 may read never-written registers, so define src first.
     for i in T.unroll(5):
         dst[i] = 91
+        src[i] = T.uint32(0)
     if active:
         src[0] = T.uint32(0x03020401)
         src[1] = T.uint32(0x03020401)
