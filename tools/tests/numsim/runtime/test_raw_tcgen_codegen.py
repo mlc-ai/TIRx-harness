@@ -3517,8 +3517,11 @@ def test_f8f6f4_cta2_k32_extended_shared_span_is_gated_by_arch_not_k_bit():
     ):
         emit_for_arch("sm_100a")
 
-    source = emit_for_arch("sm_107a")
-    assert "v2::tcgen05::variant::MatrixDescriptorSm107" in source
+    # The family form selects the same SM107 descriptor decoding, so it must
+    # also receive the widened shared-memory span that decoding can address.
+    for arch in ("sm_107a", "sm_107f"):
+        source = emit_for_arch(arch)
+        assert "v2::tcgen05::variant::MatrixDescriptorSm107" in source
 
 
 def test_raw_tcgen_tf32_shared_shared_matches_independent_matrix_product(tmp_path):

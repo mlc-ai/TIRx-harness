@@ -583,6 +583,14 @@ const TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH: &[(&str, &str)] = &[
     ("sm_107f", "sm107"),
 ];
 
+/// The TCGEN descriptor layout an architecture selects, if it has one.
+pub fn tcgen_descriptor_layout_for_arch(arch: &str) -> Option<&'static str> {
+    TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH
+        .iter()
+        .find(|(candidate, _)| *candidate == arch)
+        .map(|(_, layout)| *layout)
+}
+
 /// `require_tcgen_descriptor_layout`.
 pub fn require_tcgen_descriptor_layout(func: &Function) -> AResult<&'static str> {
     let Some(arch) = cuda_arch(func)? else {
@@ -590,11 +598,8 @@ pub fn require_tcgen_descriptor_layout(func: &Function) -> AResult<&'static str>
             "TCGEN descriptors require {CUDA_ARCH_FIELD} to select exact SM100/SM103/SM107 descriptor semantics"
         ));
     };
-    match TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH
-        .iter()
-        .find(|(candidate, _)| *candidate == arch)
-    {
-        Some((_, layout)) => Ok(layout),
+    match tcgen_descriptor_layout_for_arch(&arch) {
+        Some(layout) => Ok(layout),
         None => {
             let mut supported: Vec<&str> = TCGEN_DESCRIPTOR_LAYOUT_BY_ARCH
                 .iter()

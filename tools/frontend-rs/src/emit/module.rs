@@ -8,6 +8,7 @@ use super::super::analyze::shapes::Scalar;
 use super::super::analyze::util::{as_var, ident, oref, same, unsupported, AResult};
 use super::super::analyze::Ctx;
 use super::module_template::MODULE_TEMPLATE;
+use super::tcgen_descriptor::tcgen_descriptor_layout_for_arch;
 use super::{BufferCode, EmitOptions, Emitter, RustValue, SplitHelper, Uniformity, Variables};
 use crate::decode::projected_buffer;
 use crate::tables::{json_string, phase_binding_name};
@@ -306,9 +307,15 @@ fn render_kernel(
     let host_integer_variables = host_integer_variables(emitter);
     derived_shape_setup(emitter, &host_integer_variables, &mut setup)?;
     tensor_map_setup(emitter, &host_integer_variables, index, count, &mut setup)?;
-    let is_sm107a = cuda_arch(emitter.func)?.as_deref() == Some("sm_107a");
-    let tmem_columns: i64 = if is_sm107a { 576 } else { 512 };
-    let shared_descriptor_address_bits = if is_sm107a { 19 } else { 18 };
+    // SM107 targets (sm_107a and the sm_107f family form) provide 576 TMEM
+    // columns and widen the shared descriptor start field by one bit; derive
+    // both from the same table that selects SM107 descriptor decoding.
+    let is_sm107 = cuda_arch(emitter.func)?
+        .as_deref()
+        .and_then(tcgen_descriptor_layout_for_arch)
+        == Some("sm107");
+    let tmem_columns: i64 = if is_sm107 { 576 } else { 512 };
+    let shared_descriptor_address_bits = if is_sm107 { 19 } else { 18 };
     let mut private_metadata_declarations: Vec<String> = Vec::new();
     let backings = backing_setup(
         emitter,

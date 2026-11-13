@@ -1,8 +1,9 @@
 """Launch-model defaults, pointer observations, and CTA-local TMEM lifetimes."""
 
 import numpy as np
+import pytest
 
-from tests.numsim.support.execution import specialize
+from tests.numsim.support.execution import specialize, with_cuda_arch
 from tirx_harness import numsim, racecheck, synccheck
 from tvm_tirx.script import tirx as T
 
@@ -80,10 +81,15 @@ def test_pointer_bits_preserve_binding_address_and_subview_offset(tmp_path):
         np.testing.assert_array_equal(result.outputs["output"], expected)
 
 
-def test_exclusive_tmem_uses_cta_local_lifecycle_without_placement(tmp_path):
+# PTX 9.4 9.7.18.7.1: exclusive nCols may reach 576 on sm_107f, and the
+# architecture-specific sm_107a form carries the same SM107 TMEM capacity.
+@pytest.mark.parametrize("arch", ("sm_107a", "sm_107f"))
+def test_exclusive_tmem_uses_cta_local_lifecycle_without_placement(arch, tmp_path):
     engine = numsim.Engine(max_workers=2)
     for columns in (96, 576):
-        kernel = specialize(exclusive_lifecycle, {exclusive_lifecycle.params[0]: columns})
+        kernel = with_cuda_arch(
+            specialize(exclusive_lifecycle, {exclusive_lifecycle.params[0]: columns}), arch
+        )
         modules = {
             name: numsim.transpile(kernel, cache_dir=tmp_path, _analysis_checker=name)
             for name in (None, "synccheck", "racecheck")
