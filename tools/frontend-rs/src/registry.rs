@@ -184,6 +184,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.cuda.cta_reduce", "pure_scalar", crate::emit::pure::cuda_cta_reduce).suspends(true),
     OpRow::new("tirx.cuda.cta_sync", "synchronization", crate::emit::sync::emit_legacy).suspends(true),
     OpRow::new("tirx.cuda.cvta_generic_to_shared", "raw_memory", crate::emit::raw_memory::emit_legacy),
+    OpRow::new("tirx.cuda.decl_tmem", "tmem_buffer_rejection", crate::emit::calls::rejected).support("rejected").reason(crate::decode::TMEM_BUFFER_UNSUPPORTED),
     OpRow::new("tirx.cuda.elect_sync", "warp_collective", crate::emit::pure::cuda_elect_sync).support("deterministic_representative").reason("validates the fixed 0xffffffff membermask participation contract, then selects the first lane as the deterministic representative"),
     OpRow::new("tirx.cuda.fadd2_rn", "pure_scalar", crate::emit::pure::cuda_fadd2_rn),
     OpRow::new("tirx.cuda.fdividef", "pure_scalar", crate::emit::pure::cuda_fdividef).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE),

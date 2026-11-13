@@ -1,13 +1,12 @@
 //! Validation and emission of scalar calls and collectives.
 
 use crate::analyze::buffers::call_op_name;
-use crate::analyze::memory::MemorySpace;
 use crate::analyze::util::{
     as_buffer, buffer_name, buffer_scope, dtype_of, ffi_text, not_covered, oref, unmodeled,
     unsupported, AResult,
 };
 use crate::analyze::Ctx;
-use crate::decode::{projected_buffer, Decoded};
+use crate::decode::Decoded;
 use crate::emit::abi;
 use crate::emit::calls::call_args;
 use crate::emit::stmt::pointer_pointee_dtype;
@@ -747,12 +746,6 @@ impl<'a> Emitter<'a> {
         buffer: &tvm_tirx::ir::Var,
         indices: &[Expr],
     ) -> AResult<RustValue> {
-        if self.memory_plan.resolve(buffer)?.space == MemorySpace::Tmem {
-            return unsupported(format!(
-                "buffer:{}:address_of on TMEM is not implemented",
-                buffer_name(buffer)
-            ));
-        }
         let info = self.ctx.inspect_layout(buffer, &self.bindings)?;
         let mut owner_axes: Vec<String> = info
             .physical_axes
@@ -793,16 +786,6 @@ impl<'a> Emitter<'a> {
         signature: &CallSignature,
     ) -> AResult<RustValue> {
         let args = call_args(expr);
-        // A TMEM tensor's data pointer is its column address: a TMEM view declares
-        // its storage over `reinterpret(address)`.
-        if signature.result_dtype == "uint64" {
-            let tmem_address = projected_buffer(&args[0])?
-                .and_then(|tensor| self.ctx.tmem_address(&tensor));
-            if let Some(address) = tmem_address {
-                let value = self.emit_expr(&oref(address))?;
-                return self.coerce_value(value, "u64", "tmem_address");
-            }
-        }
         let has_handle = signature.result_dtype == "handle"
             || signature.arg_dtypes.iter().any(|dtype| dtype == "handle");
         if has_handle {

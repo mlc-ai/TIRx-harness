@@ -31,6 +31,7 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.cta_reduce` | pure_scalar | modeled |  |
 | `tirx.cuda.cta_sync` | synchronization | modeled |  |
 | `tirx.cuda.cvta_generic_to_shared` | raw_memory | modeled |  |
+| `tirx.cuda.decl_tmem` | tmem_buffer_rejection | rejected | NumSim does not support scope="tmem" buffers (T.tmem, T.alloc_tensor with scope="tmem", T.cuda.decl_tmem); use raw tcgen05 column operands and T.cuda.get_tmem_addr(...) |
 | `tirx.cuda.elect_sync` | warp_collective | deterministic_representative | validates the fixed 0xffffffff membermask participation contract, then selects the first lane as the deterministic representative |
 | `tirx.cuda.fadd2_rn` | pure_scalar | modeled |  |
 | `tirx.cuda.fdividef` | pure_scalar | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |

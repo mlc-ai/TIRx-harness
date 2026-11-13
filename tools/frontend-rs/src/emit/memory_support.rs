@@ -363,11 +363,6 @@ impl<'a> Emitter<'a> {
         let plan_itemsize = plan.layout.itemsize;
         let plan_dynamic = plan.dynamic_data_var.is_some();
         let dtype = buffer_dtype(&buffer);
-        if plan_space == MemorySpace::Tmem {
-            return unsupported(format!(
-                "buffer:{plan_name}:explicit instruction destinations do not support TMEM"
-            ));
-        }
         if self.ctx.schema.vector_dtype_abi(&dtype).is_some() {
             return unsupported(format!(
                 "buffer:{plan_name}:explicit instruction destination must be scalar"
@@ -423,7 +418,6 @@ impl<'a> Emitter<'a> {
                 MemorySpace::Global => "v2::Global",
                 MemorySpace::Shared => "v2::Shared",
                 MemorySpace::Local | MemorySpace::Register => "v2::Local",
-                MemorySpace::Tmem => unreachable!("rejected above"),
             }
         };
         let index = self.physical_index(&buffer, &indices)?;

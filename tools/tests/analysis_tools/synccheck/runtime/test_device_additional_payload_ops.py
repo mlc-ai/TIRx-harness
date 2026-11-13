@@ -67,9 +67,6 @@ from tests.numsim.runtime.test_sparse_mma_forms import (
 from tirx_harness import numsim
 from tvm_tirx.ir import PrimType
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
-
-_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.function
@@ -255,14 +252,19 @@ def tcgen05_st_split_roundtrip(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
+    address = T.alloc_shared((1,), "uint32")
     registers = T.alloc_local((2,), "uint32")
+    word = T.alloc_local((1,), "uint32")
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
+    T.cuda.cta_sync()
+    word[0] = T.uint32(0)
     for column in T.unroll(16):
-        tmem[physical_row, column] = T.uint32(0)
+        T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0] + T.uint32(column), word[0])
     registers[0] = source[warp, lane, 0]
     registers[1] = source[warp, lane, 1]
     T.ptx["tcgen05.st.sync.aligned.16x32bx2.x2.b32"](
-        T.uint32(0),
+        address[0],
         2,
         registers[0],
         registers[1],
@@ -270,7 +272,13 @@ def tcgen05_st_split_roundtrip(
     T.ptx.tcgen05.wait__st.sync.aligned()
     T.cuda.cta_sync()
     for column in T.unroll(16):
-        output[physical_row, column] = tmem[physical_row, column]
+        T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(column))
+        T.ptx.tcgen05.wait__ld.sync.aligned()
+        output[physical_row, column] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
 _KERNELS = (

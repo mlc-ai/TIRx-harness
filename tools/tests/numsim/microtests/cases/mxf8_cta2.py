@@ -3,7 +3,7 @@
 import numpy as np
 from tests.numsim.microtests.harness import PairedBuffer
 
-from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
 from tvm_tirx.script import tirx as T
 
 _A_LAYOUT = mma_shared_layout("float8_e4m3fn", SwizzleMode.SWIZZLE_32B_ATOM, (64, 32))
@@ -28,10 +28,6 @@ def _raw_mxf8_cta2_m128(
     barriers = T.alloc_shared((1,), "uint64")
     shared_a = T.alloc_shared((64, 32), "float8_e4m3fn", layout=_A_LAYOUT)
     shared_b = T.alloc_shared((16, 32), "float8_e4m3fn", layout=_B_LAYOUT)
-    # Declare the physical allocation used by the raw TMEM addresses below.
-    tmem = T.tmem(  # noqa: F841
-        (128, 32), "uint32", allocated_addr=address[0], layout=tmem_datapath_layout("D", 128, 32)
-    )
     registers = T.alloc_local((16,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64

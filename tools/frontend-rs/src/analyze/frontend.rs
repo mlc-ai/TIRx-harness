@@ -16,7 +16,7 @@ use tvm_tirx::tvm_ffi::{self, structural_map, Any, ObjectRefCore, String as FfiS
 
 use super::buffers::{call_op_name, BufferBindings};
 use super::expression_bindings::ExpressionBindings;
-use super::memory::{build_memory_plan, MemoryPlan, MemorySpace};
+use super::memory::{build_memory_plan, MemoryPlan};
 use super::topology::{extract_topology, validate_for, validate_region, LaunchTopology};
 use super::util::{
     as_buffer, buffer_dtype, buffer_name, buffer_scope, dtype_of, dtype_text, ffi_text,
@@ -178,7 +178,6 @@ pub struct KernelPlan {
     pub implicit_tensor_maps: Vec<Json>,
     pub uses_raw_tensor_map_registry: bool,
     pub requires_implicit_tmem: bool,
-    pub uses_dynamic_tmem_lifecycle: bool,
     /// Whether any call is a readonly-proxy load.
     pub uses_readonly_proxy: bool,
 }
@@ -229,13 +228,9 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
     let (buffers, buffer_names) = buffer_entries(ctx, func, &mut unsupported_items)?;
     let ((scalars, scalar_specs), (pointers, pointer_specs)) =
         scalar_and_pointer_entries(ctx, &params, &mut unsupported_items)?;
-    let requires_implicit_tmem = tmem_requirements.uses_tmem
-        && memory_plan.as_ref().is_some_and(|plan| {
-            !plan
-                .backings
-                .iter()
-                .any(|backing| backing.space == MemorySpace::Tmem)
-        });
+    // TMEM is only addressed through raw tcgen05 column operands, so every
+    // kernel that uses it addresses one implicit allocation.
+    let requires_implicit_tmem = tmem_requirements.uses_tmem && memory_plan.is_some();
     let uses_dynamic_tmem_lifecycle = tmem_requirements.dynamic_lifecycle;
     let uses_readonly_proxy = crate::emit::raw_memory::uses_readonly_proxy(&nodes)?;
     let name = kernel_name(func)?;
@@ -288,7 +283,6 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
         implicit_tensor_maps,
         uses_raw_tensor_map_registry,
         requires_implicit_tmem,
-        uses_dynamic_tmem_lifecycle,
         uses_readonly_proxy,
     };
     if plan.analysis_failure.is_none() {

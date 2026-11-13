@@ -9,7 +9,7 @@ use tvm_tirx::tvm_ffi::{self, Any, Array, DLDataType, DLDataTypeExt, Map, String
 
 use super::util::{
     buffer_dtype, buffer_name, buffer_scope, dtype_text, enum_name, ffi_text, int_const,
-    int_imm_expr, not_covered, oref, prim, prim_expr, repr_of, simplify,
+    int_imm_expr, not_covered, oref, prim_expr, repr_of, simplify,
     static_int as shared_static_int, unsupported, AResult, Failure, PrimExprExt, TensorVarExt,
 };
 use crate::schema::Schema;
@@ -129,11 +129,6 @@ pub struct LayoutInfo {
     pub explicit_strides: Option<Vec<i64>>,
     pub dynamic_layout_elem_offset: Option<Expr>,
     pub packed_nibble_offset: i64,
-    pub allocated_addr: Option<Expr>,
-    pub allocated_addr_static: Option<i64>,
-    pub tmem_lane_span: Option<i64>,
-    pub tmem_tcol_span_elements: Option<i64>,
-    pub tmem_tcol_base_static: Option<i64>,
 }
 
 impl LayoutInfo {
@@ -421,7 +416,6 @@ pub fn inspect_buffer_layout(
     analyzer: &Analyzer,
     buffer: &Var,
     shape_bindings: &Map<Var, tvm_tirx::ir::Expr>,
-    tmem_address: Option<tvm_tirx::ir::Expr>,
     byte_offset: Option<tvm_tirx::ir::Expr>,
 ) -> AResult<LayoutInfo> {
     let name = buffer_name(buffer);
@@ -470,6 +464,12 @@ pub fn inspect_buffer_layout(
         i64::from(data_type.bits) / 8
     };
     let scope = buffer_scope(buffer);
+    if crate::decode::is_tmem_scope(&scope) {
+        return unsupported(format!(
+            "buffer:{name}:{}",
+            crate::decode::TMEM_BUFFER_UNSUPPORTED
+        ));
+    }
     // A declared view starts `byte_offset` bytes into its storage root, a whole
     // number of storage elements (bytes for packed float4); a TensorType has no
     // strides, which belong to its layout.
@@ -644,32 +644,6 @@ pub fn inspect_buffer_layout(
         return unsupported(format!(
             "buffer:{name}:explicit strides are currently supported only for shared storage, got scope {:?}",
             &scope));
-    }
-    if scope == "tmem" || scope.starts_with("tmem.") {
-        if let Some(aligned) = &dynamic_elem_offset_alignment {
-            return unsupported(format!(
-                "buffer:{name}:runtime TMEM offset is not provably element-aligned: {}",
-                repr_of(aligned)?
-            ));
-        }
-        return inspect_tmem(
-            analyzer,
-            &name,
-            shape,
-            dtype,
-            itemsize,
-            elem_offset,
-            dynamic_elem_offset,
-            expected_elements,
-            signature,
-            &layout,
-            &canonical,
-            &mapped,
-            &zero_axes,
-            dynamic_layout_elem_offset,
-            packed_nibble,
-            tmem_address,
-        );
     }
     let zero_m = get_axis(&mapped, "m");
     let owner_axes: Vec<String> = zero_axes
@@ -895,11 +869,6 @@ pub fn inspect_buffer_layout(
         explicit_strides,
         dynamic_layout_elem_offset,
         packed_nibble_offset,
-        allocated_addr: None,
-        allocated_addr_static: None,
-        tmem_lane_span: None,
-        tmem_tcol_span_elements: None,
-        tmem_tcol_base_static: Some(0),
     })
 }
 
@@ -919,174 +888,3 @@ fn set_axis(mapped: &mut Vec<(String, Expr)>, axis: &str, value: Expr) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn inspect_tmem(
-    analyzer: &Analyzer,
-    name: &str,
-    shape: Vec<Extent>,
-    dtype: String,
-    itemsize: i64,
-    elem_offset: i64,
-    dynamic_elem_offset: Option<Expr>,
-    expected_elements: Option<i64>,
-    signature: String,
-    layout: &Layout,
-    canonical: &Layout,
-    mapped: &[(String, Expr)],
-    zero_axes: &[String],
-    dynamic_layout_elem_offset: Option<Expr>,
-    packed_nibble: bool,
-    tmem_address: Option<tvm_tirx::ir::Expr>,
-) -> AResult<LayoutInfo> {
-    if dynamic_elem_offset.is_some() {
-        return unsupported(format!(
-            "buffer:{name}:dynamic TMEM elem_offset is not implemented"
-        ));
-    }
-    if packed_nibble {
-        return unsupported(format!(
-            "buffer:{name}:float4 TMEM views are not implemented"
-        ));
-    }
-    // The column address is an operand of the producing tirx.alloc_tensor or
-    // tirx.cuda.decl_tmem, not part of the tensor type.
-    let Some(tmem_address) = tmem_address else {
-        return unsupported(format!(
-            "buffer:{name}:TMEM requires the column address of its allocation"
-        ));
-    };
-    let allocated_addr = prim(&oref(tmem_address))?;
-    let Ok(_) = layout.clone().downcast::<TileLayout>() else {
-        return unsupported(format!(
-            "buffer:{name}:TMEM requires a TileLayout, got {signature}"
-        ));
-    };
-    if !zero_axes
-        .iter()
-        .all(|axis| axis == "TLane" || axis == "TCol")
-    {
-        return unsupported(format!(
-            "buffer:{name}:TMEM layout must map only to TLane/TCol, got {:?}: {signature}",
-            &zero_axes
-        ));
-    }
-    let canonical_tile = canonical
-        .clone()
-        .downcast::<TileLayout>()
-        .map_err(|_| Failure::NotCovered("expected TileLayout".into()))?;
-    let mut unsupported_axes: Vec<String> = Vec::new();
-    for item in canonical_tile
-        .shard
-        .iter()
-        .chain(canonical_tile.replica.iter())
-    {
-        let axis = axis_name(&item.axis)?;
-        if axis != "TLane" && axis != "TCol" && !unsupported_axes.contains(&axis) {
-            unsupported_axes.push(axis);
-        }
-    }
-    unsupported_axes.sort();
-    if !unsupported_axes.is_empty() {
-        return unsupported(format!(
-            "buffer:{name}:TMEM layout uses unsupported axes {:?}: {signature}",
-            &unsupported_axes
-        ));
-    }
-    let zero_lane = match get_axis(mapped, "TLane") {
-        Some(value) => static_int(analyzer, &value, &format!("{name}:TLane base"))?,
-        None => 0,
-    };
-    let zero_tcol_static: Option<i64> = match get_axis(mapped, "TCol") {
-        Some(value) => match static_int(analyzer, &value, &format!("{name}:TCol base")) {
-            Ok(base) => Some(base),
-            Err(Failure::Unsupported { .. }) => None,
-            Err(error) => return Err(error),
-        },
-        None => Some(0),
-    };
-    if zero_lane < 0 || zero_tcol_static.is_some_and(|value| value < 0) {
-        let tcol = match zero_tcol_static {
-            Some(value) => value.to_string(),
-            None => "None".to_owned(),
-        };
-        return unsupported(format!(
-            "buffer:{name}:negative TMEM layout base (lane={zero_lane}, tcol={tcol}) is unsupported"
-        ));
-    }
-    let addr_static: Option<i64> =
-        match static_int(analyzer, &allocated_addr, &format!("{name}:allocated_addr")) {
-            Ok(value) => Some(value),
-            Err(Failure::Unsupported { .. }) => None,
-            Err(error) => return Err(error),
-        };
-    if addr_static.is_some_and(|value| value < 0) {
-        return unsupported(format!(
-            "buffer:{name}:negative TMEM allocated_addr {}",
-            addr_static.unwrap()
-        ));
-    }
-    let lane_span = static_int(
-        analyzer,
-        &canonical.span(Some("TLane"))?,
-        &format!("{name}:TLane span"),
-    )?;
-    if lane_span <= 0 || lane_span > 128 {
-        return unsupported(format!(
-            "buffer:{name}:TMEM TLane span {lane_span} is outside 1..128"
-        ));
-    }
-    let tcol_capacity = match static_int(
-        analyzer,
-        &canonical.span(Some("TCol"))?,
-        &format!("{name}:TCol span"),
-    ) {
-        Ok(value) => value,
-        Err(Failure::Unsupported {
-            message,
-            unsupported: items,
-        }) => {
-            if zero_tcol_static.is_some() {
-                return Err(Failure::Unsupported {
-                    message,
-                    unsupported: items,
-                });
-            }
-            let remaining_columns = match addr_static {
-                None => 512,
-                Some(addr) => 512 - addr,
-            };
-            if remaining_columns <= 0 {
-                return unsupported(format!(
-                    "buffer:{name}:TMEM allocated_addr {} leaves no TCol capacity",
-                    addr_static.unwrap()
-                ));
-            }
-            remaining_columns * 4 / itemsize
-        }
-        Err(error) => return Err(error),
-    };
-    if tcol_capacity <= 0 {
-        return unsupported(format!(
-            "buffer:{name}:TMEM TCol span must be positive, got {tcol_capacity}"
-        ));
-    }
-    Ok(LayoutInfo {
-        shape,
-        dtype,
-        itemsize,
-        elem_offset,
-        dynamic_elem_offset,
-        dynamic_elem_offset_alignment: None,
-        element_count: expected_elements,
-        signature,
-        physical_axes: vec!["TCol".to_owned(), "TLane".to_owned()],
-        explicit_strides: None,
-        dynamic_layout_elem_offset,
-        packed_nibble_offset: 0,
-        allocated_addr: Some(allocated_addr),
-        allocated_addr_static: addr_static,
-        tmem_lane_span: Some(lane_span),
-        tmem_tcol_span_elements: Some(tcol_capacity),
-        tmem_tcol_base_static: zero_tcol_static,
-    })
-}

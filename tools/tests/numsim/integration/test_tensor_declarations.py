@@ -7,6 +7,7 @@ from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm_tirx.ir import PtrType
 from tvm_tirx.script import tirx as T
+from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 
 @T.function
@@ -55,3 +56,41 @@ def misaligned_view(output: T.Tensor((32,), "float32")):
 def test_views_between_elements_are_rejected(tmp_path):
     with pytest.raises(UnsupportedTIRxError, match="not a multiple of the 4-byte element"):
         numsim.transpile(misaligned_view, cache_dir=tmp_path)
+
+
+_TMEM_LAYOUT = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+
+
+@T.function
+def tmem_from_alloc_tensor(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.alloc_tensor(ty_args=[T.Tensor((128, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT)])
+    output[lane] = tmem[lane, 0]
+
+
+@T.function
+def tmem_from_tmem_helper(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
+    output[lane] = tmem[lane, 0]
+
+
+@T.function
+def tmem_from_decl_tmem(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tmem = T.cuda.decl_tmem(
+        T.uint32(0),
+        ty_args=[T.Tensor((128, 4), "uint32", scope="tmem", layout=_TMEM_LAYOUT)],
+    )
+    output[lane] = tmem[lane, 0]
+
+
+@pytest.mark.parametrize(
+    "kernel", [tmem_from_alloc_tensor, tmem_from_tmem_helper, tmem_from_decl_tmem]
+)
+def test_declared_tmem_buffers_are_rejected(kernel, tmp_path):
+    with pytest.raises(UnsupportedTIRxError, match=r'does not support scope="tmem" buffers'):
+        numsim.transpile(kernel, cache_dir=tmp_path)

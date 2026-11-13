@@ -5,7 +5,6 @@ import re
 import numpy as np
 import pytest
 
-from tests.numsim.support.kernels import tmem_d_alias_per_cta
 from tests.numsim.support.manifest import emitted_module
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
@@ -521,11 +520,3 @@ def test_wider_view_at_a_misaligned_runtime_offset_fails_at_its_declaration(tmp_
 
     with pytest.raises(numsim.NumSimExecutionError, match="not a multiple of the 8-byte element"):
         numsim.Engine().run(module, _wide_view_inputs(start=1))
-
-
-def test_all_declared_tmem_views_share_one_physical_backing():
-    source = emitted_module(tmem_d_alias_per_cta)
-    assert source.count("allocate_cta_tmem(") == 1
-    backings = re.findall(r"runtime_buffer_tmem\(\s*(\w+)\.clone\(\),", source)
-    assert len(backings) == 2
-    assert len(set(backings)) == 1

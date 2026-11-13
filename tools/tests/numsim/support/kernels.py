@@ -1,6 +1,6 @@
 """Small source-backed TIRx kernels for transpiler tests."""
 
-from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout, tmem_datapath_layout
+from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
 from tvm_tirx.ir import PtrType
 from tvm_tirx.ir.type import PrimType
 from tvm_tirx.script import tirx as T
@@ -198,92 +198,6 @@ def local_array_per_lane(output: T.Tensor((32,), "float32")):
     local[0] = T.cast(lane, "float32")
     local[1] = T.cast(lane + 1, "float32")
     output[lane] = local[0] + local[1]
-
-
-@T.function
-def tmem_d_alias_per_cta(output: T.Tensor((2, 128), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128))
-    cta = T.cuda.block_idx("x")
-    warp = T.cuda.warp_id()
-    lane = T.cuda.lane_id()
-    row = T.meta_var(warp * 32 + lane)
-    primary = T.tmem((128, 4), "uint32", allocated_addr=3, layout=tmem_datapath_layout("D", 128, 4))
-    alias = T.tmem((128, 4), "uint32", allocated_addr=3, layout=tmem_datapath_layout("D", 128, 4))
-    primary[row, 0] = T.cast(cta * 1000 + row, "uint32")
-    output[cta, row] = alias[row, 0]
-
-
-@T.function
-def tmem_f_lane_mapping(output: T.Tensor((64,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
-    warp = T.cuda.warp_id()
-    lane = T.cuda.lane_id()
-    row = T.meta_var(warp * 32 + lane)
-    f_view = T.tmem((64, 4), "uint32", allocated_addr=0, layout=tmem_datapath_layout("F", 64, 4))
-    d_alias = T.tmem((128, 4), "uint32", allocated_addr=0, layout=tmem_datapath_layout("D", 128, 4))
-    physical_lane = T.meta_var((row // 16) * 32 + row % 16)
-    f_view[row, 1] = T.cast(2000 + row, "uint32")
-    output[row] = d_alias[physical_lane, 1]
-
-
-@T.function
-def tmem_b_lane_column_mapping(output: T.Tensor((64, 2), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
-    warp = T.cuda.warp_id()
-    lane = T.cuda.lane_id()
-    row = T.meta_var(warp * 32 + lane)
-    b_view = T.tmem((64, 8), "uint32", allocated_addr=2, layout=tmem_datapath_layout("B", 64, 8))
-    d_alias = T.tmem((128, 4), "uint32", allocated_addr=2, layout=tmem_datapath_layout("D", 128, 4))
-    b_view[row, 0] = T.cast(3000 + row, "uint32")
-    b_view[row, 4] = T.cast(4000 + row, "uint32")
-    output[row, 0] = d_alias[row, 0]
-    output[row, 1] = d_alias[row + 64, 0]
-
-
-@T.function
-def tmem_packed_alias(output: T.Tensor((128,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
-    warp = T.cuda.warp_id()
-    lane = T.cuda.lane_id()
-    row = T.meta_var(warp * 32 + lane)
-    packed_layout = TileLayout(S[(128, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-    word_layout = TileLayout(S[(128, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-    low = T.tmem((128, 2), "uint16", allocated_addr=5, layout=packed_layout)
-    word = T.tmem((128, 2), "uint32", allocated_addr=5, layout=word_layout)
-    low[row, 0] = T.uint16(0x1122)
-    low[row, 1] = T.uint16(0x3344)
-    output[row] = word[row, 0]
-
-
-@T.function
-def tmem_dynamic_allocated_addr(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    address = T.alloc_shared((1,), "uint32")
-    if lane == 0:
-        address[0] = T.uint32(6)
-    T.cuda.warp_sync()
-    tmem = T.tmem(
-        (32, 2),
-        "uint32",
-        allocated_addr=address[0],
-        layout=TileLayout(S[(32, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
-    )
-    tmem[lane, 1] = T.cast(5000 + lane, "uint32")
-    output[lane] = tmem[lane, 1]
-
-
-@T.function
-def tmem_uninitialized_read(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    tmem = T.tmem(
-        (32, 2),
-        "uint32",
-        allocated_addr=0,
-        layout=TileLayout(S[(32, 2) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
-    )
-    output[lane] = tmem[lane, 0]
 
 
 @T.function
