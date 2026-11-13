@@ -33,6 +33,5 @@ def test_tensor_map_predicates_gpu_oracle(pytestconfig):
                 kernel,
                 {**inputs, "descriptor": descriptor},
                 outputs=("output",),
-                arch="sm_100a",
             )
             np.testing.assert_array_equal(gpu["output"], expected)

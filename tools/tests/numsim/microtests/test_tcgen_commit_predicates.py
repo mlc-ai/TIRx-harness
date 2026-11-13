@@ -30,6 +30,6 @@ def test_tcgen_commit_predicates_gpu(pytestconfig, restricted, multicast):
     for enabled, selected in ((0, 0), (1, 0), (1, 31)):
         inputs, expected = commit_inputs(enabled, selected)
         device = run_gpu_primfunc(
-            kernel, inputs, outputs=("output",), arch="sm_107a" if sm107 else "sm_100a"
+            kernel, inputs, outputs=("output",), arch="sm_107a" if sm107 else None
         )
         np.testing.assert_array_equal(device["output"], expected)

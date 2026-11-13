@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -242,8 +244,7 @@ def initialize(image: T.Tensor((128,), "uint8")):
 """,
                 {"T": T, "source": source},
             )
-            major, minor = torch.cuda.get_device_capability()
-            _compile_gpu(initialize, arch=f"sm_{major}{minor}a")(device_image)
+            _compile_gpu(initialize)(device_image)
             torch.cuda.synchronize()
             if by_value:
                 opaque[:] = device_image.cpu().numpy()
@@ -402,9 +403,55 @@ def _parameter_names(prim_func: Any) -> tuple[str, ...]:
     return tuple(parameter.name for parameter in prim_func.params)
 
 
-def _compile_gpu(prim_func: Any, *, arch: str) -> Any:
+def device_arch() -> str:
+    """The architecture-specific target of the active CUDA device, e.g. ``sm_107a``."""
+
+    import torch
+
+    major, minor = torch.cuda.get_device_capability()
+    return f"sm_{major}{minor}a"
+
+
+def _declared_cuda_arch(prim_func: Any) -> str | None:
+    """The ``backend_config`` architecture a kernel pins, which overrides the target."""
+
+    from tvm_tirx import ir
+
+    configs = [
+        statement.attrs["backend_config"]
+        for statement in (prim_func.body.seq if prim_func.body is not None else ())
+        if isinstance(statement, ir.RegionStmt)
+        and str(statement.op.name) in {"tirx.device_entry", "tirx.device_scope"}
+        and "backend_config" in statement.attrs
+    ]
+    if prim_func.attrs is not None and "backend_config" in prim_func.attrs:
+        configs.append(prim_func.attrs["backend_config"])
+    for config in configs:
+        arch = json.loads(str(config)).get("cuda", {}).get("arch")
+        if arch is not None:
+            return str(arch)
+    return None
+
+
+def _device_loads(arch: str) -> bool:
+    """Whether the active device can load a cubin built for ``arch``."""
+
+    import torch
+
+    match = re.fullmatch(r"sm_(\d+)(\d)([af]?)", arch)
+    if match is None:
+        return True
+    target = (int(match[1]), int(match[2]))
+    device = torch.cuda.get_device_capability()
+    if match[3] == "a":
+        return target == device
+    return target[0] == device[0] and device[1] >= target[1]
+
+
+def _compile_gpu(prim_func: Any, *, arch: str | None = None) -> Any:
     import tvm_tirx
 
+    arch = arch or device_arch()
     target = tvm_tirx.target.Target({"kind": "cuda", "arch": arch})
     return tvm_tirx.compile(
         tvm_tirx.IRModule({"main": prim_func}),
@@ -418,7 +465,7 @@ def run_gpu_primfunc(
     arguments: Mapping[str, Any],
     *,
     outputs: Sequence[str],
-    arch: str,
+    arch: str | None = None,
 ) -> dict[str, np.ndarray]:
     import torch
 
@@ -518,6 +565,11 @@ def run_gpu_primfunc(
         else:
             device_arguments[name] = value
 
+    effective_arch = _declared_cuda_arch(prim_func) or arch or device_arch()
+    if not _device_loads(effective_arch):
+        pytest.skip(
+            f"kernel targets {effective_arch}, which this {device_arch()} device cannot load"
+        )
     executable = _compile_gpu(prim_func, arch=arch)
     executable(
         *(
@@ -537,7 +589,7 @@ def run_paired_primfunc(
     *,
     outputs: Sequence[str],
     cache_dir: str | Path,
-    arch: str = "sm_100a",
+    arch: str | None = None,
     max_ulp: int | Mapping[str, int] = 0,
 ) -> PairedRunResult:
     """Run one PrimFunc from identical host state on GPU and NumSim, then compare outputs."""

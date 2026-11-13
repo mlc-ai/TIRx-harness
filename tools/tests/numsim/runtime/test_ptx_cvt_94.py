@@ -10,23 +10,26 @@ from tvm_tirx.script import tirx as T
 
 @T.function
 def ptx94_cvt_forms(
+    scale: T.Tensor((1,), "uint8"),
     output_u16: T.Tensor((32, 6), "uint16"),
     output_u32: T.Tensor((32, 2), "uint32"),
 ):
+    # The ue8m0 scales come from memory: ptxas 13.4 (sm_107f) aborts with an
+    # internal compiler error (C7907) when a narrow scaled cvt takes an immediate.
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
 
     T.ptx["cvt.rz.satfinite.scaled::n1::ue8m0.e2m3x2.f32"](
-        output_u16[lane, 0], T.float32(2.125), T.float32(-2.375), T.uint8(128)
+        output_u16[lane, 0], T.float32(2.125), T.float32(-2.375), scale[0]
     )
     T.ptx["cvt.rz.satfinite.e3m2x2.bf16x2"](output_u16[lane, 1], T.uint32(0x3F88BF98))
     T.ptx["cvt.rp.satfinite.ue5m3x2.f32"](output_u16[lane, 2], T.float32(1.0625), T.float32(1.1875))
     T.ptx["cvt.rn.satfinite.scaled::n1::ue8m0.ue5m3x2.f32"](
-        output_u16[lane, 3], T.float32(2.125), T.float32(2.375), T.uint8(128)
+        output_u16[lane, 3], T.float32(2.125), T.float32(2.375), scale[0]
     )
     T.ptx["cvt.rz.satfinite.ue5m3x2.f16x2"](output_u16[lane, 4], T.uint32(0x3C403CC0))
     T.ptx["cvt.rn.satfinite.scaled::n1::ue8m0.ue5m3x2.bf16x2"](
-        output_u16[lane, 5], T.uint32(0x40084018), T.uint8(128)
+        output_u16[lane, 5], T.uint32(0x40084018), scale[0]
     )
 
     T.ptx["cvt.rn.f16x2.ue5m3x2"](output_u32[lane, 0], T.uint16(0x0178))
@@ -36,16 +39,16 @@ def ptx94_cvt_forms(
 
 
 @T.function
-def ptx94_pzo_forms(output: T.Tensor((32, 4), "uint16")):
+def ptx94_pzo_forms(scale: T.Tensor((1,), "uint8"), output: T.Tensor((32, 4), "uint16")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     T.ptx["cvt.rz.satfinite.e4m3x2.f32"](output[lane, 0], T.float32(-1e-30), T.float32(-0.0))
     T.ptx["cvt.rz.satfinite.pzo.e4m3x2.f32"](output[lane, 1], T.float32(-1e-30), T.float32(-0.0))
     T.ptx["cvt.rn.satfinite.scaled::n1::ue8m0.e2m3x2.bf16x2"](
-        output[lane, 2], T.uint32(0x80008000), T.uint8(127)
+        output[lane, 2], T.uint32(0x80008000), scale[0]
     )
     T.ptx["cvt.rn.satfinite.pzo.scaled::n1::ue8m0.e2m3x2.bf16x2"](
-        output[lane, 3], T.uint32(0x80008000), T.uint8(127)
+        output[lane, 3], T.uint32(0x80008000), scale[0]
     )
 
 
@@ -53,6 +56,7 @@ def test_ptx94_non_pzo_cvt_families_match_independent_bit_oracle(tmp_path):
     result = numsim.Engine().run(
         numsim.transpile(ptx94_cvt_forms, cache_dir=tmp_path),
         {
+            "scale": np.array([128], np.uint8),
             "output_u16": np.zeros((32, 6), np.uint16),
             "output_u32": np.zeros((32, 2), np.uint32),
         },
@@ -75,7 +79,7 @@ def test_ptx94_non_pzo_cvt_families_match_independent_bit_oracle(tmp_path):
 def test_ptx94_pzo_normalizes_each_negative_zero_after_narrow_conversion(tmp_path):
     result = numsim.Engine().run(
         numsim.transpile(ptx94_pzo_forms, cache_dir=tmp_path),
-        {"output": np.zeros((32, 4), np.uint16)},
+        {"scale": np.array([127], np.uint8), "output": np.zeros((32, 4), np.uint16)},
     )
     expected = np.asarray([0x8080, 0, 0x2020, 0], dtype=np.uint16)
     np.testing.assert_array_equal(result.outputs["output"], np.broadcast_to(expected, (32, 4)))

@@ -61,6 +61,6 @@ def wait(state: T.Tensor((32,), "int32"), out: T.Tensor((32,), "int32")):
     expected = np.full(32, 22, np.int32)
     inputs = {"state": expected.copy(), "out": np.zeros(32, np.int32)}
     result = run_checked(kernel, inputs, outputs=("out",), cache_dir=tmp_path)
-    gpu = run_gpu_primfunc(kernel, inputs, outputs=("out",), arch="sm_100a")
+    gpu = run_gpu_primfunc(kernel, inputs, outputs=("out",))
     np.testing.assert_array_equal(result.outputs["out"], expected)
     np.testing.assert_array_equal(gpu["out"], expected)

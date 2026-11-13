@@ -27,8 +27,6 @@ def test_raw_mxf8_cta2_matching_nan_scales_are_valid_on_gpu(pytestconfig):
     arguments = make_arguments()
     arguments["scale_b"].fill(np.uint32(0xFFFFFFFF))
     arguments["output"].fill(0)
-    output = run_gpu_primfunc(raw_mxf8_cta2_m128, arguments, outputs=("output",), arch="sm_100a")[
-        "output"
-    ]
+    output = run_gpu_primfunc(raw_mxf8_cta2_m128, arguments, outputs=("output",))["output"]
     # PTX requires NaN propagation; it does not promise a particular NaN payload.
     assert np.isnan(output).all()

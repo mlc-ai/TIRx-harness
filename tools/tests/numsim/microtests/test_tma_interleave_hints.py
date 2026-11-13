@@ -23,5 +23,5 @@ def test_interleave_prefetch_gpu_oracle(pytestconfig, operation, raw, swizzle):
     actual = run_checked(kernel, inputs, outputs=("output",))
     np.testing.assert_array_equal(actual.outputs["output"], expected)
     inputs["descriptor"] = PairedTensorMap(base, **metadata)
-    gpu = run_gpu_primfunc(kernel, inputs, outputs=("output",), arch="sm_100a")
+    gpu = run_gpu_primfunc(kernel, inputs, outputs=("output",))
     np.testing.assert_array_equal(gpu["output"], expected)
