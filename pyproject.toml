@@ -35,7 +35,7 @@ common = [
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
   # TVM TIRx compiles CUDA through NVRTC; cuda-bindings does not ship libnvrtc.
-  "nvidia-cuda-nvrtc>=13.2",
+  "nvidia-cuda-nvrtc>=13.4",
   "tirx-kernels==0.1.3",
   "kcoral>=0.1.2",
 ]
@@ -49,21 +49,21 @@ harness = [
 ]
 benchmark = [
   { include-group = "common" },
-  "cupti-python==13.2.0",
+  "cupti-python==13.4.0",
   # DeepGEMM 559d79f, Torch 2.14.0+cu132; Linux x86_64, glibc >= 2.38.
   "deep-gemm @ https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl#sha256=be7dda2bed915220fe557e15a7dbbf1ce5ba18d52e06bfb3cf329de7bad3cf8c ; python_version == '3.12'",
   "deep-gemm @ https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl#sha256=96f6fa8657aca7072bbcfa377a611053637425eb36fc44817cb38650805f55f4 ; python_version == '3.13'",
   # FlashKDA 7afb9f4, built with Torch 2.13.0+cu132 for B200 (sm_100a).
   "flash-kda @ https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl#sha256=49e5df1697459d61ee3954b22a47d37d0b117b31f0b6e0b177cee5d99e8e3393 ; python_version == '3.12'",
   "flash-kda @ https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl#sha256=6f9b4dc2a2817e7bf06f62f9c2433596d2c036309e4caab2fa8065fee33ba26c ; python_version == '3.13'",
-  "flash-linear-attention==0.5.2",
+  "flash-linear-attention==0.6.0",
   "flashinfer-python @ https://github.com/flashinfer-ai/whl/releases/download/nightly-v0.6.18-20260909/flashinfer_python-0.6.18.dev20260909-py3-none-any.whl#sha256=02b1c431a1f5c1dc6ad0bfdc490261a07a8a0b71ffb12767f4e34e6113c33142",
   "huggingface-hub>=1.0",
   "safetensors==0.8.0",
-  "torch @ https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=0b059371a41b7c868589b00ff60a9f72118bc9b3c0bf12e820c06eb2a3aab55b ; python_version == '3.12'",
-  "torch @ https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl#sha256=c083c08cf72c207fefbd8bfca4935f8830af38cb1c6b9548bd589939b73f56c4 ; python_version == '3.13'",
+  "torch @ https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=1c19ba829e928b6eed2f3d7d7013ce9c981328cc3f7910d7b8b362a617eb4bff ; python_version == '3.12'",
+  "torch @ https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl#sha256=ed75d71d0e287f43a6aa226423115ea14e2176e293eb7afc7b6a260ad29e3d85 ; python_version == '3.13'",
   "torch-c-dlpack-ext==0.1.5",
-  "triton==3.8.0",
+  "triton==3.9.0",
 ]
 server = [
   { include-group = "benchmark" },
