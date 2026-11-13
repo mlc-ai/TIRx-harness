@@ -34,9 +34,8 @@ common = [
   "apache-tvm-ffi==0.1.16",
   "numpy>=2.5.3",
   "nvidia-cutlass-dsl[cu13]==4.7.0",
-  # The TVM IKET profile checks these exact versions.
-  "nvidia-cuda-nvrtc==13.2.78",
-  "nvidia-cuda-nvdisasm==13.3.73",
+  # TVM TIRx compiles CUDA through NVRTC; cuda-bindings does not ship libnvrtc.
+  "nvidia-cuda-nvrtc>=13.2",
   "tirx-kernels==0.1.3rc1",
   "kcoral>=0.1.2rc1",
 ]
