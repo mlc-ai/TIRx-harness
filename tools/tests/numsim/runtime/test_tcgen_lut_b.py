@@ -62,8 +62,11 @@ def lut_b_case(group=1, tmem=False, segment=0, half=False, block=False, **option
         metadata[:, :, 2:] = lookup.view(np.uint32).reshape(2, 128, 2)
         lane = np.arange(128, dtype=np.uint32)
         for cta in range(group):
-            metadata[cta, :, 0] = (126 + lane % 2 + cta) << 8  # SFA_ID = 1.
-            metadata[cta, :, 1] = (127 + lane // 16 % 2) << 16  # SFB_ID = 2.
+            # K=64 reads each row's scale byte pair at SFA_ID = 0 and SFB_ID = 2.
+            scale_a = 126 + lane % 2 + cta
+            scale_b = 127 + lane // 16 % 2
+            metadata[cta, :, 0] = scale_a | (scale_a << 8)
+            metadata[cta, :, 1] = (scale_b << 16) | (scale_b << 24)
         a *= np.exp2((np.arange(m) % 2 - 1 + np.arange(m) // 128)[:, None])
         # CTA2 uses replicated, joint-N B scales, unlike the local-N lookup tables.
         b *= np.exp2((np.arange(n) // 16 % 2)[:, None])

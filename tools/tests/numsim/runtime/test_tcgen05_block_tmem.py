@@ -63,10 +63,17 @@ def block_tmem_case(
     metadata = np.zeros((2, 128, 2), np.uint32)
     for cta in range(cta_group):
         lane = np.arange(128, dtype=np.uint32)
-        metadata[cta, :, 0] = 125 | ((126 + lane % 32 % 3 + cta) << 8) | (129 << 16) | (124 << 24)
+        scale_a = 126 + lane % 32 % 3 + cta
+        metadata[cta, :, 0] = 125 | (scale_a << 8) | (129 << 16) | (124 << 24)
         # Both CTAs consume the full B scale vector; each holds a replica,
         # not a distinct scale vector for its local half of shared B.
-        metadata[cta, :, 1] = 123 | (129 << 8) | ((127 + lane % 2) << 16) | (126 << 24)
+        scale_b = 127 + lane % 2
+        metadata[cta, :, 1] = 123 | (129 << 8) | (scale_b << 16) | (126 << 24)
+        if k == 64 and block_scale:
+            # K=64 reads the byte pair at even IDs (SFA 0, SFB 2); repeat each
+            # row's scale so both K halves share it.
+            metadata[cta, :, 0] = scale_a | (scale_a << 8) | (129 << 16) | (124 << 24)
+            metadata[cta, :, 1] = 123 | (129 << 8) | (scale_b << 16) | (scale_b << 24)
     if block_scale:
         rows = m // cta_group
         a *= np.exp2(((np.arange(m) % rows % 32 % 3) - 1 + np.arange(m) // rows)[:, None])
@@ -207,3 +214,32 @@ def test_block_scale_implicit_size_with_discard(kind, tmem_a, tmp_path):
         )
     result = run_checked(kernel, args, cache_dir=tmp_path)
     np.testing.assert_array_equal(result.outputs["out"].view(np.float32), expected)
+
+
+def _with_scale_ids(kernel, sfa_id, sfb_id):
+    def replace_descriptor(node):
+        if type(node).__name__ != "Call" or not str(node.op.name).startswith(
+            "tirx.ptx.tcgen05_mma"
+        ):
+            return node
+        descriptor = decode_ptx_call(node).scalar_operand("idesc")
+        value = (int(descriptor.value) & ~((3 << 29) | (3 << 4))) | (sfa_id << 29) | (sfb_id << 4)
+        operands = [T.uint32(value) if arg.same_as(descriptor) else arg for arg in node.args]
+        return type(node)(
+            node.op, operands, attrs=node.attrs, ty_args=node.ty_args, loc=node.loc, ty=node.ty
+        )
+
+    return kernel.with_body(structural_map(kernel.body, replace_descriptor))
+
+
+# Recorded on an SM107 GPU (NVIDIA VR NVL72 ES): K=64 mxf8f6f4 raises an
+# illegal-instruction fault for any odd SFA or SFB ID; K=32 accepts them.
+@pytest.mark.parametrize("sfa_id,sfb_id", [(1, 2), (0, 1), (3, 0), (2, 3)])
+def test_mxf8f6f4_k64_rejects_odd_scale_ids(sfa_id, sfb_id, tmp_path):
+    kernel, args, _ = block_tmem_case(1, 0, 1, tmem_a=False, k=64)
+    assert_rejected(
+        _with_scale_ids(kernel, sfa_id, sfb_id),
+        args,
+        "K=64 requires SFA/SFB IDs 0 or 2",
+        cache_dir=tmp_path,
+    )

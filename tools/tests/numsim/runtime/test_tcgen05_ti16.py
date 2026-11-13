@@ -120,7 +120,9 @@ def ti16_kernel(
         if half_accumulator:
             formats &= ~(1 << 4)
     if block_scale:
-        formats = (1 << 23) | (1 << 29) | (2 << 4) | (a_format << 7) | (b_format << 10)
+        # SFA ID 1 for K=32; K=64 consumes two scale bytes and needs an even ID.
+        sfa_id = 0 if mma_k == 64 else 1
+        formats = (1 << 23) | (sfa_id << 29) | (2 << 4) | (a_format << 7) | (b_format << 10)
         if kind != "mxf8f6f4":
             formats = (1 << 23) | (1 << 7) | (1 << 10)
             if arch == "sm_107a":

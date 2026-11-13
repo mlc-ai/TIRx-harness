@@ -6614,6 +6614,15 @@ fn decode_raw_tcgen_mxf8f6f4_instruction_descriptor(
         )));
     }
     let sparse = descriptor & 4 != 0;
+    let sfa_id = (descriptor >> 29) & 0x3;
+    let sfb_id = (descriptor >> 4) & 0x3;
+    // SM107 traps (illegal instruction) on an odd SFA or SFB ID when K=64:
+    // each row then consumes two adjacent scale bytes starting at the ID.
+    if k == 64 && (sfa_id | sfb_id) & 1 != 0 {
+        return Err(EngineError::message(format!(
+            "raw mxf8f6f4 K=64 requires SFA/SFB IDs 0 or 2, got {sfa_id}/{sfb_id}"
+        )));
+    }
     Ok(RawTcgenMxf8f6f4InstructionDescriptor {
         sparse,
         sfa_lanes: raw_tcgen05_sfa_lanes(descriptor, layout)?,
