@@ -3125,8 +3125,15 @@ fn decode_raw_tcgen_f8f6f4_instruction_descriptor(
     } else {
         32
     };
-    // Table 48 restricts dense K64 to FP8, not sparse K128. Ordinary
-    // sparse operands retain the existing padded-atom / padded-TMEM codecs.
+    // `k` is the dense K that bit 29 selects; sparse doubles it, so bit 29
+    // with sparse would mean K=128. PTX Table 51 defines bit 29 only for dense
+    // K=64, and SM107 raises an illegal instruction for sparse K=128 with
+    // every operand format.
+    if k == 64 && sparse {
+        return Err(EngineError::message(
+            "raw f8f6f4 sparse K=128 is invalid: PTX Table 51 defines K bit 29 only for dense K=64",
+        ));
+    }
     if k == 64
         && !sparse
         && (a_format.format().width_bits != 8 || b_format.format().width_bits != 8)
@@ -3187,8 +3194,8 @@ fn decode_raw_tcgen_f8f6f4_instruction_descriptor(
         }
         _ => false,
     };
-    // Table 48's extended-K M restriction is for dense K=64, not sparse K=128.
-    if k == 64 && !sparse && !weight_stationary && m != 128 * cta_group as usize {
+    // Table 48 restricts dense K=64 to M=128 per CTA.
+    if k == 64 && !weight_stationary && m != 128 * cta_group as usize {
         return Err(EngineError::message(
             "dense f8f6f4 K=64 requires M=128 per CTA",
         ));
@@ -6557,12 +6564,14 @@ impl RawTcgenNarrowFormat {
         Ok(values)
     }
     fn block_tmem_columns(self, k: usize) -> Result<usize, EngineError> {
+        // K=64 TMEM A packs values contiguously (SM107-measured for FP8,
+        // FP6 and FP4): width/2 words per 16 values.
         match (k, self.format().width_bits) {
             (32, _) => Ok(8),
-            (64, 6) => Ok(12),
-            _ => Err(EngineError::message(
-                "MXF8F6F4 K=64 TMEM A requires packed FP6",
-            )),
+            (64, width) => Ok(width as usize * 2),
+            _ => Err(EngineError::message(format!(
+                "MXF8F6F4 TMEM A has no K={k} layout"
+            ))),
         }
     }
 
@@ -6576,9 +6585,10 @@ impl RawTcgenNarrowFormat {
                 values.extend(self.decode_tmem_word(word)?);
             }
         } else {
-            // 16 FP6 values occupy exactly three words; the 6-bit fields
-            // crossing a word boundary use the same 96-bit decoder as shared A.
-            for group in words.chunks_exact(3) {
+            // 16 values occupy width/2 words; FP6 fields crossing a word
+            // boundary use the same packed decoder as shared A.
+            let words_per_16 = self.format().width_bits as usize / 2;
+            for group in words.chunks_exact(words_per_16) {
                 let mut bytes = [0_u8; 16];
                 for (dst, word) in bytes.chunks_exact_mut(4).zip(group) {
                     dst.copy_from_slice(&word.to_le_bytes());
@@ -6653,6 +6663,13 @@ fn decode_raw_tcgen_mxf8f6f4_instruction_descriptor(
     if k == 64 && (sfa_id | sfb_id) & 1 != 0 {
         return Err(EngineError::message(format!(
             "raw mxf8f6f4 K=64 requires SFA/SFB IDs 0 or 2, got {sfa_id}/{sfb_id}"
+        )));
+    }
+    // SM107 also traps on sparse K=128 whenever B is E4M3/E5M2, for every A
+    // format, scale ID and transpose; sparse K=64 and 6-/4-bit B run.
+    if sparse && k == 64 && b_format.format().width_bits == 8 {
+        return Err(EngineError::message(format!(
+            "raw mxf8f6f4 sparse K=128 requires an E2M3, E3M2 or E2M1 B operand; SM107 raises an illegal instruction for {b_format:?} B"
         )));
     }
     Ok(RawTcgenMxf8f6f4InstructionDescriptor {
