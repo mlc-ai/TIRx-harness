@@ -225,6 +225,7 @@ def _torch_tensor_map(
             opaque = np.ctypeslib.as_array((ctypes.c_uint8 * 128).from_address(descriptor_address))
             device_image = torch.from_numpy(opaque.copy()).to("cuda")
         if value.inactive_swizzle_atomicity:
+            import tvm_tirx
             from tvm_tirx.script import tirx as T
 
             # CUDA's encoder has no inactive-atomicity argument. Initialize
