@@ -22,21 +22,48 @@ from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tvm_tirx.backend.cuda.lang.alloc_pool import SMEMPool
 from tvm_tirx.backend.cuda.layout import SwizzleMode, mma_shared_layout
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
 TCGEN_DESCRIPTOR_LAYOUT = "<artifact-tcgen-descriptor-layout>"
 
-_TMEM_D_4 = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_8 = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_16 = TileLayout(S[(128, 16) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_32 = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_104 = TileLayout(S[(128, 104) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_D_512 = TileLayout(S[(128, 512) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _BF16_SMEM_64B = mma_shared_layout("bfloat16", SwizzleMode.SWIZZLE_64B_ATOM, (64, 64))
-_TMEM_NVF4_24 = TileLayout(S[(128, 24) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _PACKED_FP4_SMEM_128X64 = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (128, 64))
 _PACKED_FP4_SMEM_8X64 = mma_shared_layout("uint8", SwizzleMode.SWIZZLE_32B_ATOM, (8, 64))
+
+
+@T.inline
+def _tmem_alloc(address, columns):
+    T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), columns)
+
+
+@T.inline
+def _tmem_free(address, columns):
+    T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], columns)
+    T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
+
+
+@T.inline
+def _tmem_alloc_cta2(address, columns):
+    T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), columns)
+
+
+@T.inline
+def _tmem_free_cta2(address, columns):
+    T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], columns)
+    T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
+
+
+@T.inline
+def _tmem_store(address, column, value):
+    """Warp-collective store of one 32-bit word to the warp's TMEM lane quarter."""
+    T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0] + T.uint32(column), value)
+    T.ptx.tcgen05.wait__st.sync.aligned()
+
+
+@T.inline
+def _tmem_load(word, address, column):
+    """Warp-collective load of one 32-bit word from the warp's TMEM lane quarter."""
+    T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(column))
+    T.ptx.tcgen05.wait__ld.sync.aligned()
 
 
 @pytest.mark.parametrize(
@@ -201,12 +228,16 @@ def raw_tcgen_ldst_32x32b(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     registers = T.alloc_local((4,), "uint32")
     runtime_address = T.alloc_local((1,), "uint32")
-    runtime_address[0] = T.uint32(0)
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    runtime_address[0] = address[0]
     for col in T.unroll(4):
-        tmem[row, col] = source[row, col]
+        _tmem_store(address, col, source[row, col])
     T.cuda.cta_sync()
     T.ptx["tcgen05.ld.sync.aligned.32x32b.x4.b32"](
         registers[0], registers[1], registers[2], registers[3], runtime_address[0]
@@ -222,7 +253,11 @@ def raw_tcgen_ldst_32x32b(
     T.ptx.tcgen05.wait__st.sync.aligned()
     T.cuda.cta_sync()
     for col in T.unroll(4):
-        output[row, col] = tmem[row, 4 + col]
+        _tmem_load(word, address, 4 + col)
+        output[row, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -233,10 +268,13 @@ def raw_tcgen_ld_16x256b_mapping(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
     registers = T.alloc_local((4,), "uint32")
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(8):
-        tmem[physical_row, col] = source[physical_row, col]
+        _tmem_store(address, col, source[physical_row, col])
     T.cuda.cta_sync()
     T.ptx["tcgen05.ld.sync.aligned.16x256b.x1.b32"](
         registers[0], registers[1], registers[2], registers[3], T.uint32(0)
@@ -244,6 +282,9 @@ def raw_tcgen_ld_16x256b_mapping(
     T.ptx.tcgen05.wait__ld.sync.aligned()
     for register in T.unroll(4):
         output[warp, lane, register] = registers[register]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -254,10 +295,13 @@ def raw_tcgen_ld_missing_shape_mappings(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
+    address = T.alloc_shared((1,), "uint32")
     registers = T.alloc_local((2,), "uint32")
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(16):
-        tmem[physical_row, col] = source[physical_row, col]
+        _tmem_store(address, col, source[physical_row, col])
     T.cuda.cta_sync()
     T.ptx["tcgen05.ld.sync.aligned.16x32bx2.x2.b32"](
         registers[0], registers[1], T.uint32(0), 2 * (2) if T.constexpr(False) else 2
@@ -273,6 +317,9 @@ def raw_tcgen_ld_missing_shape_mappings(
     T.ptx.tcgen05.wait__ld.sync.aligned()
     output[2, warp, lane, 0] = registers[0]
     output[2, warp, lane, 1] = registers[1]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -283,10 +330,13 @@ def raw_tcgen_ld_pack_32x32b(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
     registers = T.alloc_local((2,), "uint32")
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(4):
-        tmem[physical_row, col] = source[physical_row, col]
+        _tmem_store(address, col, source[physical_row, col])
     T.cuda.cta_sync()
     T.ptx["tcgen05.ld.sync.aligned.32x32b.x2.pack::16b.b32"](
         registers[0], registers[1], T.uint32(0)
@@ -294,6 +344,9 @@ def raw_tcgen_ld_pack_32x32b(
     T.ptx.tcgen05.wait__ld.sync.aligned()
     output[warp, lane, 0] = registers[0]
     output[warp, lane, 1] = registers[1]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -304,10 +357,14 @@ def raw_tcgen_st_unpack_32x32b(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     registers = T.alloc_local((2,), "uint32")
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(4):
-        tmem[physical_row, col] = T.uint32(0)
+        _tmem_store(address, col, T.uint32(0))
     registers[0] = source[warp, lane, 0]
     registers[1] = source[warp, lane, 1]
     T.ptx["tcgen05.st.sync.aligned.32x32b.x2.unpack::16b.b32"](
@@ -316,7 +373,11 @@ def raw_tcgen_st_unpack_32x32b(
     T.ptx.tcgen05.wait__st.sync.aligned()
     T.cuda.cta_sync()
     for col in T.unroll(4):
-        output[physical_row, col] = tmem[physical_row, col]
+        _tmem_load(word, address, col)
+        output[physical_row, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -329,14 +390,18 @@ def raw_tcgen_cp_warpx4(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((32, 4), "uint32")
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
     if warp == 0:
         for col in T.unroll(4):
             shared[lane, col] = source[lane, col]
     row = T.meta_var(warp * 32 + lane)
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(4):
-        tmem[row, col] = T.uint32(0)
+        _tmem_store(address, col, T.uint32(0))
     T.cuda.cta_sync()
     if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_matrix_descriptor(
@@ -347,7 +412,11 @@ def raw_tcgen_cp_warpx4(
         )
     T.cuda.cta_sync()
     for col in T.unroll(4):
-        output[row, col] = tmem[row, col]
+        _tmem_load(word, address, col)
+        output[row, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -356,8 +425,12 @@ def raw_tcgen_cp_4x256b(source: T.Tensor((512,), "uint8"), output: T.Tensor((4, 
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((512,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for copy_i in T.serial(16):
         shared[lane + copy_i * 32] = source[lane + copy_i * 32]
     T.cuda.cta_sync()
@@ -367,9 +440,13 @@ def raw_tcgen_cp_4x256b(source: T.Tensor((512,), "uint8"), output: T.Tensor((4, 
         )
         T.ptx["tcgen05.cp.cta_group::1.4x256b"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
-    if lane == 0:
-        for col in T.unroll(8):
-            output[warp, col] = tmem[warp * 32, col]
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane == 0:
+            output[warp, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -380,8 +457,12 @@ def raw_tcgen_cp_warpx2_01_23(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((64, 4), "uint32")
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     if warp < 2:
         row = warp * 32 + lane
         for col in T.unroll(4):
@@ -395,7 +476,11 @@ def raw_tcgen_cp_warpx2_01_23(
     T.cuda.cta_sync()
     row = warp * 32 + lane
     for col in T.unroll(4):
-        output[row, col] = tmem[row, col]
+        _tmem_load(word, address, col)
+        output[row, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -406,8 +491,12 @@ def raw_tcgen_cp_decompress_b4(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((512,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for copy_i in T.serial(16):
         shared[lane + copy_i * 32] = source[lane + copy_i * 32]
     T.cuda.cta_sync()
@@ -417,9 +506,13 @@ def raw_tcgen_cp_decompress_b4(
         )
         T.ptx["tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
-    if lane == 0:
-        for col in T.unroll(8):
-            output[warp, col] = tmem[warp * 32, col]
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane == 0:
+            output[warp, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -430,8 +523,12 @@ def raw_tcgen_cp_decompress_b6(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((512,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for copy_i in T.serial(16):
         shared[lane + copy_i * 32] = source[lane + copy_i * 32]
     T.cuda.cta_sync()
@@ -441,9 +538,13 @@ def raw_tcgen_cp_decompress_b6(
         )
         T.ptx["tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
-    if lane == 0:
-        for col in T.unroll(8):
-            output[warp, col] = tmem[warp * 32, col]
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane == 0:
+            output[warp, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -454,8 +555,12 @@ def raw_tcgen_cp_128b_base32b(
     warp = T.cuda.warp_in_warpgroup()
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((512,), "uint8", align=32)
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for copy_i in T.serial(16):
         shared[lane + copy_i * 32] = source[lane + copy_i * 32]
     T.cuda.cta_sync()
@@ -465,9 +570,13 @@ def raw_tcgen_cp_128b_base32b(
         )
         T.ptx["tcgen05.cp.cta_group::1.4x256b"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
-    if lane == 0:
-        for col in T.unroll(8):
-            output[warp, col] = tmem[warp * 32, col]
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane == 0:
+            output[warp, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -479,8 +588,12 @@ def raw_tcgen_cp_128x256b_swizzle(
     lane = T.cuda.lane_id()
     row = T.meta_var(warp * 32 + lane)
     shared = T.alloc_shared((128, 32), "uint32")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
     for col in T.unroll(32):
         shared[row, col] = source[row, col]
     T.cuda.cta_sync()
@@ -491,7 +604,11 @@ def raw_tcgen_cp_128x256b_swizzle(
         T.ptx["tcgen05.cp.cta_group::1.128x256b"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
     for col in T.unroll(8):
-        output[row, col] = tmem[row, col]
+        _tmem_load(word, address, col)
+        output[row, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -504,8 +621,11 @@ def raw_tcgen_cp_64x128b_cta_group2(
     lane = T.cuda.lane_id()
     row = T.meta_var(warp * 32 + lane)
     shared = T.alloc_shared((64, 32), "uint32")
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc_cta2(address, 32)
     if row < 64:
         for col in T.unroll(32):
             shared[row, col] = source[cta, row, col]
@@ -517,7 +637,11 @@ def raw_tcgen_cp_64x128b_cta_group2(
         T.ptx["tcgen05.cp.cta_group::2.64x128b.warpx2::02_13"](T.uint32(0), descriptor)
     T.cuda.cluster_sync()
     for col in T.unroll(4):
-        output[cta, row, col] = tmem[row, col]
+        _tmem_load(word, address, col)
+        output[cta, row, col] = word[0]
+    T.cuda.cluster_sync()
+    if warp == 0:
+        _tmem_free_cta2(address, 32)
 
 
 @T.function
@@ -529,8 +653,12 @@ def raw_tcgen_cp_128x256b_swizzle64_logical(
     lane = T.cuda.lane_id()
     physical_row = T.meta_var(warp * 32 + lane)
     shared = T.alloc_shared((64, 64), "bfloat16", layout=_BF16_SMEM_64B)
-    tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
 
     if warp < 2:
         source_row = warp * 32 + lane
@@ -548,9 +676,14 @@ def raw_tcgen_cp_128x256b_swizzle64_logical(
         T.ptx["tcgen05.cp.cta_group::1.128x256b"](T.uint32(8), descriptor)
     T.cuda.cta_sync()
 
-    for word in T.unroll(8):
-        output[0, physical_row, word] = tmem[physical_row, word]
-        output[1, physical_row, word] = tmem[physical_row, 8 + word]
+    for column in T.unroll(8):
+        _tmem_load(word, address, column)
+        output[0, physical_row, column] = word[0]
+        _tmem_load(word, address, 8 + column)
+        output[1, physical_row, column] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -566,8 +699,12 @@ def raw_tcgen_cp_descriptor_crosses_short_pool_alias(
     pool.move_base_to(64)
     descriptor_root = pool.alloc((16,), "uint8")
     pool.commit()
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     descriptor: T.uint64
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
 
     if warp == 0:
         for byte in T.unroll(16):
@@ -580,8 +717,12 @@ def raw_tcgen_cp_descriptor_crosses_short_pool_alias(
         T.ptx["tcgen05.cp.cta_group::1.32x128b.warpx4"](T.uint32(0), descriptor)
     T.cuda.cta_sync()
 
-    for word in T.unroll(4):
-        output[physical_row, word] = tmem[physical_row, word]
+    for column in T.unroll(4):
+        _tmem_load(word, address, column)
+        output[physical_row, column] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -590,7 +731,9 @@ def raw_tcgen_cp_descriptor_cannot_cross_shared_backings():
     lane = T.cuda.lane_id()
     first = T.alloc_shared((512,), "uint8")
     second = T.alloc_shared((512,), "uint8")
-    _tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    _tmem_alloc(address, 32)
+    T.cuda.warp_sync()
     descriptor: T.uint64
 
     for byte in T.unroll(16):
@@ -606,6 +749,8 @@ def raw_tcgen_cp_descriptor_cannot_cross_shared_backings():
             T.uint32(0),
             descriptor,
         )
+    T.cuda.cta_sync()
+    _tmem_free(address, 32)
 
 
 @T.function
@@ -617,25 +762,31 @@ def raw_tcgen_mma_block_scaled_mxf4_mqa(
     issue_second: T.int32,
     output: T.Tensor((128, 128), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(4):
-        tmem[lane, 128 + row_group] = scale_a_cells[row_group, lane]
-        tmem[lane, 132 + row_group] = scale_b_cells[row_group, lane]
+    if warp == 0:
+        _tmem_alloc(address, 256)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+            shared_b[offset] = b_physical[offset]
+        for row_group in T.unroll(4):
+            _tmem_store(address, 128 + row_group, scale_a_cells[row_group, lane])
+            _tmem_store(address, 132 + row_group, scale_b_cells[row_group, lane])
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor_block_scaled(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -684,10 +835,13 @@ def raw_tcgen_mma_block_scaled_mxf4_mqa(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output[row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.serial(128):
+        _tmem_load(word, address, col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 256)
 
 
 @T.function
@@ -708,26 +862,36 @@ def raw_tcgen_mma_block_scaled_mxf4nvf4_two_k_tiles(
     bit 23 selects whether those bytes decode as UE8M0 or UE4M3.
     """
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 24), "uint32", allocated_addr=0, layout=_TMEM_NVF4_24)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-        shared_b[offset] = b_physical[offset]
-    for k_tile in T.unroll(2):
-        for row_group in T.unroll(4):
-            tmem[lane, 8 + k_tile * 4 + row_group] = scale_a_cells[k_tile, row_group, lane]
-        tmem[lane, 16 + k_tile] = scale_b_cells[k_tile, lane]
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+            shared_b[offset] = b_physical[offset]
+        for k_tile in T.unroll(2):
+            for row_group in T.unroll(4):
+                _tmem_store(
+                    address,
+                    8 + k_tile * 4 + row_group,
+                    scale_a_cells[k_tile, row_group, lane],
+                )
+            _tmem_store(address, 16 + k_tile, scale_b_cells[k_tile, lane])
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor_block_scaled(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -776,10 +940,13 @@ def raw_tcgen_mma_block_scaled_mxf4nvf4_two_k_tiles(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(8):
-            output[row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.serial(8):
+        _tmem_load(word, address, col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -791,25 +958,31 @@ def raw_tcgen_mma_block_scaled_mxf4_expression_input_d(
     scale_b_cells: T.Tensor((4, 32), "uint32"),
     output: T.Tensor((128, 128), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(4):
-        tmem[lane, 128 + row_group] = scale_a_cells[row_group, lane]
-        tmem[lane, 132 + row_group] = scale_b_cells[row_group, lane]
+    if warp == 0:
+        _tmem_alloc(address, 256)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+            shared_b[offset] = b_physical[offset]
+        for row_group in T.unroll(4):
+            _tmem_store(address, 128 + row_group, scale_a_cells[row_group, lane])
+            _tmem_store(address, 132 + row_group, scale_b_cells[row_group, lane])
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor_block_scaled(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -841,10 +1014,13 @@ def raw_tcgen_mma_block_scaled_mxf4_expression_input_d(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output[row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.serial(128):
+        _tmem_load(word, address, col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 256)
 
 
 @T.function
@@ -859,7 +1035,7 @@ def raw_tcgen_mxf4_bulk_reads_fail_closed(
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
@@ -872,9 +1048,11 @@ def raw_tcgen_mxf4_bulk_reads_fail_closed(
         else:
             shared_a[offset] = a_physical[offset]
         shared_b[offset] = b_physical[offset]
+    _tmem_alloc(address, 256)
+    T.cuda.warp_sync()
     for row_group in T.unroll(4):
-        tmem[lane, 128 + row_group] = scale_a_cells[row_group, lane]
-        tmem[lane, 132 + row_group] = scale_b_cells[row_group, lane]
+        _tmem_store(address, 128 + row_group, scale_a_cells[row_group, lane])
+        _tmem_store(address, 132 + row_group, scale_b_cells[row_group, lane])
     T.cuda.cta_sync()
 
     if lane == 0:
@@ -907,6 +1085,8 @@ def raw_tcgen_mxf4_bulk_reads_fail_closed(
             T.uint32(132),
             T.ptx.pred(T.cast(mode == 2, "uint32")),
         )
+    T.cuda.cta_sync()
+    _tmem_free(address, 256)
 
 
 @T.function
@@ -915,22 +1095,28 @@ def raw_tcgen_mma_e4m3_mqa(
     b_physical: T.Tensor((16384,), "uint8"),
     output: T.Tensor((128, 128), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((16384,), "uint8")
     shared_b = T.alloc_shared((16384,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(512):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-        shared_b[offset] = b_physical[offset]
+    if warp == 0:
+        _tmem_alloc(address, 128)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(512):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+            shared_b[offset] = b_physical[offset]
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -963,10 +1149,13 @@ def raw_tcgen_mma_e4m3_mqa(
             )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output[row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.serial(128):
+        _tmem_load(word, address, col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 128)
 
 
 @T.function
@@ -975,24 +1164,30 @@ def raw_tcgen_mma_tf32_ss(
     b_physical: T.Tensor((1024,), "uint8"),
     output: T.Tensor((64, 8), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((1024,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-    for copy_i in T.serial(32):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+        for copy_i in T.serial(32):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1024,11 +1219,13 @@ def raw_tcgen_mma_tf32_ss(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.unroll(8):
-            output[row, col] = T.reinterpret(tmem[physical_lane, col], ty="float32")
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1037,65 +1234,72 @@ def raw_tcgen_mma_tf32_ts_predicated(
     b_physical: T.Tensor((4096,), "uint8"),
     output: T.Tensor((64, 32), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_b = T.alloc_shared((4096,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
     desc_b_low: T.uint32
     desc_b_replaced: T.uint64
 
-    for copy_i in T.serial(128):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for k in T.unroll(8):
-            tmem[physical_lane, k] = T.reinterpret(a[row, k], ty="uint32")
-        for col in T.serial(32):
-            tmem[physical_lane, 16 + col] = T.reinterpret(T.float32(4), ty="uint32")
+    if warp == 0:
+        _tmem_alloc(address, 64)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(128):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
+    # M=64 Layout F: logical row r lives in TMEM lane (r // 16) * 32 + r % 16.
+    for k in T.unroll(8):
+        _tmem_store(address, k, T.reinterpret(a[warp * 16 + lane % 16, k], ty="uint32"))
+    for col in T.serial(32):
+        _tmem_store(address, 16 + col, T.reinterpret(T.float32(4), ty="uint32"))
     T.cuda.cta_sync()
 
-    T.cuda.tcgen05.encode_instr_descriptor(
-        T.address_of(desc_i),
-        d_dtype="float32",
-        a_dtype="tf32",
-        b_dtype="tf32",
-        M=64,
-        N=32,
-        K=8,
-        trans_a=False,
-        trans_b=False,
-        n_cta_groups=1,
-    )
-    T.cuda.tcgen05.encode_matrix_descriptor(
-        T.address_of(desc_b), T.address_of(shared_b[0]), ldo=0, sdo=64, swizzle=3
-    )
-    desc_b_low = T.cast(desc_b, "uint32")
-    desc_b_replaced = T.bitwise_or(
-        T.bitwise_and(desc_b, T.bitwise_not(T.uint64(0xFFFFFFFF))), T.cast(desc_b_low, "uint64")
-    )
-    T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
-        T.uint32(16),
-        T.uint32(0),
-        desc_b_replaced,
-        desc_i,
-        T.uint32(1 << 3),
-        T.uint32(0),
-        T.uint32(0),
-        T.uint32(0),
-        T.ptx.pred(T.uint32(1)),
-        pred=T.cast(lane == 7, "uint32"),
-    )
+    if warp == 0:
+        T.cuda.tcgen05.encode_instr_descriptor(
+            T.address_of(desc_i),
+            d_dtype="float32",
+            a_dtype="tf32",
+            b_dtype="tf32",
+            M=64,
+            N=32,
+            K=8,
+            trans_a=False,
+            trans_b=False,
+            n_cta_groups=1,
+        )
+        T.cuda.tcgen05.encode_matrix_descriptor(
+            T.address_of(desc_b), T.address_of(shared_b[0]), ldo=0, sdo=64, swizzle=3
+        )
+        desc_b_low = T.cast(desc_b, "uint32")
+        desc_b_replaced = T.bitwise_or(
+            T.bitwise_and(desc_b, T.bitwise_not(T.uint64(0xFFFFFFFF))), T.cast(desc_b_low, "uint64")
+        )
+        T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
+            T.uint32(16),
+            T.uint32(0),
+            desc_b_replaced,
+            desc_i,
+            T.uint32(1 << 3),
+            T.uint32(0),
+            T.uint32(0),
+            T.uint32(0),
+            T.ptx.pred(T.uint32(1)),
+            pred=T.cast(lane == 7, "uint32"),
+        )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.serial(32):
-            output[row, col] = T.reinterpret(tmem[physical_lane, 16 + col], ty="float32")
+    for col in T.serial(32):
+        _tmem_load(word, address, 16 + col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 64)
 
 
 @T.function
@@ -1104,24 +1308,30 @@ def raw_tcgen_mma_e4m3_m64_n8(
     b_physical: T.Tensor((1024,), "uint8"),
     output: T.Tensor((64, 8), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((1024,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-    for copy_i in T.serial(32):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+        for copy_i in T.serial(32):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1153,11 +1363,13 @@ def raw_tcgen_mma_e4m3_m64_n8(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.unroll(8):
-            output[row, col] = T.reinterpret(tmem[physical_lane, col], ty="float32")
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1168,24 +1380,30 @@ def raw_tcgen_mma_e5m2_e4m3_m64_n8(
 ):
     """`kind::f8f6f4` with an E5M2 A and an E4M3 B: independent operand dtypes."""
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((1024,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-    for copy_i in T.serial(32):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+        for copy_i in T.serial(32):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1217,11 +1435,13 @@ def raw_tcgen_mma_e5m2_e4m3_m64_n8(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.unroll(8):
-            output[row, col] = T.reinterpret(tmem[physical_lane, col], ty="float32")
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1273,28 +1493,32 @@ def raw_tcgen_mma_f8f6f4_f16_destination_m64_n8(
 ):
     """`kind::f8f6f4` accumulating into a float16 destination, read as raw words."""
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((8192,), "uint8")
     shared_b = T.alloc_shared((1024,), "uint8")
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_D_8)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[offset]
-    for copy_i in T.serial(32):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.unroll(8):
-            tmem[row, col] = seed[row, col]
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[offset]
+        for copy_i in T.serial(32):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
+    for col in T.unroll(8):
+        _tmem_store(address, col, seed[warp * 32 + lane, col])
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float16",
@@ -1326,11 +1550,13 @@ def raw_tcgen_mma_f8f6f4_f16_destination_m64_n8(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.unroll(8):
-            output[row, col] = tmem[physical_lane, col]
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = word[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1339,23 +1565,27 @@ def raw_tcgen_mma_tf32_m128_n16(
     b_physical: T.Tensor((2048,), "uint8"),
     output: T.Tensor((128, 16), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_b = T.alloc_shared((2048,), "uint8")
-    tmem = T.tmem((128, 32), "uint32", allocated_addr=0, layout=_TMEM_D_32)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
 
-    for copy_i in T.serial(64):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for k in T.unroll(8):
-            tmem[row, k] = T.reinterpret(a[row, k], ty="uint32")
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(64):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
+    for k in T.unroll(8):
+        _tmem_store(address, k, T.reinterpret(a[warp * 32 + lane, k], ty="uint32"))
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1384,10 +1614,13 @@ def raw_tcgen_mma_tf32_m128_n16(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.unroll(16):
-            output[row, col] = T.reinterpret(tmem[row, 16 + col], ty="float32")
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.unroll(16):
+        _tmem_load(word, address, 16 + col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1395,7 +1628,6 @@ def raw_tcgen_mma_tf32_rejects_malformed_runtime_descriptor():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     shared_b = T.alloc_shared((4096,), "uint8")
-    _tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
     desc_i: T.uint32
     desc_b: T.uint64
     forged_desc: T.uint64
@@ -1434,7 +1666,9 @@ def raw_tcgen_cp_rejects_absolute_shared_descriptor():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((128,), "uint8")
-    _tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_D_4)
+    address = T.alloc_shared((1,), "uint32")
+    _tmem_alloc(address, 32)
+    T.cuda.warp_sync()
     for byte in T.unroll(4):
         shared[lane * 4 + byte] = T.uint8(lane)
     T.cuda.cta_sync()
@@ -1443,6 +1677,8 @@ def raw_tcgen_cp_rejects_absolute_shared_descriptor():
             T.uint32(0),
             T.uint64(1 << 46),
         )
+    T.cuda.cta_sync()
+    _tmem_free(address, 32)
 
 
 @T.function
@@ -1452,30 +1688,36 @@ def raw_tcgen_mma_bf16_ss(
     output: T.Tensor((64, 8), "float32"),
     output_ws: T.Tensor((64, 8), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     prefix = T.alloc_shared((128,), "uint8")
     shared_a = T.alloc_shared((4096,), "uint8")
     shared_b = T.alloc_shared((1024,), "uint8")
     descriptor_table = T.alloc_shared((1,), "uint64")
     barriers = T.alloc_shared((2,), "uint64")
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_a_loaded: T.uint64
     desc_b: T.uint64
-    prefix[lane] = T.cast(lane, "uint8")
-    for copy_i in T.serial(128):
-        shared_a[lane + copy_i * 32] = a_physical[lane + copy_i * 32]
-    for copy_i in T.serial(32):
-        shared_b[lane + copy_i * 32] = b_physical[lane + copy_i * 32]
-    if lane == 0:
+    if warp == 0:
+        _tmem_alloc(address, 32)
+    T.cuda.cta_sync()
+    if warp == 0:
+        prefix[lane] = T.cast(lane, "uint8")
+        for copy_i in T.serial(128):
+            shared_a[lane + copy_i * 32] = a_physical[lane + copy_i * 32]
+        for copy_i in T.serial(32):
+            shared_b[lane + copy_i * 32] = b_physical[lane + copy_i * 32]
+    if warp == 0 and lane == 0:
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[0]), 1)
         T.ptx.mbarrier.init.shared.b64(T.address_of(barriers[1]), 1)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cta_sync()
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1512,13 +1754,12 @@ def raw_tcgen_mma_bf16_ss(
         )
     T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
     T.cuda.cta_sync()
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.unroll(8):
-            output[row, col] = T.reinterpret(_tmem[physical_lane, col], ty="float32")
+    for col in T.unroll(8):
+        _tmem_load(word, address, col)
+        if lane < 16:
+            output[warp * 16 + lane, col] = T.reinterpret(word[0], ty="float32")
     T.cuda.cta_sync()
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.ptx["tcgen05.mma.ws.cta_group::1.kind::f16"](
             T.uint32(0),
             desc_a_loaded,
@@ -1532,12 +1773,15 @@ def raw_tcgen_mma_bf16_ss(
         )
     T.cuda.mbarrier_wait(T.address_of(barriers[1]), 0)
     T.cuda.cta_sync()
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        for col in T.unroll(8):
-            physical_lane = row + (col // 4) * 64
-            physical_col = col % 4
-            output_ws[row, col] = T.reinterpret(_tmem[physical_lane, physical_col], ty="float32")
+    # M=64 `.ws` Layout E: columns 0..3 in lanes 0..63, columns 4..7 in lanes 64..127.
+    for col in T.unroll(4):
+        _tmem_load(word, address, col)
+        output_ws[(warp % 2) * 32 + lane, (warp // 2) * 4 + col] = T.reinterpret(
+            word[0], ty="float32"
+        )
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 32)
 
 
 @T.function
@@ -1548,20 +1792,26 @@ def raw_tcgen_mma_ws_bf16_ss_layout_e_tail(
 ):
     """M64 `.ws` writes N halves into the two Layout-E lane banks."""
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((4096,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 512), "uint32", allocated_addr=0, layout=_TMEM_D_512)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
-    for copy_i in T.serial(128):
-        shared_a[lane + copy_i * 32] = a_physical[lane + copy_i * 32]
-    for copy_i in T.serial(256):
-        shared_b[lane + copy_i * 32] = b_physical[lane + copy_i * 32]
+    if warp == 0:
+        _tmem_alloc(address, 512)
     T.cuda.cta_sync()
-    if lane == 0:
+    if warp == 0:
+        for copy_i in T.serial(128):
+            shared_a[lane + copy_i * 32] = a_physical[lane + copy_i * 32]
+        for copy_i in T.serial(256):
+            shared_b[lane + copy_i * 32] = b_physical[lane + copy_i * 32]
+    T.cuda.cta_sync()
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1589,12 +1839,15 @@ def raw_tcgen_mma_ws_bf16_ss_layout_e_tail(
             T.uint64(0),
         )
     T.cuda.cta_sync()
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            physical_lane = row + (col // 64) * 64
-            physical_col = 400 + col % 64
-            output[row, col] = T.reinterpret(tmem[physical_lane, physical_col], ty="float32")
+    # Layout E: N half h of logical row r lives in lane r + 64 * h.
+    for col in T.serial(64):
+        _tmem_load(word, address, 400 + col)
+        output[(warp % 2) * 32 + lane, (warp // 2) * 64 + col] = T.reinterpret(
+            word[0], ty="float32"
+        )
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 512)
 
 
 @T.function
@@ -1604,23 +1857,27 @@ def raw_tcgen_mma_f16_ts_mn_major_n128(
     output: T.Tensor((128, 128), "float32"),
     output_ws: T.Tensor((128, 128), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_b = T.alloc_shared((16384,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
 
-    for copy_i in T.serial(512):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[offset]
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for packed_k in T.unroll(8):
-            tmem[row, packed_k] = a_packed[row, packed_k]
+    if warp == 0:
+        _tmem_alloc(address, 256)
+    T.cuda.cta_sync()
+    if warp == 0:
+        for copy_i in T.serial(512):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[offset]
+    for packed_k in T.unroll(8):
+        _tmem_store(address, packed_k, a_packed[warp * 32 + lane, packed_k])
     T.cuda.cta_sync()
 
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1653,12 +1910,11 @@ def raw_tcgen_mma_f16_ts_mn_major_n128(
         )
     T.cuda.cta_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output[row, col] = T.reinterpret(tmem[row, 8 + col], ty="float32")
+    for col in T.serial(128):
+        _tmem_load(word, address, 8 + col)
+        output[warp * 32 + lane, col] = T.reinterpret(word[0], ty="float32")
     T.cuda.cta_sync()
-    if lane == 0:
+    if warp == 0 and lane == 0:
         T.ptx["tcgen05.mma.ws.cta_group::1.kind::f16"](
             T.uint32(8),
             T.uint32(0),
@@ -1668,10 +1924,12 @@ def raw_tcgen_mma_f16_ts_mn_major_n128(
             T.uint64(0),
         )
     T.cuda.cta_sync()
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output_ws[row, col] = T.reinterpret(tmem[row, 8 + col], ty="float32")
+    for col in T.serial(128):
+        _tmem_load(word, address, 8 + col)
+        output_ws[warp * 32 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 256)
 
 
 @T.function
@@ -1686,37 +1944,41 @@ def raw_tcgen_mma_f16_cta2_datapaths(
     output_ts256: T.Tensor((256, 16), "float32"),
     output_ss128: T.Tensor((128, 128), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a_ss256 = T.alloc_shared((16384,), "uint8")
     shared_b_ss256 = T.alloc_shared((1024,), "uint8")
     shared_b_ts256 = T.alloc_shared((8192,), "uint8")
     shared_a_ss128 = T.alloc_shared((8192,), "uint8")
     shared_b_ss128 = T.alloc_shared((8192,), "uint8")
-    tmem = T.tmem((128, 104), "uint32", allocated_addr=0, layout=_TMEM_D_104)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(512):
-        offset = lane + copy_i * 32
-        shared_a_ss256[offset] = a_ss256_physical[cta, offset]
-    for copy_i in T.serial(32):
-        offset = lane + copy_i * 32
-        shared_b_ss256[offset] = b_ss256_physical[cta, offset]
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_b_ts256[offset] = b_ts256_physical[cta, offset]
-        shared_a_ss128[offset] = a_ss128_physical[cta, offset]
-        shared_b_ss128[offset] = b_ss128_physical[cta, offset]
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for packed_k in T.unroll(8):
-            tmem[row, packed_k] = a_ts256_packed[cta, row, packed_k]
+    if warp == 0:
+        _tmem_alloc_cta2(address, 128)
+    T.cuda.cluster_sync()
+    if warp == 0:
+        for copy_i in T.serial(512):
+            offset = lane + copy_i * 32
+            shared_a_ss256[offset] = a_ss256_physical[cta, offset]
+        for copy_i in T.serial(32):
+            offset = lane + copy_i * 32
+            shared_b_ss256[offset] = b_ss256_physical[cta, offset]
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_b_ts256[offset] = b_ts256_physical[cta, offset]
+            shared_a_ss128[offset] = a_ss128_physical[cta, offset]
+            shared_b_ss128[offset] = b_ss128_physical[cta, offset]
+    for packed_k in T.unroll(8):
+        _tmem_store(address, packed_k, a_ts256_packed[cta, warp * 32 + lane, packed_k])
     T.cuda.cluster_sync()
 
-    if cta == 0 and lane == 0:
+    if cta == 0 and warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -1817,19 +2079,21 @@ def raw_tcgen_mma_f16_cta2_datapaths(
         )
     T.cuda.cluster_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(16):
-            output_ss256[cta * 128 + row, col] = T.reinterpret(tmem[row, 8 + col], ty="float32")
-            output_ts256[cta * 128 + row, col] = T.reinterpret(tmem[row, 24 + col], ty="float32")
-    for row_group in T.unroll(2):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            physical_lane = row + 64 * (col // 64)
-            physical_col = col % 64
-            output_ss128[cta * 64 + row, col] = T.reinterpret(
-                tmem[physical_lane, 40 + physical_col], ty="float32"
-            )
+    row = T.meta_var(warp * 32 + lane)
+    for col in T.serial(16):
+        _tmem_load(word, address, 8 + col)
+        output_ss256[cta * 128 + row, col] = T.reinterpret(word[0], ty="float32")
+        _tmem_load(word, address, 24 + col)
+        output_ts256[cta * 128 + row, col] = T.reinterpret(word[0], ty="float32")
+    # M=128 CTA-pair: N half h of logical row r lives in lane r + 64 * h.
+    for col in T.serial(64):
+        _tmem_load(word, address, 40 + col)
+        output_ss128[cta * 64 + (warp % 2) * 32 + lane, (warp // 2) * 64 + col] = T.reinterpret(
+            word[0], ty="float32"
+        )
+    T.cuda.cluster_sync()
+    if warp == 0:
+        _tmem_free_cta2(address, 128)
 
 
 @T.function
@@ -1841,7 +2105,6 @@ def raw_tcgen_mma_f8f6f4_cta2_k32_without_arch():
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((16384,), "uint8")
     shared_b = T.alloc_shared((8192,), "uint8")
-    _tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
     desc_a: T.uint64
     desc_b: T.uint64
 
@@ -1884,7 +2147,6 @@ def raw_tcgen_mma_f8f6f4_cta2_k32_extended_span_without_arch():
         T.ptr_byte_offset(shared_arena.data, 262144, ty=T.Ptr("uint8", "shared")),
         ty_args=[T.Tensor((8192,), "uint8", scope="shared")],
     )
-    _tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
     desc_a: T.uint64
     desc_b: T.uint64
 
@@ -1929,8 +2191,9 @@ def raw_tcgen_mma_f8f6f4_cta2_rubin_k64_discard(
     """Rubin's M256/N128/K64 form with a B descriptor above the SM100 address ceiling."""
 
     T.func_attr({"backend_config": '{"cuda": {"arch": "sm_107a"}}'})
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_arena = T.alloc_shared((327936,), "uint8", align=1024)
     shared_a = T.decl_tensor(
@@ -1940,23 +2203,26 @@ def raw_tcgen_mma_f8f6f4_cta2_rubin_k64_discard(
         T.ptr_byte_offset(shared_arena.data, 262144, ty=T.Ptr("uint8", "shared")),
         ty_args=[T.Tensor((8192,), "uint8", scope="shared")],
     )
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(512):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[cta, offset]
-    for copy_i in T.serial(256):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[cta, offset]
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            tmem[row, col] = T.reinterpret(seed[cta, row, col], ty="uint32")
+    if warp == 0:
+        _tmem_alloc_cta2(address, 128)
+    T.cuda.cluster_sync()
+    if warp == 0:
+        for copy_i in T.serial(512):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[cta, offset]
+        for copy_i in T.serial(256):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[cta, offset]
+    for col in T.serial(128):
+        _tmem_store(address, col, T.reinterpret(seed[cta, warp * 32 + lane, col], ty="uint32"))
     T.cuda.cluster_sync()
 
-    if cta == 0 and lane == 0:
+    if cta == 0 and warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_matrix_descriptor(
             T.address_of(desc_a), T.address_of(shared_a[0]), ldo=0, sdo=64, swizzle=3
         )
@@ -1990,10 +2256,12 @@ def raw_tcgen_mma_f8f6f4_cta2_rubin_k64_discard(
         )
     T.cuda.cluster_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(128):
-            output[cta, row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    for col in T.serial(128):
+        _tmem_load(word, address, col)
+        output[cta, warp * 32 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cluster_sync()
+    if warp == 0:
+        _tmem_free_cta2(address, 128)
 
 
 @T.function
@@ -2005,7 +2273,6 @@ def raw_tcgen_mma_f8f6f4_cta2_rubin_rejects_descriptor_bit15():
     cta = T.cuda.cluster_cta_id("x")
     lane = T.cuda.lane_id()
     shared = T.alloc_shared((16384,), "uint8")
-    _tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
     desc_a: T.uint64
     desc_b: T.uint64
 
@@ -2051,7 +2318,6 @@ def raw_tcgen_mma_f8f6f4_reserved_operand():
 
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.cta_group::1.kind::f8f6f4"](
             T.uint32(0),
@@ -2070,7 +2336,6 @@ def raw_tcgen_mma_f8f6f4_reserved_operand():
 def raw_tcgen_mma_f8f6f4_cta_group2_reserved_destination():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.cta_group::2.kind::f8f6f4.collector::a::discard"](
             T.uint32(0),
@@ -2095,7 +2360,6 @@ def raw_tcgen_mma_f8f6f4_cta_group2_invalid_n():
 
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.cta_group::2.kind::f8f6f4.collector::a::discard"](
             T.uint32(0),
@@ -2125,20 +2389,24 @@ def raw_tcgen_mma_mxf8_k_major_cta1(
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((16384,), "uint8")
     shared_b = T.alloc_shared((16384,), "uint8")
-    tmem = T.tmem((128, 512), "uint32", allocated_addr=0, layout=_TMEM_D_512)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
     if warp == 0:
+        _tmem_alloc(address, 512)
+    T.cuda.cta_sync()
+    if warp == 0:
         for copy_i in T.serial(512):
             offset = lane + copy_i * 32
             shared_a[offset] = a_physical[offset]
             shared_b[offset] = b_physical[offset]
-        for replica in T.unroll(4):
-            for row_group in T.unroll(4):
-                tmem[replica * 32 + lane, 256 + row_group] = T.uint32(0x7F7F7F7F)
-                tmem[replica * 32 + lane, 260 + row_group] = T.uint32(0x7F7F7F7F)
+    # Every warp replicates the unit scales into its own lane quarter.
+    for row_group in T.unroll(4):
+        _tmem_store(address, 256 + row_group, T.uint32(0x7F7F7F7F))
+        _tmem_store(address, 260 + row_group, T.uint32(0x7F7F7F7F))
     T.cuda.cta_sync()
 
     if (warp == 0) and (lane == 0):
@@ -2177,7 +2445,11 @@ def raw_tcgen_mma_mxf8_k_major_cta1(
 
     row = T.meta_var(warp * 32 + lane)
     for col in T.serial(128):
-        output[row, col] = T.reinterpret(tmem[row, col], ty="float32")
+        _tmem_load(word, address, col)
+        output[row, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cta_sync()
+    if warp == 0:
+        _tmem_free(address, 512)
 
 
 @T.function
@@ -2188,29 +2460,35 @@ def raw_tcgen_mma_mixed_fp4_fp8_cta_group2(
     scale_b_cells: T.Tensor((2, 1, 32), "uint32"),
     output: T.Tensor((2, 128, 32), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_a = T.alloc_shared((16384,), "uint8")
     shared_b = T.alloc_shared((2048,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+    address = T.alloc_shared((1,), "uint32")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    for copy_i in T.serial(512):
-        offset = lane + copy_i * 32
-        shared_a[offset] = a_physical[cta, offset]
-    for copy_i in T.serial(64):
-        offset = lane + copy_i * 32
-        shared_b[offset] = b_physical[cta, offset]
-    for replica in T.unroll(4):
-        for row_group in T.unroll(4):
-            tmem[replica * 32 + lane, 32 + row_group] = scale_a_cells[cta, row_group, lane]
-        tmem[replica * 32 + lane, 36] = scale_b_cells[cta, 0, lane]
+    if warp == 0:
+        _tmem_alloc_cta2(address, 64)
+    T.cuda.cluster_sync()
+    if warp == 0:
+        for copy_i in T.serial(512):
+            offset = lane + copy_i * 32
+            shared_a[offset] = a_physical[cta, offset]
+        for copy_i in T.serial(64):
+            offset = lane + copy_i * 32
+            shared_b[offset] = b_physical[cta, offset]
+    # Every warp replicates the scales into its own lane quarter.
+    for row_group in T.unroll(4):
+        _tmem_store(address, 32 + row_group, scale_a_cells[cta, row_group, lane])
+    _tmem_store(address, 36, scale_b_cells[cta, 0, lane])
     T.cuda.cluster_sync()
 
-    if cta == 0 and lane == 0:
+    if cta == 0 and warp == 0 and lane == 0:
         T.cuda.tcgen05.encode_instr_descriptor_block_scaled(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -2257,10 +2535,12 @@ def raw_tcgen_mma_mixed_fp4_fp8_cta_group2(
         )
     T.cuda.cluster_sync()
 
-    for row_group in T.unroll(4):
-        row = row_group * 32 + lane
-        for col in T.serial(32):
-            output[cta, row, col] = T.reinterpret(tmem[row, col], ty="float32")
+    for col in T.serial(32):
+        _tmem_load(word, address, col)
+        output[cta, warp * 32 + lane, col] = T.reinterpret(word[0], ty="float32")
+    T.cuda.cluster_sync()
+    if warp == 0:
+        _tmem_free_cta2(address, 64)
 
 
 @T.function
@@ -2268,7 +2548,6 @@ def raw_tcgen_mxf4_ss_cta2_analysis_probe():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     _shared = T.alloc_shared((1,), "uint8")
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.cta_group::2.kind::mxf4.block_scale.scale_vec::2X"](
             T.uint32(0),
@@ -2286,7 +2565,6 @@ def raw_tcgen_mxf4_ts_cta1_analysis_probe():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     _shared = T.alloc_shared((1,), "uint8")
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.cta_group::1.kind::mxf4.block_scale.scale_vec::2X"](
             T.uint32(0),
@@ -2304,7 +2582,6 @@ def raw_tcgen_ws_ss_mask_analysis_probe():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     _shared = T.alloc_shared((1,), "uint8")
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.ws.cta_group::1.kind::f16"](
             T.uint32(0),
@@ -2321,7 +2598,6 @@ def raw_tcgen_ws_ts_mask_analysis_probe():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     _shared = T.alloc_shared((1,), "uint8")
-    _tmem = T.tmem((128, 16), "uint32", allocated_addr=0, layout=_TMEM_D_16)
     if lane == 0:
         T.ptx["tcgen05.mma.ws.cta_group::1.kind::f16"](
             T.uint32(0),
@@ -2369,12 +2645,15 @@ def _raw_calls(func):
     )
 
 
-def _resolved_ptx_raw_tcgen_calls(func):
+def _resolved_ptx_raw_tcgen_calls(func, *, transfers=True):
+    # TMEM is only reachable through raw tcgen05.st/ld, so kernels that seed or
+    # read back TMEM also carry those transfers next to the operation under test.
+    excluded = _TCGEN_CONTROL_CALLS | (
+        set() if transfers else {"tirx.ptx.tcgen05_ld", "tirx.ptx.tcgen05_st"}
+    )
     return _accepted_calls(
         func,
-        lambda op_name: (
-            op_name.startswith("tirx.ptx.tcgen05_") and op_name not in _TCGEN_CONTROL_CALLS
-        ),
+        lambda op_name: op_name.startswith("tirx.ptx.tcgen05_") and op_name not in excluded,
     )
 
 
@@ -2651,11 +2930,14 @@ def test_raw_tcgen_registry_classifies_exact_descriptor_and_transfer_signatures(
         "tirx.ptx.tcgen05_ld",
         "tirx.ptx.tcgen05_st",
     }
-    assert [call.op_name for call in _resolved_ptx_raw_tcgen_calls(raw_tcgen_cp_warpx4)] == [
-        "tirx.ptx.tcgen05_cp"
-    ]
     assert [
-        call.op_name for call in _resolved_ptx_raw_tcgen_calls(raw_tcgen_mma_block_scaled_mxf4_mqa)
+        call.op_name for call in _resolved_ptx_raw_tcgen_calls(raw_tcgen_cp_warpx4, transfers=False)
+    ] == ["tirx.ptx.tcgen05_cp"]
+    assert [
+        call.op_name
+        for call in _resolved_ptx_raw_tcgen_calls(
+            raw_tcgen_mma_block_scaled_mxf4_mqa, transfers=False
+        )
     ] == [
         "tirx.ptx.tcgen05_mma_block_scale_block_ss",
         "tirx.ptx.tcgen05_mma_block_scale_ss",
@@ -2668,7 +2950,7 @@ def test_raw_tcgen_registry_classifies_exact_descriptor_and_transfer_signatures(
             raw_tcgen_mma_tf32_ts_predicated,
             raw_tcgen_mma_ws_bf16_ss_layout_e_tail,
         )
-        for call in _resolved_ptx_raw_tcgen_calls(function)
+        for call in _resolved_ptx_raw_tcgen_calls(function, transfers=False)
     }
     assert dense == {
         "tirx.ptx.tcgen05_mma_ss",
@@ -2677,11 +2959,15 @@ def test_raw_tcgen_registry_classifies_exact_descriptor_and_transfer_signatures(
     }
     assert [
         call.op_name
-        for call in _resolved_ptx_raw_tcgen_calls(raw_tcgen_mma_mixed_fp4_fp8_cta_group2)
+        for call in _resolved_ptx_raw_tcgen_calls(
+            raw_tcgen_mma_mixed_fp4_fp8_cta_group2, transfers=False
+        )
     ] == ["tirx.ptx.tcgen05_mma_block_scale_ss"] * 2
     assert [
         call.op_name
-        for call in _resolved_ptx_raw_tcgen_calls(raw_tcgen_mma_block_scaled_mxf4nvf4_two_k_tiles)
+        for call in _resolved_ptx_raw_tcgen_calls(
+            raw_tcgen_mma_block_scaled_mxf4nvf4_two_k_tiles, transfers=False
+        )
     ] == ["tirx.ptx.tcgen05_mma_block_scale_ss"] * 2
 
 
@@ -2765,9 +3051,10 @@ def test_raw_tcgen_f8f6f4_cta2_sm100_rejects_sm107_k64_bit(arch, tmp_path):
         lane = T.cuda.lane_id()
         shared_a = T.alloc_shared((16384,), "uint8")
         shared_b = T.alloc_shared((8192,), "uint8")
-        _tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
+        address = T.alloc_shared((1,), "uint32")
         desc_a: T.uint64
         desc_b: T.uint64
+        _tmem_alloc_cta2(address, 256)
         for i in T.serial(512):
             shared_a[lane + i * 32] = T.uint8(0)
         for i in T.serial(256):
@@ -2796,6 +3083,7 @@ def test_raw_tcgen_f8f6f4_cta2_sm100_rejects_sm107_k64_bit(arch, tmp_path):
                 T.ptx.pred(T.uint32(0)),
             )
         T.cuda.cluster_sync()
+        _tmem_free_cta2(address, 256)
 
     kernel = with_cuda_arch(runtime_descriptor, arch)
     module = numsim.transpile(kernel, cache_dir=tmp_path)

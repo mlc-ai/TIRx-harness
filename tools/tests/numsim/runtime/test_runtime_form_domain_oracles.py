@@ -88,9 +88,6 @@ _SNAPSHOT_BOUND_LDSTMATRIX_LAYOUT = TileLayout(
 )
 
 
-_RAW_TCGEN_LDST_LAYOUT = TileLayout(S[(128, 512) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-
-
 _RAW_TCGEN_LDST_DOMAINS = {
     "16x32bx2": (1, 128),
     "16x64b": (1, 128),
@@ -107,11 +104,11 @@ def _make_raw_tcgen_ldst_runtime_kernel(shape: str, registers_per_num: int, num:
         ld_chain = f"tcgen05.ld.sync.aligned.{shape}.x{num}{'.pack::16b' if packed else ''}.b32"
         st_chain = f"tcgen05.st.sync.aligned.{shape}.x{num}{'.unpack::16b' if packed else ''}.b32"
         split_offset = 2 * num if packed else num
-        ld_operands = f"{registers}, T.uint32(0)"
-        st_operands = f"T.uint32(0), {registers}"
+        ld_operands = f"{registers}, address[0]"
+        st_operands = f"address[0], {registers}"
         if shape == "16x32bx2":
             ld_operands = f"{ld_operands}, {split_offset}"
-            st_operands = f"T.uint32(0), {split_offset}, {registers}"
+            st_operands = f"address[0], {split_offset}, {registers}"
         statements.extend(
             (
                 f'    T.ptx["{ld_chain}"]({ld_operands})',
@@ -121,6 +118,7 @@ def _make_raw_tcgen_ldst_runtime_kernel(shape: str, registers_per_num: int, num:
             )
         )
     name = shape.replace("x", "_x")
+    initial_registers = ", ".join(f"registers[{index}]" for index in range(128))
     return tvm_tirx.script.from_source(
         "\n".join(
             (
@@ -130,17 +128,29 @@ def _make_raw_tcgen_ldst_runtime_kernel(shape: str, registers_per_num: int, num:
                 "    warp = T.cuda.warp_in_warpgroup()",
                 "    lane = T.cuda.lane_id()",
                 "    row = T.meta_var(warp * 32 + lane)",
-                "    tmem = T.tmem((128, 512), 'uint32', allocated_addr=0, layout=TMEM_LAYOUT)",
+                "    address = T.alloc_shared((1,), 'uint32')",
                 "    registers = T.alloc_local((128,), 'uint32')",
-                "    for col in T.serial(512):",
-                "        tmem[row, col] = T.cast(row * 257 + col, 'uint32')",
+                "    if warp == 0:",
+                "        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32("
+                "T.address_of(address[0]), 512)",
+                "    T.cuda.cta_sync()",
+                "    for chunk in T.serial(4):",
+                "        for col in T.unroll(128):",
+                "            registers[col] = T.cast(row * 257 + chunk * 128 + col, 'uint32')",
+                "        T.ptx['tcgen05.st.sync.aligned.32x32b.x128.b32']("
+                f"address[0] + T.uint32(chunk * 128), {initial_registers})",
+                "    T.ptx.tcgen05.wait__st.sync.aligned()",
                 "    T.cuda.cta_sync()",
                 *statements,
                 "    if (warp == 0) and (lane == 0):",
                 "        output[0] = 0x2468ACE",
+                "    T.cuda.cta_sync()",
+                "    if warp == 0:",
+                "        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 512)",
+                "        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()",
             )
         ),
-        extra_vars={"T": T, "TMEM_LAYOUT": _RAW_TCGEN_LDST_LAYOUT},
+        extra_vars={"T": T},
     )
 
 
@@ -196,24 +206,44 @@ def _make_raw_tcgen_cp_runtime_kernel(shape: str, multicast: str, cta_group: int
                 "    lane = T.cuda.lane_id()",
                 "    thread = T.meta_var(warp * 32 + lane)",
                 "    shared = T.alloc_shared((16384,), 'uint8', align=128)",
-                "    tmem = T.tmem((128, 512), 'uint32', allocated_addr=0, layout=TMEM_LAYOUT)",
+                "    address = T.alloc_shared((1,), 'uint32')",
+                "    barrier = T.alloc_shared((1,), 'uint64')",
+                "    readback = T.alloc_local((1,), 'uint32')",
                 "    descriptor: T.uint64",
+                "    if warp == 0:",
+                f"        T.ptx.tcgen05.alloc.cta_group__{cta_group}.sync.aligned.shared__cta.b32("
+                "T.address_of(address[0]), 512)",
+                "        if lane == 0:",
+                "            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)",
                 "    for index in T.serial(128):",
                 "        shared[thread + index * 128] = T.uint8(0)",
+                "    T.ptx.fence.proxy.async_.shared__cta()",
+                "    T.ptx.fence.mbarrier_init.release.cluster()",
                 "    T.cuda.cluster_sync()",
                 "    if (cta == 0) and (warp == 0) and (lane == 0):",
                 "        T.cuda.tcgen05.encode_matrix_descriptor(",
                 f"            T.address_of(descriptor), T.address_of(shared[0]), {ldo}, {sdo}, {swizzle}",
                 "        )",
                 "        descriptor_value: T.let = descriptor",
-                f'        T.ptx["{cp_chain}"](T.uint32(0), descriptor)',
-                f'        T.ptx["{cp_chain}"](T.uint32(0), descriptor_value)',
+                f'        T.ptx["{cp_chain}"](address[0], descriptor)',
+                f'        T.ptx["{cp_chain}"](address[0], descriptor_value)',
+                "        T.ptx.tcgen05.commit.cta_group__"
+                f"{cta_group}.mbarrier__arrive__one.shared__cluster.b64(T.address_of(barrier[0]))",
+                "    if (cta == 0) and (warp == 0):",
+                "        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)",
+                "        T.ptx.tcgen05.fence__after_thread_sync()",
+                "        T.ptx['tcgen05.ld.sync.aligned.32x32b.x1.b32'](readback[0], address[0])",
+                "        T.ptx.tcgen05.wait__ld.sync.aligned()",
+                "        if lane == 0:",
+                "            output[0] = T.cast(readback[0] == T.uint32(0), 'int32')",
                 "    T.cuda.cluster_sync()",
-                "    if (cta == 0) and (warp == 0) and (lane == 0):",
-                "        output[0] = T.cast(tmem[0, 0] == T.uint32(0), 'int32')",
+                "    if warp == 0:",
+                f"        T.ptx.tcgen05.dealloc.cta_group__{cta_group}.sync.aligned.b32("
+                "address[0], 512)",
+                f"        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__{cta_group}.sync.aligned()",
             )
         ),
-        extra_vars={"T": T, "TMEM_LAYOUT": _RAW_TCGEN_LDST_LAYOUT},
+        extra_vars={"T": T},
     )
 
 

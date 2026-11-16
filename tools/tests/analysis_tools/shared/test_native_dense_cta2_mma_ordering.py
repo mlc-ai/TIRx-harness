@@ -19,7 +19,6 @@ import pytest
 
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
-from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
 from tvm_tirx.script import tirx as T
 from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
@@ -41,16 +40,15 @@ def raw_dense_cta2_mma_pipeline(
     destination with no completion edge behind them.
     """
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=64, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     barrier = T.alloc_shared((1,), "uint64")
+    address = T.alloc_shared((1,), "uint32")
     left_shared = T.alloc_shared((64, 16), "float16", layout=_MMA_F16_32B)
     right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
-    accumulator = T.tmem(
-        (64, 32), "float32", allocated_addr=0, layout=tmem_datapath_layout("B", 64, 32)
-    )
+    accumulator = T.alloc_local((16,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
@@ -61,6 +59,8 @@ def raw_dense_cta2_mma_pipeline(
         for _i1_0, _i1_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
             right_shared[_i1_0, _i1_1] = right[cta * 16 + _i1_0, _i1_1]
         T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.ptx.fence.proxy.async_.shared__cta()
     T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cluster_sync()
@@ -86,7 +86,7 @@ def raw_dense_cta2_mma_pipeline(
                 T.address_of(desc_b), T.address_of(right_shared[0, 0]), ldo=16, sdo=16, swizzle=1
             )
             T.ptx["tcgen05.mma.cta_group::2.kind::f16"](
-                T.uint32(0),
+                address[0],
                 desc_a,
                 desc_b,
                 desc_i,
@@ -107,11 +107,39 @@ def raw_dense_cta2_mma_pipeline(
         if with_commit != 0:
             T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
     T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if (warp == 1) and (lane == 0):
-        for row in T.serial(64):
-            for col in T.serial(32):
-                output[cta * 64 + row, col] = accumulator[row, col]
+    # Datapath layout B: row r, column c lives in TMEM lane r + 64 * (c // 16),
+    # column c % 16, so each warp reads one 32-lane quarter.
+    T.ptx["tcgen05.ld.sync.aligned.32x32b.x16.b32"](
+        accumulator[0],
+        accumulator[1],
+        accumulator[2],
+        accumulator[3],
+        accumulator[4],
+        accumulator[5],
+        accumulator[6],
+        accumulator[7],
+        accumulator[8],
+        accumulator[9],
+        accumulator[10],
+        accumulator[11],
+        accumulator[12],
+        accumulator[13],
+        accumulator[14],
+        accumulator[15],
+        address[0],
+    )
+    T.ptx.tcgen05.wait__ld.sync.aligned()
+    for col in T.serial(16):
+        output[cta * 64 + (warp % 2) * 32 + lane, (warp // 2) * 16 + col] = T.reinterpret(
+            accumulator[col], ty="float32"
+        )
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], 32)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
 
 
 @pytest.fixture(scope="module")

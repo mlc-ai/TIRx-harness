@@ -22,10 +22,9 @@ _INTENTIONAL_REGISTER_ONLY_PTX_REJECTIONS = {
 }
 
 
-# Consumed outside call dispatch: TileDispatch expands tile ops before analysis,
-# the host prelude owns tensor-map encoding, and decl_tmem declares a tensor.
+# Consumed outside call dispatch: TileDispatch expands tile ops before analysis
+# and the host prelude owns tensor-map encoding.
 _HANDLED_OUTSIDE_CALL_DISPATCH = {
-    "tirx.cuda.decl_tmem",
     "tirx.cuda.tensormap_encode_tiled",
     "tirx.cuda.tile.apply",
     "tirx.cuda.tile.ewise",
@@ -119,7 +118,8 @@ def test_explicit_rejections_have_exact_public_reasons():
     assert unreviewed
     assert unreviewed <= set(PTX_SCHEMA_BY_OP_NAME)
     reviewed_rejections = set(rejected) - authoritative_wgmma - unreviewed
-    assert reviewed_rejections == {"tirx.cuda.bmma_sync"}
+    assert reviewed_rejections == {"tirx.cuda.bmma_sync", "tirx.cuda.decl_tmem"}
+    assert 'does not support scope="tmem" buffers' in rejected["tirx.cuda.decl_tmem"]
 
 
 def test_timing_and_observation_surfaces_declare_representative_fidelity():

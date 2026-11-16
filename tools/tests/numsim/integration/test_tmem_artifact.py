@@ -3,19 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tests.numsim.support.kernels import (
-    tmem_b_lane_column_mapping,
-    tmem_d_alias_per_cta,
-    tmem_dynamic_allocated_addr,
-    tmem_f_lane_mapping,
-    tmem_packed_alias,
-    tmem_uninitialized_read,
-)
 from tirx_harness import numsim
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
-
-_DYNAMIC_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.function
@@ -23,11 +12,16 @@ def dynamic_tmem_live_lease(output: T.Tensor((32,), "uint32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     address = T.alloc_shared((1,), "uint32")
-    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
+    value = T.alloc_local((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 64)
     T.cuda.warp_sync()
-    tmem[lane, 0] = T.cast(7000 + lane, "uint32")
-    output[lane] = tmem[lane, 0]
+    value[0] = T.cast(7000 + lane, "uint32")
+    T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0], value[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
+    value[0] = T.uint32(0)
+    T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](value[0], address[0])
+    T.ptx.tcgen05.wait__ld.sync.aligned()
+    output[lane] = value[0]
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 64)
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
@@ -37,12 +31,14 @@ def dynamic_tmem_use_before_alloc(output: T.Tensor((32,), "uint32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     address = T.alloc_shared((1,), "uint32")
-    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
+    value = T.alloc_local((1,), "uint32")
     if lane == 0:
         address[0] = T.uint32(0)
     T.cuda.warp_sync()
-    tmem[lane, 0] = T.cast(lane, "uint32")
-    output[lane] = tmem[lane, 0]
+    value[0] = T.cast(lane, "uint32")
+    T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0], value[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
+    output[lane] = value[0]
 
 
 @T.function
@@ -50,10 +46,12 @@ def dynamic_tmem_outside_live_lease(output: T.Tensor((32,), "uint32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     address = T.alloc_shared((1,), "uint32")
-    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
+    value = T.alloc_local((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.cuda.warp_sync()
-    tmem[lane, 32] = T.cast(lane, "uint32")
+    value[0] = T.cast(lane, "uint32")
+    T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0] + T.uint32(32), value[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
     output[lane] = T.uint32(1)
 
 
@@ -62,13 +60,30 @@ def dynamic_tmem_use_after_dealloc(output: T.Tensor((32,), "uint32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
     address = T.alloc_shared((1,), "uint32")
-    tmem = T.tmem((128, 64), "uint32", allocated_addr=address[0], layout=_DYNAMIC_TMEM_LAYOUT)
+    value = T.alloc_local((1,), "uint32")
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     T.cuda.warp_sync()
     T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
     T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
-    tmem[lane, 0] = T.cast(lane, "uint32")
+    value[0] = T.cast(lane, "uint32")
+    T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0], value[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
     output[lane] = T.uint32(1)
+
+
+@T.function
+def tmem_uninitialized_read(output: T.Tensor((32,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    address = T.alloc_shared((1,), "uint32")
+    value = T.alloc_local((1,), "uint32")
+    T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
+    T.cuda.warp_sync()
+    T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](value[0], address[0])
+    T.ptx.tcgen05.wait__ld.sync.aligned()
+    output[lane] = value[0]
+    T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
+    T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
 @T.function
@@ -98,52 +113,6 @@ def dynamic_tmem_leak(output: T.Tensor((1,), "uint32")):
     T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
     if lane == 0:
         output[0] = address[0]
-
-
-def test_tmem_layout_d_aliases_and_isolates_ctas(tmp_path):
-    output = np.zeros((2, 128), dtype=np.uint32)
-    expected = np.stack([np.arange(128, dtype=np.uint32), 1000 + np.arange(128, dtype=np.uint32)])
-
-    module = numsim.transpile(tmem_d_alias_per_cta, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-def test_tmem_layout_f_maps_rows_to_half_slabs(tmp_path):
-    output = np.zeros(64, dtype=np.uint32)
-    module = numsim.transpile(tmem_f_lane_mapping, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(result.outputs["output"], 2000 + np.arange(64, dtype=np.uint32))
-
-
-def test_tmem_layout_b_splits_columns_across_lane_halves(tmp_path):
-    output = np.zeros((64, 2), dtype=np.uint32)
-    expected = np.stack(
-        [3000 + np.arange(64, dtype=np.uint32), 4000 + np.arange(64, dtype=np.uint32)], axis=1
-    )
-    module = numsim.transpile(tmem_b_lane_column_mapping, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(result.outputs["output"], expected)
-
-
-def test_tmem_subword_views_alias_one_physical_cell(tmp_path):
-    output = np.zeros(128, dtype=np.uint32)
-    module = numsim.transpile(tmem_packed_alias, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(
-        result.outputs["output"], np.full(128, 0x33441122, dtype=np.uint32)
-    )
-
-
-def test_tmem_runtime_address_without_a_dynamic_lease_is_rejected(tmp_path):
-    output = np.zeros(32, dtype=np.uint32)
-    module = numsim.transpile(tmem_dynamic_allocated_addr, cache_dir=tmp_path)
-    with pytest.raises(numsim.NumSimExecutionError, match="not covered by any live allocation"):
-        numsim.Engine().run(module, {"output": output})
 
 
 def test_tmem_runtime_address_uses_a_live_dynamic_lease(tmp_path):

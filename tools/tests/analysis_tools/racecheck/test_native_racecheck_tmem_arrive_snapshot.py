@@ -10,20 +10,21 @@ from tirx_harness import numsim
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tirx_harness.numsim.checkers import _run_synccheck as synccheck
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM_LAYOUT = TileLayout(S[(128, 64) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+# Warps 0 and 4 share TMEM lane quarter 0, so their 32x32b accesses reach the same cells.
+_PEER_WARPS = 4
 
 
 @T.function
 def native_tmem_arrive_snapshot(
     producer_warp: T.int32, load_after_arrive: T.int32, output: T.Tensor((32,), "uint32")
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=160))
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     address = T.alloc_shared((1,), "uint32")
     barriers = T.alloc_shared((2,), "uint64")
+    value = T.alloc_local((1,), "uint32")
 
     if warp == 0:
         T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
@@ -35,27 +36,35 @@ def native_tmem_arrive_snapshot(
     T.cuda.cta_sync()
 
     tmem_base: T.let = address[0]
-    tmem = T.tmem((128, 64), "uint32", allocated_addr=tmem_base, layout=_TMEM_LAYOUT)
 
     if warp == producer_warp:
-        tmem[lane, 0] = T.cast(7000 + lane, "uint32")
+        value[0] = T.cast(7000 + lane, "uint32")
+        T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](tmem_base, value[0])
+        T.ptx.tcgen05.wait__st.sync.aligned()
         if load_after_arrive == 0:
-            output[lane] = tmem[lane, 0]
+            T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](value[0], tmem_base)
+            T.ptx.tcgen05.wait__ld.sync.aligned()
+            output[lane] = value[0]
         # Publish every producer lane's pre-arrive accesses through lane 0.
         T.ptx.bar.warp.sync(T.uint32(0xFFFFFFFF))
         if lane == 0:
             T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[0]))
         if load_after_arrive != 0:
-            output[lane] = tmem[lane, 0]
-    else:
+            T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](value[0], tmem_base)
+            T.ptx.tcgen05.wait__ld.sync.aligned()
+            output[lane] = value[0]
+    elif warp == _PEER_WARPS - producer_warp:
         if lane == 0:
             T.cuda.mbarrier_wait(T.address_of(barriers[0]), 0)
         T.ptx.bar.warp.sync(T.uint32(0xFFFFFFFF))
-        tmem[lane, 0] = T.cast(9000 + lane, "uint32")
+        value[0] = T.cast(9000 + lane, "uint32")
+        T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](tmem_base, value[0])
+        T.ptx.tcgen05.wait__st.sync.aligned()
 
-    T.ptx.bar.warp.sync(T.uint32(0xFFFFFFFF))
-    if lane == 0:
-        T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[1]))
+    if warp == producer_warp or warp == _PEER_WARPS - producer_warp:
+        T.ptx.bar.warp.sync(T.uint32(0xFFFFFFFF))
+        if lane == 0:
+            T.ptx.mbarrier.arrive.shared.b64(T.address_of(barriers[1]))
     if warp == 0:
         if lane == 0:
             T.cuda.mbarrier_wait(T.address_of(barriers[1]), 0)
@@ -190,7 +199,7 @@ def _assert_post_arrive_tmem_war(
     read = next(item for item in witnesses if item["access_kind"] == "read")
     write = next(item for item in witnesses if item["access_kind"] == "write")
     assert read["operation"]["global_warp_id"] == producer_warp
-    assert write["operation"]["global_warp_id"] == 1 - producer_warp
+    assert write["operation"]["global_warp_id"] == _PEER_WARPS - producer_warp
     assert read["space"] == write["space"] == "tmem"
     assert read["lane"] == write["lane"] == 0
     assert read["span"] == write["span"] == finding["overlap"]
@@ -198,26 +207,30 @@ def _assert_post_arrive_tmem_war(
 
     tmem_accesses = [access for access in replay["accesses"] if access["space"] == "tmem"]
     assert [access["access_kind"] for access in tmem_accesses] == ["write", "read"]
-    assert all(access["width"] == 4 for access in tmem_accesses)
-    assert all(access["active_lane_count"] == 32 for access in tmem_accesses)
-    assert all(len(access["lanes"]) == 32 for access in tmem_accesses)
+    # A 32x32b transfer is one warp-collective access of 32 TMEM lanes x 4 bytes.
+    assert all(access["width"] == 128 for access in tmem_accesses)
+    assert all(access["active_lane_count"] == 1 for access in tmem_accesses)
+    assert all(len(access["lanes"]) == 1 for access in tmem_accesses)
     initial_write, recorded_read = tmem_accesses
     assert initial_write["operation"]["global_warp_id"] == producer_warp
     assert _operation_key(recorded_read["operation"]) == _operation_key(read["operation"])
-    assert initial_write["lanes"][0] == {"lane": 0, "spans": [finding["overlap"]]}
-    assert recorded_read["lanes"][0] == {"lane": 0, "spans": [finding["overlap"]]}
+    for access in tmem_accesses:
+        (issuer,) = access["lanes"]
+        assert issuer["lane"] == 0
+        assert len(issuer["spans"]) == 32
+        assert issuer["spans"][0] == finding["overlap"]
     assert finding["current"] == write
     return replay, read, write
 
 
 def test_public_native_tmem_post_arrive_load_races_with_late_consumer_store(native_cache_dir):
     clean = _assert_clean(
-        _run_race(producer_warp=1, load_after_arrive=0, cache_dir=native_cache_dir)
+        _run_race(producer_warp=_PEER_WARPS, load_after_arrive=0, cache_dir=native_cache_dir)
     )
-    race = _run_race(producer_warp=1, load_after_arrive=1, cache_dir=native_cache_dir)
-    sync = _assert_clean(_run_sync(producer_warp=1, cache_dir=native_cache_dir))
+    race = _run_race(producer_warp=_PEER_WARPS, load_after_arrive=1, cache_dir=native_cache_dir)
+    sync = _assert_clean(_run_sync(producer_warp=_PEER_WARPS, cache_dir=native_cache_dir))
     replay, read, write = _assert_post_arrive_tmem_war(
-        race, producer_warp=1, cache_dir=native_cache_dir
+        race, producer_warp=_PEER_WARPS, cache_dir=native_cache_dir
     )
 
     assert clean["engine"]["artifact_key"] == race.to_dict()["native"]["engine"]["artifact_key"]

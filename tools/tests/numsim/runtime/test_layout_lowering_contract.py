@@ -15,15 +15,7 @@ _PADDED_COMPOSE = ComposeLayout(
     2,
     TileLayout(S[(2, 4) : (1, 4)]),
 )
-_TMEM_LANE_COLUMN = TileLayout(S[(2, 2) : (64 @ Axis.get("TLane"), 3 @ Axis.get("TCol"))])
-_TMEM_PHYSICAL = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 _LOCAL_WITH_GAPS = TileLayout(S[(32, 2) : (1 @ Axis.get("laneid"), 2)] + 3)
-
-
-def _offset_tmem_layout(layout, col_offset):
-    offset = dict(layout.offset)
-    offset[Axis.get("TCol")] = offset.get(Axis.get("TCol"), 0) + col_offset
-    return TileLayout.from_iters(layout.shard, layout.replica, offset)
 
 
 @T.function
@@ -101,47 +93,6 @@ def runtime_offset_shared_views(output: T.Tensor((8,), "uint32")):
         output[lane] = storage[lane]
 
 
-@T.function
-def tmem_lane_column_physical_alias(output: T.Tensor((4,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    logical = T.tmem((2, 2), "uint32", allocated_addr=7, layout=_TMEM_LANE_COLUMN)
-    physical = T.tmem((128, 4), "uint32", allocated_addr=7, layout=_TMEM_PHYSICAL)
-    if lane == 0:
-        logical[0, 0] = T.uint32(11)
-        logical[0, 1] = T.uint32(12)
-        logical[1, 0] = T.uint32(21)
-        logical[1, 1] = T.uint32(22)
-        output[0] = physical[0, 0]
-        output[1] = physical[0, 3]
-        output[2] = physical[64, 0]
-        output[3] = physical[64, 3]
-
-
-@T.function
-def runtime_tmem_layout_base(output: T.Tensor((32, 2), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    physical = T.tmem(
-        (32, 8),
-        "uint32",
-        allocated_addr=10,
-        layout=TileLayout(S[(32, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]),
-    )
-    for phase in T.serial(2):
-        view = T.tmem(
-            (32, 4),
-            "uint32",
-            allocated_addr=10,
-            layout=_offset_tmem_layout(
-                TileLayout(S[(32, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]), phase * 4
-            ),
-        )
-        view[lane, 0] = T.cast(1000 * phase + lane, "uint32")
-    output[lane, 0] = physical[lane, 0]
-    output[lane, 1] = physical[lane, 4]
-
-
 def test_shared_dyn_tile_layout_maps_logical_values_into_the_exact_physical_span(
     tmp_path,
 ):
@@ -190,25 +141,3 @@ def test_runtime_shared_view_offset_selects_the_observable_backing_region(tmp_pa
         result.outputs["output"],
         np.concatenate([np.arange(4, dtype=np.uint32), 100 + np.arange(4, dtype=np.uint32)]),
     )
-
-
-def test_tmem_tlane_tcol_coordinates_are_observable_through_a_physical_alias(
-    tmp_path,
-):
-    output = np.zeros(4, dtype=np.uint32)
-    module = numsim.transpile(tmem_lane_column_physical_alias, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": output})
-
-    np.testing.assert_array_equal(
-        result.outputs["output"], np.array([11, 12, 21, 22], dtype=np.uint32)
-    )
-
-
-def test_runtime_tmem_layout_base_selects_physical_columns(tmp_path):
-    module = numsim.transpile(runtime_tmem_layout_base, cache_dir=tmp_path)
-    result = numsim.Engine().run(module, {"output": np.zeros((32, 2), dtype=np.uint32)})
-
-    expected = np.stack(
-        [np.arange(32, dtype=np.uint32), 1000 + np.arange(32, dtype=np.uint32)], axis=1
-    )
-    np.testing.assert_array_equal(result.outputs["output"], expected)

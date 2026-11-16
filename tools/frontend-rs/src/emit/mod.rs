@@ -57,11 +57,9 @@ pub mod stmt;
 pub mod sync;
 pub mod tcgen05;
 pub mod tcgen_descriptor;
-pub mod tmem;
 pub mod wait_until;
 
 use super::analyze::buffers::BufferBindings;
-use super::analyze::expression_bindings::ExpressionBindings;
 use super::analyze::frontend::KernelPlan;
 use super::analyze::memory::{bind_map, MemoryPlan};
 use super::analyze::shapes::Scalar;
@@ -253,7 +251,6 @@ pub struct Emitter<'a> {
     pub buffer_bindings: &'a BufferBindings,
     pub bindings: Map<Var, Expr>,
     pub memory_plan: &'a MemoryPlan,
-    pub expression_bindings: &'a ExpressionBindings,
     /// One serialized entry per node identity.
     pub op_ids: IdMap<i64>,
     pub kernel_index: i64,
@@ -263,7 +260,6 @@ pub struct Emitter<'a> {
     pub raw_tcgen: raw_tcgen::State,
     pub memory_candidates: memory_support::CandidateState,
     pub sync: sync::State,
-    pub tmem: tmem::State<'a>,
     pub warps_per_warpgroup: i64,
     pub warps_per_cta: i64,
     pub threads_per_warpgroup: i64,
@@ -548,7 +544,6 @@ impl<'a> Emitter<'a> {
             buffer_bindings,
             bindings,
             memory_plan,
-            expression_bindings,
             op_ids,
             kernel_index,
             analysis_capable: options.analysis_capable,
@@ -557,7 +552,6 @@ impl<'a> Emitter<'a> {
             raw_tcgen: raw_tcgen::State::default(),
             memory_candidates: memory_support::CandidateState::default(),
             sync: sync::State::default(),
-            tmem: tmem::State::new(plan),
             warps_per_warpgroup,
             warps_per_cta,
             threads_per_warpgroup,

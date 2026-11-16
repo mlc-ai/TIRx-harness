@@ -7,16 +7,16 @@ from tests.numsim.support.execution import with_cuda_arch
 from tirx_harness import numsim, racecheck, synccheck
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
-
-_TMEM = TileLayout(S[(128, 32) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 def _kernel(offset, a_in_tmem):
+    # Each warp addresses its own 32-lane TMEM quarter: the D accumulator is
+    # columns [0, 8) and the TMEM A operand columns [16, 24).
     @T.function
     def kernel(output: T.Tensor((64, 8), "uint32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-        lane = T.cuda.linear_thread_id()
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
+        warp = T.cuda.warp_id()
+        lane = T.cuda.lane_id()
         barrier = T.alloc_shared((1,), "uint64")
         arena = T.alloc_shared((offset + 9216,), "uint8", align=1024)
         a = T.decl_tensor(
@@ -27,26 +27,37 @@ def _kernel(offset, a_in_tmem):
             T.ptr_byte_offset(arena.data, (offset + 8192) * 1, ty=T.Ptr("uint8", "shared")),
             ty_args=[T.Tensor((1024,), "uint8", scope="shared")],
         )
-        tmem = T.tmem((128, 32), "uint32", allocated_addr=0, layout=_TMEM)
+        address = T.alloc_shared((1,), "uint32")
+        word = T.alloc_local((1,), "uint32")
         da: T.uint64
         db: T.uint64
         di: T.uint32
-        for i in T.serial(256):
-            a[lane + i * 32] = T.uint8(0x38)  # E4M3 1.0
-        for i in T.serial(32):
-            b[lane + i * 32] = T.uint8(0x38)
-        if T.constexpr(a_in_tmem):
-            for rg in T.unroll(4):
-                for col in T.unroll(8):
-                    tmem[rg * 32 + lane, 16 + col] = T.uint32(0x38383838)
-            T.ptx.tcgen05.wait__st.sync.aligned()
-            T.ptx.tcgen05.fence__after_thread_sync()
-        if lane == 0:
-            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+        if warp == 0:
+            T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(
+                T.address_of(address[0]), 32
+            )
+            for i in T.serial(256):
+                a[lane + i * 32] = T.uint8(0x38)  # E4M3 1.0
+            for i in T.serial(32):
+                b[lane + i * 32] = T.uint8(0x38)
+            if lane == 0:
+                T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
         T.ptx.fence.proxy.async_.shared__cta()
         T.ptx.fence.mbarrier_init.release.cluster()
+        T.ptx.tcgen05.fence__before_thread_sync()
         T.cuda.cta_sync()
-        if lane == 0:
+        T.ptx.tcgen05.fence__after_thread_sync()
+        if T.constexpr(a_in_tmem):
+            word[0] = T.uint32(0x38383838)
+            for col in T.unroll(8):
+                T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](
+                    address[0] + T.uint32(16 + col), word[0]
+                )
+            T.ptx.tcgen05.wait__st.sync.aligned()
+            T.ptx.tcgen05.fence__before_thread_sync()
+            T.cuda.cta_sync()
+            T.ptx.tcgen05.fence__after_thread_sync()
+        if warp == 0 and lane == 0:
             T.cuda.tcgen05.encode_instr_descriptor(
                 T.address_of(di),
                 d_dtype="float32",
@@ -76,8 +87,8 @@ def _kernel(offset, a_in_tmem):
             )
             if T.constexpr(a_in_tmem):
                 T.ptx["tcgen05.mma.cta_group::1.kind::f8f6f4"](
-                    T.uint32(0),
-                    T.uint32(16),
+                    address[0],
+                    address[0] + T.uint32(16),
                     db,
                     di,
                     0,
@@ -88,7 +99,7 @@ def _kernel(offset, a_in_tmem):
                 )
             else:
                 T.ptx["tcgen05.mma.cta_group::1.kind::f8f6f4"](
-                    T.uint32(0),
+                    address[0],
                     da,
                     db,
                     di,
@@ -102,10 +113,18 @@ def _kernel(offset, a_in_tmem):
                 T.address_of(barrier[0])
             )
         T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
-        for rg in T.unroll(2):
-            row = rg * 32 + lane
-            for col in T.unroll(8):
-                output[row, col] = tmem[(row // 16) * 32 + row % 16, col]
+        T.ptx.tcgen05.fence__after_thread_sync()
+        # M=64 Layout F: rows 16w..16w+15 live in the first 16 lanes of quarter w.
+        for col in T.unroll(8):
+            T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(col))
+            T.ptx.tcgen05.wait__ld.sync.aligned()
+            if lane < 16:
+                output[warp * 16 + lane, col] = word[0]
+        T.ptx.tcgen05.fence__before_thread_sync()
+        T.cuda.cta_sync()
+        if warp == 0:
+            T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 32)
+            T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
     return kernel
 

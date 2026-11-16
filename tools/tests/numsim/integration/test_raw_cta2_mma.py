@@ -2,7 +2,9 @@
 
 The kernels differ only in the MMA call: same shared and TMEM layouts, same
 rendezvous, same read-back. Their operands are exactly representable, so the
-expected destination is the plain f32 matrix product.
+expected destination is the plain f32 matrix product. TMEM is addressed through
+raw ``tcgen05`` column operands; each warp reads and writes its own 32-lane
+quarter of every CTA's TMEM.
 """
 
 from __future__ import annotations
@@ -11,14 +13,16 @@ import numpy as np
 import pytest
 
 from tirx_harness import numsim
-from tvm_tirx.backend.cuda.layout import tmem_datapath_layout
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, ComposeLayout, S, TileLayout
+from tvm_tirx.tirx.layout import ComposeLayout, S, TileLayout
 
 _MMA_F16_32B = ComposeLayout(3, 1, 3, TileLayout(S[(128,)]))
-_TMEM_A_CTA2_M128_BANKED_F16 = TileLayout(
-    S[(2, 64, 16) : (64 @ Axis.get("TLane"), 1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))]
-)
+
+
+def _packed_f16(low, high):
+    return T.cast(T.reinterpret(low, ty="uint16"), "uint32") | T.shift_left(
+        T.cast(T.reinterpret(high, ty="uint16"), "uint32"), T.uint32(16)
+    )
 
 
 @T.function
@@ -27,26 +31,33 @@ def raw_cta2_ss_layout_b_mma(
     right: T.Tensor((32, 16), "float16"),
     output: T.Tensor((128, 32), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
+    lane_row = T.meta_var(warp * 32 + lane)
+    # Operands first: their swizzle atoms start at the aligned shared base.
     left_shared = T.alloc_shared((64, 16), "float16", layout=_MMA_F16_32B)
     right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
-    accumulator = T.tmem(
-        (64, 32), "float32", allocated_addr=0, layout=tmem_datapath_layout("B", 64, 32)
-    )
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    if lane == 0:
-        for _i0_0, _i0_1 in T.grid(left_shared.shape[0], left_shared.shape[1]):
-            left_shared[_i0_0, _i0_1] = left[cta * 64 + _i0_0, _i0_1]
-        for _i1_0, _i1_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
-            right_shared[_i1_0, _i1_1] = right[cta * 16 + _i1_0, _i1_1]
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
+        if lane == 0:
+            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+            for _i0_0, _i0_1 in T.grid(left_shared.shape[0], left_shared.shape[1]):
+                left_shared[_i0_0, _i0_1] = left[cta * 64 + _i0_0, _i0_1]
+            for _i1_0, _i1_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
+                right_shared[_i1_0, _i1_1] = right[cta * 16 + _i1_0, _i1_1]
+    T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cluster_sync()
 
-    if (cta == 0) and (lane == 0):
+    if (cta == 0) and (warp == 0) and (lane == 0):
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -66,7 +77,7 @@ def raw_cta2_ss_layout_b_mma(
             T.address_of(desc_b), T.address_of(right_shared[0, 0]), ldo=16, sdo=16, swizzle=1
         )
         T.ptx["tcgen05.mma.cta_group::2.kind::f16"](
-            T.uint32(0),
+            address[0],
             desc_a,
             desc_b,
             desc_i,
@@ -80,12 +91,26 @@ def raw_cta2_ss_layout_b_mma(
             0,
             T.ptx.pred(T.uint32(0)),
         )
+        T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.b64(
+            T.address_of(barrier[0])
+        )
+    if cta == 0:
+        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
     T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if lane == 0:
-        for row in T.serial(64):
-            for col in T.serial(32):
-                output[cta * 64 + row, col] = accumulator[row, col]
+    # Layout B: row r keeps columns [0, 16) in lane r and [16, 32) in lane 64 + r.
+    for col in T.unroll(16):
+        T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(col))
+        T.ptx.tcgen05.wait__ld.sync.aligned()
+        output[cta * 64 + lane_row % 64, (lane_row // 64) * 16 + col] = T.reinterpret(
+            word[0], ty="float32"
+        )
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], 32)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
 
 
 @T.function
@@ -94,26 +119,33 @@ def raw_cta2_ss_layout_a_mma(
     right: T.Tensor((32, 16), "float16"),
     output: T.Tensor((256, 32), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
+    lane_row = T.meta_var(warp * 32 + lane)
+    # Operands first: their swizzle atoms start at the aligned shared base.
     left_shared = T.alloc_shared((128, 16), "float16", layout=_MMA_F16_32B)
     right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
-    accumulator = T.tmem(
-        (128, 32), "float32", allocated_addr=0, layout=tmem_datapath_layout("A", 128, 32)
-    )
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_a: T.uint64
     desc_b: T.uint64
 
-    if lane == 0:
-        for _i4_0, _i4_1 in T.grid(left_shared.shape[0], left_shared.shape[1]):
-            left_shared[_i4_0, _i4_1] = left[cta * 128 + _i4_0, _i4_1]
-        for _i5_0, _i5_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
-            right_shared[_i5_0, _i5_1] = right[cta * 16 + _i5_0, _i5_1]
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
+        if lane == 0:
+            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+            for _i4_0, _i4_1 in T.grid(left_shared.shape[0], left_shared.shape[1]):
+                left_shared[_i4_0, _i4_1] = left[cta * 128 + _i4_0, _i4_1]
+            for _i5_0, _i5_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
+                right_shared[_i5_0, _i5_1] = right[cta * 16 + _i5_0, _i5_1]
+    T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cluster_sync()
 
-    if (cta == 0) and (lane == 0):
+    if (cta == 0) and (warp == 0) and (lane == 0):
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -133,7 +165,7 @@ def raw_cta2_ss_layout_a_mma(
             T.address_of(desc_b), T.address_of(right_shared[0, 0]), ldo=16, sdo=16, swizzle=1
         )
         T.ptx["tcgen05.mma.cta_group::2.kind::f16"](
-            T.uint32(0),
+            address[0],
             desc_a,
             desc_b,
             desc_i,
@@ -147,12 +179,24 @@ def raw_cta2_ss_layout_a_mma(
             0,
             T.ptx.pred(T.uint32(0)),
         )
+        T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.b64(
+            T.address_of(barrier[0])
+        )
+    if cta == 0:
+        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
     T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if lane == 0:
-        for row in T.serial(128):
-            for col in T.serial(32):
-                output[cta * 128 + row, col] = accumulator[row, col]
+    # Layout A: row r of each CTA's half is lane r.
+    for col in T.unroll(32):
+        T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(col))
+        T.ptx.tcgen05.wait__ld.sync.aligned()
+        output[cta * 128 + lane_row, col] = T.reinterpret(word[0], ty="float32")
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], 32)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
 
 
 @T.function
@@ -161,29 +205,41 @@ def raw_cta2_ts_layout_b_mma(
     right: T.Tensor((2, 16, 16), "float16"),
     output: T.Tensor((2, 64, 32), "float32"),
 ):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
+    lane_row = T.meta_var(warp * 32 + lane)
+    # Operands first: their swizzle atoms start at the aligned shared base.
     right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
-    left_tmem = T.tmem(
-        (2, 64, 16), "float16", allocated_addr=0, layout=_TMEM_A_CTA2_M128_BANKED_F16
-    )
-    accumulator = T.tmem(
-        (64, 32), "float32", allocated_addr=8, layout=tmem_datapath_layout("B", 64, 32)
-    )
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
 
-    if lane == 0:
-        for _i8_0, _i8_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
-            right_shared[_i8_0, _i8_1] = right[cta, _i8_0, _i8_1]
-        for bank in T.serial(2):
-            for row in T.serial(64):
-                for col in T.serial(16):
-                    left_tmem[bank, row, col] = left[cta, bank, row, col]
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 32)
+        if lane == 0:
+            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+            for _i8_0, _i8_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
+                right_shared[_i8_0, _i8_1] = right[cta, _i8_0, _i8_1]
+    T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cluster_sync()
+    # The banked A operand: bank b, row r is lane 64 * b + r; columns [0, 8)
+    # hold two float16 values each.
+    for pair in T.unroll(8):
+        word[0] = _packed_f16(
+            left[cta, lane_row // 64, lane_row % 64, pair * 2],
+            left[cta, lane_row // 64, lane_row % 64, pair * 2 + 1],
+        )
+        T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0] + T.uint32(pair), word[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if (cta == 0) and (lane == 0):
+    if (cta == 0) and (warp == 0) and (lane == 0):
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -200,8 +256,8 @@ def raw_cta2_ts_layout_b_mma(
             T.address_of(desc_b), T.address_of(right_shared[0, 0]), ldo=16, sdo=16, swizzle=1
         )
         T.ptx["tcgen05.mma.cta_group::2.kind::f16"](
-            T.uint32(8),
-            T.uint32(0),
+            address[0] + T.uint32(8),
+            address[0],
             desc_b,
             desc_i,
             0,
@@ -214,12 +270,27 @@ def raw_cta2_ts_layout_b_mma(
             0,
             T.ptx.pred(T.uint32(0)),
         )
+        T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.b64(
+            T.address_of(barrier[0])
+        )
+    if cta == 0:
+        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
     T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if lane == 0:
-        for row in T.serial(64):
-            for col in T.serial(32):
-                output[cta, row, col] = accumulator[row, col]
+    # Layout B accumulator at column 8: row r keeps columns [0, 16) in lane r
+    # and [16, 32) in lane 64 + r.
+    for col in T.unroll(16):
+        T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(8 + col))
+        T.ptx.tcgen05.wait__ld.sync.aligned()
+        output[cta, lane_row % 64, (lane_row // 64) * 16 + col] = T.reinterpret(
+            word[0], ty="float32"
+        )
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], 32)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
 
 
 @T.function
@@ -230,28 +301,39 @@ def raw_cta2_ts_mma(
 ):
     """`M=256` CTA-pair MMA whose A operand is each CTA's own TMEM shard."""
 
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=32, cluster=2))
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=2, block=128, cluster=2))
     cta = T.cuda.cluster_cta_id("x")
+    warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
+    lane_row = T.meta_var(warp * 32 + lane)
+    # Operands first: their swizzle atoms start at the aligned shared base.
     right_shared = T.alloc_shared((16, 16), "float16", layout=_MMA_F16_32B)
-    left_tmem = T.tmem(
-        (128, 16), "float16", allocated_addr=0, layout=tmem_datapath_layout("A", 128, 16)
-    )
-    accumulator = T.tmem(
-        (128, 32), "float32", allocated_addr=8, layout=tmem_datapath_layout("A", 128, 32)
-    )
+    address = T.alloc_shared((1,), "uint32")
+    barrier = T.alloc_shared((1,), "uint64")
+    word = T.alloc_local((1,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
 
-    if lane == 0:
-        for _i10_0, _i10_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
-            right_shared[_i10_0, _i10_1] = right[cta * 16 + _i10_0, _i10_1]
-        for row in T.serial(128):
-            for col in T.serial(16):
-                left_tmem[row, col] = left[cta * 128 + row, col]
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__2.sync.aligned.shared__cta.b32(T.address_of(address[0]), 64)
+        if lane == 0:
+            T.ptx.mbarrier.init.shared.b64(T.address_of(barrier[0]), 1)
+            for _i10_0, _i10_1 in T.grid(right_shared.shape[0], right_shared.shape[1]):
+                right_shared[_i10_0, _i10_1] = right[cta * 16 + _i10_0, _i10_1]
+    T.ptx.fence.mbarrier_init.release.cluster()
     T.cuda.cluster_sync()
+    # Layout A operand: row r is lane r; columns [0, 8) hold two float16 values each.
+    for pair in T.unroll(8):
+        word[0] = _packed_f16(
+            left[cta * 128 + lane_row, pair * 2], left[cta * 128 + lane_row, pair * 2 + 1]
+        )
+        T.ptx["tcgen05.st.sync.aligned.32x32b.x1.b32"](address[0] + T.uint32(pair), word[0])
+    T.ptx.tcgen05.wait__st.sync.aligned()
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if (cta == 0) and (lane == 0):
+    if (cta == 0) and (warp == 0) and (lane == 0):
         T.cuda.tcgen05.encode_instr_descriptor(
             T.address_of(desc_i),
             d_dtype="float32",
@@ -268,8 +350,8 @@ def raw_cta2_ts_mma(
             T.address_of(desc_b), T.address_of(right_shared[0, 0]), ldo=16, sdo=16, swizzle=1
         )
         T.ptx["tcgen05.mma.cta_group::2.kind::f16"](
-            T.uint32(8),
-            T.uint32(0),
+            address[0] + T.uint32(8),
+            address[0],
             desc_b,
             desc_i,
             0,
@@ -282,12 +364,24 @@ def raw_cta2_ts_mma(
             0,
             T.ptx.pred(T.uint32(0)),
         )
+        T.ptx.tcgen05.commit.cta_group__2.mbarrier__arrive__one.shared__cluster.b64(
+            T.address_of(barrier[0])
+        )
+    if cta == 0:
+        T.cuda.mbarrier_wait(T.address_of(barrier[0]), 0)
     T.cuda.cluster_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
-    if lane == 0:
-        for row in T.serial(128):
-            for col in T.serial(32):
-                output[cta * 128 + row, col] = accumulator[row, col]
+    # Layout A accumulator at column 8: row r of each CTA's half is lane r.
+    for col in T.unroll(32):
+        T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](word[0], address[0] + T.uint32(8 + col))
+        T.ptx.tcgen05.wait__ld.sync.aligned()
+        output[cta * 128 + lane_row, col] = T.reinterpret(word[0], ty="float32")
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cluster_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__2.sync.aligned.b32(address[0], 64)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__2.sync.aligned()
 
 
 def _run(kernel, left, right, joint_m, cache_dir):

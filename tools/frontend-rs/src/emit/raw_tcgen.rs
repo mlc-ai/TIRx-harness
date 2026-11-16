@@ -1293,66 +1293,16 @@ impl<'a> Emitter<'a> {
         Ok(result)
     }
 
-    /// `(anchor, access marker, logical name)`.
+    /// `(anchor, access marker, logical name)` of the implicit TMEM allocation
+    /// every raw TCGEN column operand addresses.
     fn tmem_anchor(&mut self) -> AResult<(String, String, String)> {
-        let mut anchor: Option<String> = None;
-        let mut logical_name: Option<String> = None;
-        let mut has_dynamic_address = self.tmem.dynamic_lifecycle;
-        let mut backing_indices: Vec<usize> = Vec::new();
-        let candidates: Vec<(Var, Option<usize>, bool)> = self
-            .buffers
-            .iter()
-            .filter_map(|(buffer, code)| {
-                let plan = self.plan_of(code);
-                if plan.space == MemorySpace::Tmem && plan.dynamic_data_var.is_none() {
-                    Some((
-                        buffer.clone(),
-                        plan.backing_index,
-                        plan.layout.allocated_addr_static.is_none(),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        for (buffer, backing_index, dynamic_address) in candidates {
-            let Some(backing_index) = backing_index else {
-                return unsupported("raw TCGEN TMEM view has no physical backing");
-            };
-            if anchor.is_none() {
-                anchor = Some(self.buffer_ref(&buffer)?);
-                logical_name = Some(self.logical_buffer_name(&buffer)?);
-            }
-            has_dynamic_address |= dynamic_address;
-            if !backing_indices.contains(&backing_index) {
-                backing_indices.push(backing_index);
-            }
+        if !self.plan.requires_implicit_tmem {
+            return unsupported("raw TCGEN transfer requires the implicit TMEM allocation");
         }
-        if self.tmem.implicit {
-            if anchor.is_some() {
-                return unsupported(
-                    "raw TCGEN cannot mix implicit TMEM with declared physical views",
-                );
-            }
-            anchor = Some("buffers.implicit_tmem".to_owned());
-            logical_name = Some("implicit_tmem".to_owned());
-            has_dynamic_address = true;
-        }
-        let Some(anchor) = anchor else {
-            return unsupported("raw TCGEN transfer requires a declared TMEM physical view");
-        };
-        if backing_indices.len() > 1 {
-            return unsupported("raw TCGEN TMEM views span multiple physical backings");
-        }
-        let mode = if has_dynamic_address {
-            "DynamicTmem"
-        } else {
-            "StaticTmem"
-        };
         Ok((
-            anchor,
-            format!("v2::tcgen05::variant::{mode}"),
-            logical_name.expect("logical name"),
+            "buffers.implicit_tmem".to_owned(),
+            "v2::tcgen05::variant::DynamicTmem".to_owned(),
+            "implicit_tmem".to_owned(),
         ))
     }
 

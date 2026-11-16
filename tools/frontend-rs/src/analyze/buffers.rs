@@ -1,7 +1,7 @@
 //! Typed buffer identities and their explicit physical-data bindings.
 
 use crate::tvm_compat::TryCast;
-use crate::decode::{data_source, resolve_tmem_address, tensor_decl, TensorDecl};
+use crate::decode::{data_source, tensor_decl, TensorDecl};
 use std::cell::RefCell;
 use super::layout::{op_binary, expr_any};
 use tvm_tirx::ir::{CallObj, Expr, Op, Stmt, Var};
@@ -21,32 +21,22 @@ pub fn call_op_name(call: &CallObj) -> AResult<Option<String>> {
 pub struct BufferBindings {
     /// `(buffer, data)` in declaration order.
     pub declarations: Vec<(Var, Expr)>,
-    /// `(tensor, column address)` of TMEM views, in binding order.
-    pub tmem_addresses: Vec<(Var, Expr)>,
     storage_keys: RefCell<IdMap<ObjectRef>>,
 }
 
 impl BufferBindings {
     pub(crate) fn build(statements: &[Stmt]) -> AResult<Self> {
         let mut declarations = Vec::new();
-        let mut tmem_addresses = Vec::new();
         for statement in statements {
             let Some((tensor, decl)) = tensor_decl(statement)? else {
                 continue;
             };
-            match decl {
-                TensorDecl::View(data) => declarations.push((tensor, data)),
-                TensorDecl::Tmem(address) => {
-                    if let Some(address) = resolve_tmem_address(&address, &tmem_addresses)? {
-                        tmem_addresses.push((tensor, address));
-                    }
-                }
-                TensorDecl::Alloc => {}
+            if let TensorDecl::View(data) = decl {
+                declarations.push((tensor, data));
             }
         }
         Ok(Self {
             declarations,
-            tmem_addresses,
             storage_keys: RefCell::new(IdMap::default()),
         })
     }

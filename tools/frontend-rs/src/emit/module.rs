@@ -468,7 +468,7 @@ fn buffer_struct_fields(emitter: &Emitter<'_>) -> Vec<(String, String)> {
     if emitter.raw_tma.uses_registry {
         fields.push(typed("tensor_map_registry", "RuntimeTensorMapRegistry"));
     }
-    if emitter.tmem.implicit {
+    if emitter.plan.requires_implicit_tmem {
         fields.push(typed("implicit_tmem", "RuntimeBuffer"));
     }
     for (_, field) in &emitter.raw_tcgen.shared_descriptor_domains {
@@ -680,7 +680,7 @@ struct BackingLayout {
     register_backings: Vec<usize>,
 }
 
-/// Allocate the shared, TMEM, warp-private and implicit TMEM backings.
+/// Allocate the shared, warp-private and implicit TMEM backings.
 fn backing_setup(
     emitter: &Emitter<'_>,
     tmem_columns: i64,
@@ -720,12 +720,6 @@ fn backing_setup(
             MemorySpace::Global | MemorySpace::Shared => {}
             MemorySpace::Local => local_backings.push(backing.index),
             MemorySpace::Register => register_backings.push(backing.index),
-            MemorySpace::Tmem => setup.push(format!(
-                "        let {} = Arc::new(allocate_cta_tmem(physical, topology, {}, {}).map_err(|error| PyValueError::new_err(error.to_string()))?);",
-                backing.field,
-                optional(backing.tmem_lanes),
-                optional(backing.tmem_columns)
-            )),
         }
     }
     for (backings, name, accessor) in [
@@ -756,7 +750,7 @@ fn backing_setup(
             "        let mut {name}_backings =\n            Vec::with_capacity({backing_lengths_name}.len());\n        for &byte_len in {backing_lengths_name} {{\n            {name}_backings.push(\n                allocate_warp_private(physical.{accessor}(), topology, byte_len)\n                .map(Arc::new)\n                .map_err(|error| PyValueError::new_err(error.to_string()))?,\n            );\n        }}"
         ));
     }
-    if emitter.tmem.implicit {
+    if emitter.plan.requires_implicit_tmem {
         setup.extend([
             format!(
                 "        let implicit_tmem_allocations = Arc::new(allocate_cta_tmem(physical, topology, 128, {tmem_columns}).map_err(|error| PyValueError::new_err(error.to_string()))?);"
@@ -841,18 +835,6 @@ fn buffer_setup(
                 ));
                 buffer_initializers
                     .push((storage_index, Initializer::Private(name, descriptor_index)));
-            }
-            MemorySpace::Tmem => {
-                let backing = &emitter.memory_plan.backings[plan.backing_index.expect("backing")];
-                setup.push(format!(
-                    "        let {field} = runtime_buffer_tmem(\n            {}.clone(),\n            {},\n            {},\n            {},\n            {},\n        );",
-                    backing.field,
-                    optional(plan.layout.tmem_lane_span),
-                    optional(plan.layout.tmem_tcol_span_elements),
-                    plan.layout.elem_offset,
-                    plan.layout.itemsize
-                ));
-                buffer_initializers.push((storage_index, Initializer::Field(field)));
             }
         }
     }

@@ -4,9 +4,11 @@ import numpy as np
 
 from tirx_harness import numsim
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
 
-_TMEM_D_136 = TileLayout(S[(128, 136) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
+# Layout F (M=64) writes TMEM lanes 0..15 of each 32-lane quarter; row r lives in
+# lane (r // 16) * 32 + r % 16. The 16x32bx2 shape addresses exactly those 16 lanes
+# (or lanes 16..31 with a TLane base of 16), so each warp initializes its quarter.
+_HOLE_LANES = 16 << 16
 
 
 @T.function
@@ -21,27 +23,68 @@ def raw_tf32_layout_f_hole_poison(
     warp = T.cuda.warp_id()
     lane = T.cuda.lane_id()
     shared_b = T.alloc_shared((4096,), "uint8")
-    tmem = T.tmem((128, 136), "uint32", allocated_addr=0, layout=_TMEM_D_136)
-    readback = T.alloc_local((1,), "uint32")
+    address = T.alloc_shared((1,), "uint32")
+    registers = T.alloc_local((16,), "uint32")
+    readback = T.alloc_local((2,), "uint32")
     desc_i: T.uint32
     desc_b: T.uint64
 
+    if warp == 0:
+        T.ptx.tcgen05.alloc.cta_group__1.sync.aligned.shared__cta.b32(T.address_of(address[0]), 64)
     thread = warp * 32 + lane
     for copy_i in T.serial(32):
         offset = thread + copy_i * 128
         shared_b[offset] = b_physical[offset]
-
-    if warp == 0:
-        for row_group in T.unroll(2):
-            row = row_group * 32 + lane
-            physical_lane = (row // 16) * 32 + row % 16
-            for k in T.unroll(8):
-                tmem[physical_lane, k] = T.reinterpret(a[row, k], ty="uint32")
-            for col in T.serial(32):
-                tmem[physical_lane, 16 + col] = T.reinterpret(T.float32(4), ty="uint32")
-    if lane < 8:
-        tmem[warp * 32 + 16 + lane, 16] = T.uint32(0x3F400000)
     T.cuda.cta_sync()
+
+    # A in columns 0..7; the upper half-warp's split chunk lands in unused columns 56..63.
+    row = warp * 16 + lane % 16
+    for k in T.unroll(8):
+        registers[k] = T.reinterpret(a[row, k], ty="uint32")
+    T.ptx["tcgen05.st.sync.aligned.16x32bx2.x8.b32"](
+        address[0],
+        56,
+        registers[0],
+        registers[1],
+        registers[2],
+        registers[3],
+        registers[4],
+        registers[5],
+        registers[6],
+        registers[7],
+    )
+    # The D accumulator: columns 16..31 from the lower half-warp, 32..47 from the upper.
+    for col in T.unroll(16):
+        registers[col] = T.reinterpret(T.float32(4), ty="uint32")
+    T.ptx["tcgen05.st.sync.aligned.16x32bx2.x16.b32"](
+        address[0] + T.uint32(16),
+        16,
+        registers[0],
+        registers[1],
+        registers[2],
+        registers[3],
+        registers[4],
+        registers[5],
+        registers[6],
+        registers[7],
+        registers[8],
+        registers[9],
+        registers[10],
+        registers[11],
+        registers[12],
+        registers[13],
+        registers[14],
+        registers[15],
+    )
+    # Holes: lanes 16..31 of column 16 hold a sentinel; their column 17 stays unwritten.
+    registers[0] = T.uint32(0x3F400000)
+    T.ptx["tcgen05.st.sync.aligned.16x32bx2.x1.b32"](
+        address[0] + T.uint32(_HOLE_LANES + 16), 40, registers[0]
+    )
+    T.ptx.tcgen05.wait__st.sync.aligned()
+    T.ptx.tcgen05.fence__before_thread_sync()
+    T.cuda.cta_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
 
     if warp == 0:
         T.cuda.tcgen05.encode_instr_descriptor(
@@ -60,8 +103,8 @@ def raw_tf32_layout_f_hole_poison(
             T.address_of(desc_b), T.address_of(shared_b[0]), ldo=0, sdo=64, swizzle=3
         )
         T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
-            T.uint32(16),
-            T.uint32(0),
+            address[0] + T.uint32(16),
+            address[0],
             desc_b,
             desc_i,
             T.uint32(0),
@@ -72,19 +115,46 @@ def raw_tf32_layout_f_hole_poison(
             pred=T.cast(lane == 7, "uint32"),
         )
     T.cuda.cta_sync()
+    T.ptx.tcgen05.fence__after_thread_sync()
     T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](
-        readback[0], T.cuda.get_tmem_addr(T.uint32(0), 0, 16)
+        readback[0], T.cuda.get_tmem_addr(address[0], 0, 16)
+    )
+    T.ptx["tcgen05.ld.sync.aligned.32x32b.x1.b32"](
+        readback[1], T.cuda.get_tmem_addr(address[0], 0, 17)
+    )
+    T.ptx["tcgen05.ld.sync.aligned.16x32bx2.x16.b32"](
+        registers[0],
+        registers[1],
+        registers[2],
+        registers[3],
+        registers[4],
+        registers[5],
+        registers[6],
+        registers[7],
+        registers[8],
+        registers[9],
+        registers[10],
+        registers[11],
+        registers[12],
+        registers[13],
+        registers[14],
+        registers[15],
+        address[0] + T.uint32(16),
+        16,
     )
     T.ptx.tcgen05.wait__ld.sync.aligned()
 
-    if warp < 2:
-        row = warp * 32 + lane
-        physical_lane = (row // 16) * 32 + row % 16
-        for col in T.serial(32):
-            valid[row, col] = T.reinterpret(tmem[physical_lane, 16 + col], ty="float32")
+    for col in T.unroll(16):
+        valid[row, (lane // 16) * 16 + col] = T.reinterpret(registers[col], ty="float32")
     if consume_holes != 0:
-        if lane >= 16:
+        if lane >= 24:
+            holes[warp, lane - 16] = readback[1]
+        elif lane >= 16:
             holes[warp, lane - 16] = readback[0]
+    T.cuda.cta_sync()
+    if warp == 0:
+        T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(address[0], 64)
+        T.ptx.tcgen05.relinquish_alloc_permit.cta_group__1.sync.aligned()
 
 
 def _kmajor_swizzle_physical(logical_bytes: np.ndarray) -> np.ndarray:

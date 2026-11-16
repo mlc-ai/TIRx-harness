@@ -27,7 +27,6 @@ use crate::tables::{
 enum WarpLoadBackend {
     RuntimeScalar,
     RuntimeFloat4,
-    Tmem,
 }
 
 struct WarpLoadPlan {
@@ -35,16 +34,7 @@ struct WarpLoadPlan {
     decoder: Option<&'static str>,
 }
 
-fn warp_load_plan(dtype: &str, space: MemorySpace) -> AResult<WarpLoadPlan> {
-    if space == MemorySpace::Tmem {
-        if dtype == "float4_e2m1fn" {
-            return unsupported("float4 TMEM scalar loads are not implemented");
-        }
-        return Ok(WarpLoadPlan {
-            backend: WarpLoadBackend::Tmem,
-            decoder: None,
-        });
-    }
+fn warp_load_plan(dtype: &str) -> AResult<WarpLoadPlan> {
     if dtype == "float4_e2m1fn" {
         return Ok(WarpLoadPlan {
             backend: WarpLoadBackend::RuntimeFloat4,
@@ -176,10 +166,6 @@ impl<'a> Emitter<'a> {
             if same(candidate, buffer) {
                 return Ok(name.clone());
             }
-        }
-        let plan = self.memory_plan.resolve(buffer)?;
-        if plan.space == MemorySpace::Tmem {
-            return self.tmem_logical_buffer_name(buffer);
         }
         let root = self.ordinary_logical_view_root(buffer)?;
         let mut name = self.memory_plan.resolve(&root)?.name.clone();
@@ -611,16 +597,12 @@ impl<'a> Emitter<'a> {
                 );
             }
         }
-        if self.ctx.schema.vector_dtype_abi(&dtype).is_some() {
-            if space == MemorySpace::Tmem {
-                return unsupported(format!("{dtype} element loads do not support TMEM storage"));
-            }
-            if indices
+        if self.ctx.schema.vector_dtype_abi(&dtype).is_some()
+            && indices
                 .iter()
                 .any(|index| oref(index.clone()).downcast_ref::<RampObj>().is_some())
-            {
-                return unsupported(format!("{dtype} element load requires scalar indices"));
-            }
+        {
+            return unsupported(format!("{dtype} element load requires scalar indices"));
         }
         let Some(rust_type) = self.rust_scalar_type(&dtype) else {
             return unsupported(format!(
@@ -632,39 +614,20 @@ impl<'a> Emitter<'a> {
         if zero_fill_invalid && space != MemorySpace::Shared {
             return unsupported("Zero-filled padding reads are implemented only for shared memory");
         }
-        let load_plan = warp_load_plan(&dtype, space)?;
+        let load_plan = warp_load_plan(&dtype)?;
         let requested_mask = access_mask
             .clone()
             .unwrap_or_else(|| "ctx.active_mask()".to_owned());
-        if matches!(load_plan.backend, WarpLoadBackend::Tmem) {
-            return self.emit_tmem_buffer_load(
-                buffer,
-                indices,
-                &name,
-                &buffer_ref,
-                &requested_mask,
-                &dtype,
-                &rust_type,
-                source_op_id,
-            );
-        }
         let index = self.physical_index(buffer, indices)?;
         let access_mask = self.physical_access_mask(buffer, indices, &requested_mask)?;
         let space_marker = if plan_is_dynamic {
-            Some("v2::Generic")
+            "v2::Generic"
         } else {
             match space {
-                MemorySpace::Global => Some("v2::Global"),
-                MemorySpace::Shared => Some("v2::Shared"),
-                MemorySpace::Local | MemorySpace::Register => Some("v2::Local"),
-                MemorySpace::Tmem => None,
+                MemorySpace::Global => "v2::Global",
+                MemorySpace::Shared => "v2::Shared",
+                MemorySpace::Local | MemorySpace::Register => "v2::Local",
             }
-        };
-        let Some(space_marker) = space_marker else {
-            return unsupported(format!(
-                "TensorLoad has no PTX ld state-space for {}",
-                space.value()
-            ));
         };
         let access_context = self.control_name("load_context");
         self.emit_line(&format!(
@@ -978,7 +941,7 @@ impl<'a> Emitter<'a> {
         if let Some((tensor, decl)) = tensor_decl(stmt)? {
             return match decl {
                 TensorDecl::View(data) => self.emit_decl_tensor(&tensor, &data),
-                TensorDecl::Alloc | TensorDecl::Tmem(_) => Ok(()),
+                TensorDecl::Alloc => Ok(()),
             };
         }
         if let Some(bind) = stmt.downcast_ref::<BindObj>() {
@@ -1816,11 +1779,6 @@ impl<'a> Emitter<'a> {
                 "BufferStore scalar lowering is not implemented for {dtype}"
             ));
         };
-        if self.ctx.schema.vector_dtype_abi(&dtype).is_some() && space == MemorySpace::Tmem {
-            return unsupported(format!(
-                "BufferStore for {dtype} does not support TMEM storage"
-            ));
-        }
         let value = self.coerce_dtype(raw_value, &dtype, "store_cast")?;
         let value = self.as_warp_value(value);
         if value.rust_type != rust_type {
@@ -1830,9 +1788,6 @@ impl<'a> Emitter<'a> {
             ));
         }
         let buffer_ref = self.buffer_ref(&buffer)?;
-        if space == MemorySpace::Tmem {
-            return self.emit_tmem_store(stmt, op_id, &dtype, &value, &buffer_ref);
-        }
         if dtype == "float4_e2m1fn" {
             return unsupported(
                 "float4 BufferStore requires an explicit packed-byte frontend lowering",
@@ -1842,20 +1797,13 @@ impl<'a> Emitter<'a> {
         let index = self.physical_index(&buffer, &indices)?;
         let access_mask = self.physical_access_mask(&buffer, &indices, "ctx.active_mask()")?;
         let space_marker = if dynamic {
-            Some("v2::Generic")
+            "v2::Generic"
         } else {
             match space {
-                MemorySpace::Global => Some("v2::Global"),
-                MemorySpace::Shared => Some("v2::Shared"),
-                MemorySpace::Local | MemorySpace::Register => Some("v2::Local"),
-                MemorySpace::Tmem => None,
+                MemorySpace::Global => "v2::Global",
+                MemorySpace::Shared => "v2::Shared",
+                MemorySpace::Local | MemorySpace::Register => "v2::Local",
             }
-        };
-        let Some(space_marker) = space_marker else {
-            return unsupported(format!(
-                "BufferStore has no PTX st state-space for {}",
-                space.value()
-            ));
         };
         let mut stored_value = value.code.clone();
         let mut memory_dtype = dtype.clone();

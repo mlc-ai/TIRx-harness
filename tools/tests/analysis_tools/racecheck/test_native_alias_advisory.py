@@ -7,10 +7,6 @@ from tirx_harness import numsim
 from tirx_harness.numsim.checker_report import RaceReport
 from tirx_harness.numsim.checkers import _run_racecheck as racecheck
 from tvm_tirx.script import tirx as T
-from tvm_tirx.tirx.layout import Axis, S, TileLayout
-
-_TMEM_LAYOUT = TileLayout(S[(128, 4) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
-_TMEM_WIDE_LAYOUT = TileLayout(S[(128, 8) : (1 @ Axis.get("TLane"), 1 @ Axis.get("TCol"))])
 
 
 @T.function
@@ -62,53 +58,6 @@ def native_explicit_view_provenance(output: T.Tensor((1,), "int32")):
     if lane == 0:
         storage[2] = 7
         output[0] = transposed[0, 1]
-
-
-@T.function
-def native_tmem_view_provenance(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    tmem = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
-    tmem_view = tmem.rearrange("(group row) col -> (group row) col", group=2)
-
-    tmem[lane, 0] = T.cast(lane + 1, "uint32")
-    output[lane] = tmem_view[lane, 0]
-
-
-@T.function
-def native_tmem_partitioned_view_provenance(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    tmem = T.tmem((128, 8), "uint32", allocated_addr=0, layout=_TMEM_WIDE_LAYOUT)
-    tmem_lo = tmem.sub[:, :4]
-    _tmem_hi = tmem.sub[:, 4:]
-    tmem_view = tmem.rearrange("(group row) col -> (group row) col", group=2)
-
-    tmem_lo[lane, 0] = T.cast(lane + 1, "uint32")
-    output[lane] = tmem_view[lane, 0]
-
-
-@T.function
-def native_tmem_full_extent_subview_provenance(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    tmem = T.tmem((2, 64, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
-    tmem_view = tmem.sub[:, :, 0:4]
-
-    tmem[0, lane, 0] = T.cast(lane + 1, "uint32")
-    output[lane] = tmem_view[0, lane, 0]
-
-
-@T.function
-def native_tmem_reused_lifetime_provenance(output: T.Tensor((32,), "uint32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    lane = T.cuda.lane_id()
-    first = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
-    second = T.tmem((128, 4), "uint32", allocated_addr=0, layout=_TMEM_LAYOUT)
-
-    first[lane, 0] = T.cast(lane + 1, "uint32")
-    second[lane, 0] = T.cast(lane + 2, "uint32")
-    output[lane] = first[lane, 0]
 
 
 @T.function
@@ -241,77 +190,6 @@ def test_public_native_explicit_view_keeps_one_logical_identity(tmp_path):
     assert native["findings"] == []
     assert native["advisories"] == []
     assert native["incomplete"] == []
-
-
-def test_public_native_tmem_view_keeps_one_logical_identity(tmp_path):
-    inputs = {"output": np.zeros(32, dtype=np.uint32)}
-    numeric_module = numsim.transpile(
-        native_tmem_view_provenance,
-        cache_dir=tmp_path,
-        _analysis_checker=None,
-    )
-    numeric = numsim.Engine().run(numeric_module, inputs)
-    np.testing.assert_array_equal(numeric.outputs["output"], np.arange(1, 33, dtype=np.uint32))
-
-    report = racecheck(native_tmem_view_provenance, inputs=inputs, cache_dir=tmp_path)
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["findings"] == []
-    assert native["advisories"] == []
-    assert native["incomplete"] == []
-
-
-def test_public_native_partitioned_tmem_views_keep_one_logical_identity(tmp_path):
-    inputs = {"output": np.zeros(32, dtype=np.uint32)}
-    numeric_module = numsim.transpile(
-        native_tmem_partitioned_view_provenance,
-        cache_dir=tmp_path,
-        _analysis_checker=None,
-    )
-    numeric = numsim.Engine().run(numeric_module, inputs)
-    np.testing.assert_array_equal(numeric.outputs["output"], np.arange(1, 33, dtype=np.uint32))
-
-    report = racecheck(native_tmem_partitioned_view_provenance, inputs=inputs, cache_dir=tmp_path)
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["findings"] == []
-    assert native["advisories"] == []
-    assert native["incomplete"] == []
-
-
-def test_public_native_full_extent_tmem_subview_keeps_one_logical_identity(tmp_path):
-    inputs = {"output": np.zeros(32, dtype=np.uint32)}
-    numeric_module = numsim.transpile(
-        native_tmem_full_extent_subview_provenance,
-        cache_dir=tmp_path,
-        _analysis_checker=None,
-    )
-    numeric = numsim.Engine().run(numeric_module, inputs)
-    np.testing.assert_array_equal(numeric.outputs["output"], np.arange(1, 33, dtype=np.uint32))
-
-    report = racecheck(
-        native_tmem_full_extent_subview_provenance,
-        inputs=inputs,
-        cache_dir=tmp_path,
-    )
-    report.require_clean()
-    native = report.to_dict()["native"]
-    assert native["findings"] == []
-    assert native["advisories"] == []
-    assert native["incomplete"] == []
-
-
-def test_public_native_reused_tmem_lifetime_remains_distinct(tmp_path):
-    inputs = {"output": np.zeros(32, dtype=np.uint32)}
-    report = racecheck(native_tmem_reused_lifetime_provenance, inputs=inputs, cache_dir=tmp_path)
-
-    assert report.verdict == "review"
-    native = report.to_dict()["native"]
-    assert native["findings"] == []
-    assert [item["kind"] for item in native["advisories"]] == ["alias_stale_read"]
-    advisory = native["advisories"][0]
-    assert advisory["reader_buffer"] == "first"
-    assert advisory["writer_buffer"] == "second"
 
 
 def test_public_native_tcgen_alloc_result_is_visible_to_every_lane(tmp_path):

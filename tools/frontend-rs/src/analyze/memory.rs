@@ -22,7 +22,6 @@ pub enum MemorySpace {
     Shared,
     Local,
     Register,
-    Tmem,
 }
 
 impl MemorySpace {
@@ -32,20 +31,16 @@ impl MemorySpace {
             MemorySpace::Shared => "shared",
             MemorySpace::Local => "local",
             MemorySpace::Register => "register",
-            MemorySpace::Tmem => "tmem",
         }
     }
 }
 
 pub struct BackingPlan {
     pub index: usize,
-    pub field: String,
     pub space: MemorySpace,
     pub byte_len: Option<i64>,
     pub byte_alignment: Option<i64>,
     pub input_name: Option<String>,
-    pub tmem_lanes: Option<i64>,
-    pub tmem_columns: Option<i64>,
 }
 
 pub struct BufferPlan {
@@ -114,7 +109,10 @@ pub fn space_of(scope: &str, name: &str) -> AResult<MemorySpace> {
         "shared" | "shared.dyn" => Ok(MemorySpace::Shared),
         "local_scalar" => Ok(MemorySpace::Local),
         "local" | "register" | "reg" => Ok(MemorySpace::Register),
-        _ if scope == "tmem" || scope.starts_with("tmem.") => Ok(MemorySpace::Tmem),
+        _ if crate::decode::is_tmem_scope(scope) => unsupported(format!(
+            "buffer:{name}:{}",
+            crate::decode::TMEM_BUFFER_UNSUPPORTED
+        )),
         _ => unsupported(format!(
             "buffer:{name}:unsupported memory scope {:?}",
             scope
@@ -264,7 +262,6 @@ pub(in crate::analyze) fn build_memory_plan(
 ) -> AResult<MemoryPlan> {
     let analyzer = &ctx.analyzer;
     let mut builders: Vec<BackingBuilder> = Vec::new();
-    let mut tmem_buffers: Vec<Var> = Vec::new();
     let mut dynamic_views: Vec<(Var, Expr, MemorySpace)> = Vec::new();
     let referenced = referenced_buffers(nodes, false)?;
     let dynamic_referenced = referenced_buffers(nodes, true)?;
@@ -300,24 +297,8 @@ pub(in crate::analyze) fn build_memory_plan(
         let (is_alloc, data) = match decl {
             TensorDecl::Alloc => (true, None),
             TensorDecl::View(data) => (false, Some(data)),
-            TensorDecl::Tmem(_) => (false, None),
         };
         let scope_name = buffer_scope(&buffer);
-        if scope_name == "tmem" || scope_name.starts_with("tmem.") {
-            if is_alloc {
-                return unsupported(format!(
-                    "buffer:{}:TMEM must be declared, not allocated",
-                    buffer_name(&buffer)
-                ));
-            }
-            if !tmem_buffers
-                .iter()
-                .any(|candidate| same(candidate, &buffer))
-            {
-                tmem_buffers.push(buffer.clone());
-            }
-            continue;
-        }
         if let Some(data) = &data {
             // A view is pointer-derived when its storage root is a pointer
             // rather than a tensor, including a view of such a view through
@@ -333,12 +314,6 @@ pub(in crate::analyze) fn build_memory_plan(
                     ));
                 }
                 let nominal_space = space_of(&scope_name, &buffer_name(&buffer))?;
-                if nominal_space == MemorySpace::Tmem {
-                    return unsupported(format!(
-                        "buffer:{}:generic pointers cannot derive TMEM views",
-                        buffer_name(&buffer)
-                    ));
-                }
                 dynamic_views.push((buffer.clone(), data.clone(), nominal_space));
                 continue;
             }
@@ -585,7 +560,6 @@ pub(in crate::analyze) fn build_memory_plan(
         let owner_alignment = i64::from(owner.tensor_type().data_alignment);
         backing_plans.push(BackingPlan {
             index,
-            field: format!("backing_{index}"),
             space,
             byte_len: owner_end,
             byte_alignment: if owner_alignment > 0 {
@@ -594,8 +568,6 @@ pub(in crate::analyze) fn build_memory_plan(
                 None
             },
             input_name,
-            tmem_lanes: None,
-            tmem_columns: None,
         });
         for (buffer, is_parameter, info, _) in &infos {
             buffer_plans.push(BufferPlan {
@@ -605,57 +577,6 @@ pub(in crate::analyze) fn build_memory_plan(
                 space,
                 layout: info.clone(),
                 is_parameter: *is_parameter,
-                dynamic_data_var: None,
-                referenced: true,
-            });
-        }
-    }
-
-    if !tmem_buffers.is_empty() {
-        let mut infos: Vec<(Var, LayoutInfo)> = Vec::new();
-        for buffer in &tmem_buffers {
-            infos.push((buffer.clone(), ctx.inspect_layout(buffer, &bindings)?));
-        }
-        let dynamic_base = infos.iter().any(|(_, info)| {
-            info.allocated_addr_static.is_none() || info.tmem_tcol_base_static.is_none()
-        });
-        let mut static_column_end: i64 = 0;
-        for (_, info) in &infos {
-            if let Some(addr) = info.allocated_addr_static {
-                let columns = addr
-                    + ((info.elem_offset + info.tmem_tcol_span_elements.unwrap_or(0))
-                        * info.itemsize
-                        * 8
-                        + 31)
-                        / 32;
-                static_column_end = static_column_end.max(columns);
-            }
-        }
-        let tmem_columns = static_column_end.max(if dynamic_base { 512 } else { 0 });
-        if tmem_columns <= 0 || tmem_columns > 512 {
-            return unsupported(format!(
-                "TMEM physical column span {tmem_columns} is outside 1..512"
-            ));
-        }
-        let backing_index = backing_plans.len();
-        backing_plans.push(BackingPlan {
-            index: backing_index,
-            field: format!("backing_{backing_index}"),
-            space: MemorySpace::Tmem,
-            byte_len: Some(128 * tmem_columns * 4),
-            byte_alignment: None,
-            input_name: None,
-            tmem_lanes: Some(128),
-            tmem_columns: Some(tmem_columns),
-        });
-        for (buffer, info) in infos {
-            buffer_plans.push(BufferPlan {
-                buffer: buffer.clone(),
-                name: buffer_name(&buffer),
-                backing_index: Some(backing_index),
-                space: MemorySpace::Tmem,
-                layout: info,
-                is_parameter: false,
                 dynamic_data_var: None,
                 referenced: true,
             });
