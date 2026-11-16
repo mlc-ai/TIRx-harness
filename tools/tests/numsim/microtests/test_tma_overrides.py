@@ -60,6 +60,30 @@ def test_tma_overrides_match_gpu(pytestconfig, tmp_path):
                     arch="sm_107f",
                 )
                 np.testing.assert_array_equal(result.gpu_outputs["output"][-2:], [1, int(matched)])
+    for route, form in (
+        (route, form)
+        for route in ("g2cta", "s2g", "reduce")
+        for form in ("dim_b8", "dim_b16", "stride_b8", "stride_b16")
+    ):
+        rank = 2 if "stride" in form else 1
+        for dimension in (1, 2, 3):
+            run_paired_primfunc(
+                override_kernel(route, form, dimension=dimension),
+                {
+                    "input_map": PairedTensorMap(
+                        array=np.full((8,) * rank, -10, np.float32),
+                        global_shape=(8,) * rank,
+                        global_strides=() if rank == 1 else (32,),
+                        box_shape=(4,) if rank == 1 else (4, 2),
+                        element_strides=(1,) * rank,
+                    ),
+                    "replacement": np.arange(32772, dtype=np.float32),
+                    "output": np.zeros(4 if rank == 1 else 8, np.float32),
+                },
+                outputs=("output", "replacement"),
+                cache_dir=tmp_path,
+                arch="sm_107f",
+            )
     for route in ("load", "store", "reduce"):
         for form, issuer in (("stride_b8", -1), ("stride_b16", 1)):
             kernel, inputs, expected, shared = multiissuer_override_case(route, form, issuer)

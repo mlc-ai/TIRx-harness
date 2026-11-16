@@ -1527,6 +1527,9 @@ struct TensorMapOverride {
     lower_stride: Vec<String>,
     coords: Vec<String>,
     upper_stride: Vec<String>,
+    /// Loads bound the box by the overridden dimensions; SM107 stores and
+    /// reductions with dimension overrides write the whole box unclipped.
+    clips_dimensions: bool,
 }
 
 impl<'a> Emitter<'a> {
@@ -2293,9 +2296,13 @@ impl<'a> Emitter<'a> {
         decoded: &DecodedPtx,
     ) -> AResult<Option<TensorMapOverride>> {
         let op_name = decoded.op_name.clone();
-        if override_base(&op_name).is_none() {
+        let Some(base) = override_base(&op_name) else {
             return Ok(None);
-        }
+        };
+        let clips_dimensions = !matches!(
+            base,
+            "tirx.ptx.cp_async_bulk_tensor_s2g" | "tirx.ptx.cp_reduce_async_bulk_tensor"
+        );
         let mut address = self.emit_expr(&decoded.scalar_operand("global_address")?)?;
         if address.rust_type != "PhysicalPtr" {
             address = self.emit_raw_generic_pointer(address, "ctx.active_mask()")?;
@@ -2312,6 +2319,7 @@ impl<'a> Emitter<'a> {
             lower_stride: self.raw_tma_override_operands(decoded, "lower_stride")?,
             coords: self.raw_tma_override_operands(decoded, "coords")?,
             upper_stride: self.raw_tma_override_operands(decoded, "upper_stride")?,
+            clips_dimensions,
         }))
     }
 
@@ -2351,6 +2359,7 @@ impl<'a> Emitter<'a> {
                 strides,
                 upper,
                 coordinates,
+                prepared.clips_dimensions.to_string(),
             ],
             &[],
             true,

@@ -66,9 +66,10 @@ def override_kernel(
     ]
     if form != "address":
         dtype = "uint8" if form.endswith("b8") else "uint16"
-        args += [f'T.cast({dimension}, "{dtype}")']
+        # Override dimensions are encoded as size - 1, like the descriptor's.
+        args += [f'T.cast({dimension - 1}, "{dtype}")']
         if rank == 2:
-            args += [f'T.cast(2, "{dtype}")', "T.uint32(4)", f"T.uint16({upper})"]
+            args += [f'T.cast(1, "{dtype}")', "T.uint32(4)", f"T.uint16({upper})"]
     args += [f"T.int32({coordinate})", *(["T.int32(0)"] if rank == 2 else [])]
     if load:
         args = ["shared.ptr_to([0])", *args, "barrier.ptr_to([0])"]
@@ -163,8 +164,8 @@ def multiissuer_override_case(route, form, issuer=-1):
     operands = [
         "T.address_of(input_map)",
         'T.reinterpret(replacement.ptr_to([lane * 16]), ty="uint64")',
-        f'T.cast(4 - lane, "{dtype}")',
-        f'T.cast(2, "{dtype}")',
+        f'T.cast(3 - lane, "{dtype}")',
+        f'T.cast(1, "{dtype}")',
         "T.uint32(1 + lane)",
         "T.uint16(0)",
         "coordinate[0]",
@@ -239,7 +240,9 @@ def kernel(input_map: T.Ptr(T.TensorMap), replacement: T.Tensor((32800,), "float
             continue
         for row in range(2):
             for column in range(4):
-                inside = column < 4 - lane
+                # SM107 bounds loads by the overridden dimension but writes the
+                # whole box for stores and reductions with dimension overrides.
+                inside = column < 4 - lane or not load
                 index = lane * 16 + row * 4 * (1 + lane) + column
                 if load:
                     shared[lane, row * 4 + column] = expected[index] if inside else 0
@@ -280,13 +283,52 @@ def test_tma_override_data_and_descriptor_isolation(route, form, tmp_path):
     assert any("override_" in op_name for op_name in call_op_names(module.spec.kernels[0]))
 
 
+def partial_dimension_expectation(form, dimension):
+    """Loaded values for a 4-wide box whose overridden inner dimension is `dimension`."""
+
+    row = np.where(np.arange(4) < dimension, np.arange(4, 8, dtype=np.float32), 0)
+    if "stride" not in form:
+        return row
+    return np.concatenate((row, np.where(np.arange(4) < dimension, row + 16, 0)))
+
+
+# Recorded on an SM107 GPU (NVIDIA VR NVL72 ES): the dimension operand d loads
+# d + 1 elements, so a dimension below the box width zero-fills the remaining columns.
+@pytest.mark.parametrize("form", ("dim_b8", "dim_b16", "stride_b8", "stride_b16"))
+@pytest.mark.parametrize("dimension", (1, 2, 3, 4))
+def test_tma_override_dimension_operand_encodes_size_minus_one(form, dimension, tmp_path):
+    kernel = override_kernel("g2cta", form, dimension=dimension)
+    inputs, _ = override_inputs(form)
+    result = run_checked(kernel, inputs, cache_dir=tmp_path)
+    np.testing.assert_array_equal(
+        result.outputs["output"], partial_dimension_expectation(form, dimension)
+    )
+
+
+@pytest.mark.parametrize("route", ("s2g", "reduce"))
+@pytest.mark.parametrize("form", ("dim_b8", "stride_b16"))
+@pytest.mark.parametrize("dimension", (1, 3))
+def test_tma_override_store_dimensions_do_not_clip_the_box(route, form, dimension, tmp_path):
+    kernel = override_kernel(route, form, dimension=dimension)
+    inputs, _ = override_inputs(form)
+    before = inputs["replacement"].copy()
+    run_checked(kernel, inputs, cache_dir=tmp_path)
+    indices = np.arange(4) + 4
+    if "stride" in form:
+        indices = np.concatenate((indices, indices + 16))
+    expected = before.copy()
+    payload = np.arange(1, len(indices) + 1, dtype=np.float32)
+    expected[indices] = payload + (before[indices] if route == "reduce" else 0)
+    np.testing.assert_array_equal(inputs["replacement"], expected)
+
+
 @pytest.mark.parametrize(
     "kwargs,message",
     [
         ({"offset": 1}, "16-byte aligned"),
         ({"offset": 8}, "128 KiB"),
         ({"coordinate": 1}, "zero coordinates"),
-        ({"dimension": 256}, "8-bit"),
+        ({"dimension": 257}, "8-bit"),
         ({"upper": 16}, "unused bits"),
     ],
 )

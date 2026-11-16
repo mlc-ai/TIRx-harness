@@ -980,6 +980,7 @@ impl RuntimeTensorMap {
         lower_strides: &[i64],
         upper_strides: i64,
         coordinates: &[i64],
+        clips_dimensions: bool,
     ) -> Result<Self, EngineError> {
         let rank = self.rank();
         let observed_base = address.observed_allocation_address().unwrap_or(0);
@@ -1015,13 +1016,23 @@ impl RuntimeTensorMap {
                     "TMA attribute override requires zero coordinates",
                 ));
             }
+            // Like the descriptor's own globalDim fields, each override operand
+            // encodes the dimension size minus one: SM107 loads `operand + 1`
+            // elements along the axis. Stores and reductions with dimension
+            // overrides are not clipped at all on SM107; they write the whole
+            // box, which starts at the required zero coordinates.
             for (axis, &dimension) in dimensions.iter().enumerate() {
-                if !(1..=255).contains(&dimension) {
+                if !(0..=255).contains(&dimension) {
                     return Err(EngineError::message(
-                        "TMA override dimension must be a nonzero 8-bit value",
+                        "TMA override dimension must be an 8-bit size-minus-one value",
                     ));
                 }
-                image.replace_global_dimension(axis, dimension as usize)?;
+                let size = if clips_dimensions {
+                    dimension as usize + 1
+                } else {
+                    self.box_shape[axis]
+                };
+                image.replace_global_dimension(axis, size)?;
             }
             let upper = u16::try_from(upper_strides)
                 .map_err(|_| EngineError::message("TMA upper strides must fit 16 bits"))?;
@@ -3817,10 +3828,11 @@ mod tests {
             .with_overrides(
                 &global,
                 view,
-                &[4, 1, 1, 1, 1],
+                &[3, 0, 0, 0, 0],
                 &[1, 2, 3, 4],
                 0x4321,
                 &[0; 5],
+                true,
             )
             .unwrap();
         for axis in 0..4 {
