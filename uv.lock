@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -230,17 +230,13 @@ wheels = [
 
 [[package]]
 name = "cuda-toolkit"
-version = "13.2.1"
+version = "13.4.1.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/6a/f79c134fa8e6d5fe028584933be063ce7961b1a85ce217f261cdda176e48/cuda_toolkit-13.2.1-py2.py3-none-any.whl", hash = "sha256:646d0e3668ce6f78f2312bb9cc0f668b9cbfcbef187eaa6a39eb2ea6dbec2a31", size = 2612, upload-time = "2026-04-14T01:10:36.163Z" },
+    { url = "https://files.pythonhosted.org/packages/82/bc/f95a9c7027b61d00bf9eef1c4bd2f6336e3f742e49693279b0e56dba2a3c/cuda_toolkit-13.4.1.0-py2.py3-none-any.whl", hash = "sha256:433c6197ebb482ad0c00ab6e1aa0d2ba5d3e817a25cb9943418d5363aaca6464", size = 2745, upload-time = "2026-09-09T18:59:37.65Z" },
 ]
 
 [package.optional-dependencies]
-cublas = [
-    { name = "nvidia-cublas" },
-    { name = "nvidia-cuda-nvrtc" },
-]
 cudart = [
     { name = "nvidia-cuda-runtime" },
 ]
@@ -253,15 +249,6 @@ cufile = [
 ]
 cupti = [
     { name = "nvidia-cuda-cupti" },
-]
-curand = [
-    { name = "nvidia-curand" },
-]
-cusolver = [
-    { name = "nvidia-cublas" },
-    { name = "nvidia-cusolver" },
-    { name = "nvidia-cusparse" },
-    { name = "nvidia-nvjitlink" },
 ]
 cusparse = [
     { name = "nvidia-cusparse" },
@@ -279,16 +266,18 @@ nvtx = [
 
 [[package]]
 name = "cupti-python"
-version = "13.2.0"
+version = "13.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuda-bindings" },
+    { name = "cuda-pathfinder" },
     { name = "numpy" },
     { name = "nvidia-cuda-cupti" },
+    { name = "pyelftools" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/8f/24b2439a91893b79bee0b6b203a4362a867d5dd571556a4a2b7458718afd/cupti_python-13.2.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3cbf2b619d28e938cd0e5ebbcdb42bca0b5074990990d6e6349e153ddfb8a234", size = 859418, upload-time = "2026-03-16T12:47:17.323Z" },
-    { url = "https://files.pythonhosted.org/packages/3b/05/83276c8e675521e7da4dabb6f4769d01f9468ccfe70dfa6b24f011735c3f/cupti_python-13.2.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8896bc98347ccb62fbe1a24b5d737dc406bd64fb03e99a2c490b1ed467d71ced", size = 840967, upload-time = "2026-03-16T12:47:24.396Z" },
+    { url = "https://files.pythonhosted.org/packages/83/6a/22830508acf59c1aeefc709213b74e5a54a70223b892a6bc8113b86290e7/cupti_python-13.4.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0d6c286c191c8c466dcd4dcea90fa0fd15f16288592b9039af3a367e87e3c0b5", size = 6096422, upload-time = "2026-09-10T08:35:46.639Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/97/a7cef8a95272137eaba85dd6f077152a9b4c40ad92ddd92bea5a20d19a8f/cupti_python-13.4.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f317815aa08e4e2f3e9239945c139400b2415df7e2f1905a7b4ec88176318c6c", size = 5917710, upload-time = "2026-09-10T08:35:48.574Z" },
 ]
 
 [[package]]
@@ -358,14 +347,14 @@ wheels = [
 
 [[package]]
 name = "fla-core"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/85/20bdc0fbbbaeec27b5b198e0dbbbc51161a267066a4aebd9e4b413637c6c/fla_core-0.5.2.tar.gz", hash = "sha256:9360fc412f784c1c8f05c320ec2902d5d968764178c9b8a92efc919e17a39680", size = 587835, upload-time = "2026-07-27T18:26:19.424Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/2d/3181d715d021c12db379ce0bc51ba78c5b6282ff6c3c79cc2f64d183d1b2/fla_core-0.6.0.tar.gz", hash = "sha256:cdd5b7ff6d5c0e5c08fde73f2624d76e0b506f8684af4e316bc7f2d8bfd9a623", size = 775665, upload-time = "2026-10-23T17:48:03.213Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/ed/dfe19c4da779957eb6a42a26812f9b4e2280bf757a17a71933ff59ffcb98/fla_core-0.5.2-py3-none-any.whl", hash = "sha256:5e830c85bad3d0d34677f98ac7074d08687a3756f0f0499d95ceb96eb6920761", size = 819225, upload-time = "2026-07-27T18:26:16.147Z" },
+    { url = "https://files.pythonhosted.org/packages/23/08/a1a16725117cddded90bb11afed4b31f23d97f7f554775e66af998818ef9/fla_core-0.6.0-py3-none-any.whl", hash = "sha256:b0708b70e0b119cd58a0a5146ea56cb175cef6ed969d8ac60267e3e077ce3ebd", size = 1085221, upload-time = "2026-10-23T17:48:00.23Z" },
 ]
 
 [[package]]
@@ -392,15 +381,15 @@ wheels = [
 
 [[package]]
 name = "flash-linear-attention"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fla-core" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/76/c180949eae5161b9fcf4c928cab52f0c257ce84c1a59b4462b1d2b6e5883/flash_linear_attention-0.5.2.tar.gz", hash = "sha256:c053d3a75c8f5b725063f719ae6bce0f4d9dac6da32735be8ae7d485a6c9820f", size = 208110, upload-time = "2026-07-27T18:26:20.536Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/2f/6e07920d032e97fcc1a09d7578a7aa595b7dece535280bd712bb7077a3fa/flash_linear_attention-0.6.0.tar.gz", hash = "sha256:4110ff0f94ca54b76fc5499f0c169f5cbd44738d875e0199adc3a11ab0e241fa", size = 222155, upload-time = "2026-10-23T17:48:04.341Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/d2/2070e3cf2148c5cce99ca4876633c4b7b89ec085323600bd3d47aeacd306/flash_linear_attention-0.5.2-py3-none-any.whl", hash = "sha256:dcf405d81f5426393b59037097aa700d0f4a841465d5028d5aa543f4502f2400", size = 399590, upload-time = "2026-07-27T18:26:17.912Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/c1/ad271e49528b06c7032c35e6dca85592f96ef8390e6ce1b803d6b23eae0a/flash_linear_attention-0.6.0-py3-none-any.whl", hash = "sha256:6dec9735f8454523c13553622e98aff30152dde6586b4ac7d88010fbb7a06b5f", size = 403549, upload-time = "2026-10-23T17:48:01.882Z" },
 ]
 
 [[package]]
@@ -423,8 +412,8 @@ dependencies = [
     { name = "packaging" },
     { name = "requests" },
     { name = "tabulate" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "tqdm" },
 ]
 wheels = [
@@ -658,8 +647,8 @@ server = [
     { name = "grpcio" },
     { name = "nvidia-cutlass-dsl", extra = ["cu13"] },
     { name = "protobuf" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "uvicorn" },
 ]
 
@@ -821,21 +810,29 @@ wheels = [
 
 [[package]]
 name = "nvidia-cublas"
-version = "13.4.0.1"
+version = "13.8.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cuda-nvrtc" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/ec/c9b2998aebe3149dee2769e501257e048c8701de51263925f4dff76ddedc/nvidia_cublas-13.4.0.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:53bf22e2ccbf644db74b6cc21cea7f5efb1a52aa64515438b430abbd05af4106", size = 404872465, upload-time = "2026-04-13T09:50:12.116Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/1b/adc70acf3fde509b1f0ca29d1c0e8d9b00aaecd871f8cf877257c8b68d9c/nvidia_cublas-13.8.1.7-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:c11a27fd4379510e5b1f84b367a2514d1e52fe5cc13442117a0e0a1addee3cf2", size = 439315821, upload-time = "2026-09-28T19:52:22.63Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-cccl"
+version = "13.3.5.0.6"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/7e/4aa67cca14e0558b5a151a692f5ffe609930cdfc20d16c7a584de68424d4/nvidia_cuda_cccl-13.3.5.0.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d5230098fa2df5021e1a00c0c4eee41797671a91119d31e892463e5ccf3ee326", size = 4113651, upload-time = "2026-11-04T23:21:54.262Z" },
 ]
 
 [[package]]
 name = "nvidia-cuda-cupti"
-version = "13.2.75"
+version = "13.4.58"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/2d/cbf8f6288259c502165282fdaa2b733daae98434e3f2aee2b7952ba87c6f/nvidia_cuda_cupti-13.2.75-py3-none-manylinux_2_25_x86_64.whl", hash = "sha256:f75aca6bef89c625a4076a820302bb06764daa1d21595286f6bee5e237d3a187", size = 11986992, upload-time = "2026-04-13T09:40:54.517Z" },
+    { url = "https://files.pythonhosted.org/packages/18/b8/1f1626e737fd6de093f65cced8637f1f744acb31182679a4f769da26ccb2/nvidia_cuda_cupti-13.4.58-py3-none-manylinux_2_25_x86_64.whl", hash = "sha256:97203894e99c68ba120eaef7327449a7573634a0f774cf75679718d5f6b50609", size = 13058355, upload-time = "2026-09-09T17:54:55.533Z" },
 ]
 
 [[package]]
@@ -848,29 +845,29 @@ wheels = [
 
 [[package]]
 name = "nvidia-cuda-nvrtc"
-version = "13.2.78"
+version = "13.4.59"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/96/237b40b171e06eb65905375c4ad5c96f78c2f861ac6e8ae7f650d95e1dfd/nvidia_cuda_nvrtc-13.2.78-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:a9049031da08cbedd0c20e3470e5a978dc330af0e0326b3b05774718c665dc3e", size = 47019062, upload-time = "2026-04-13T09:45:33.875Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/17/c81fb9e706ddf37ac8d71ce701437c1cf8ee3c324c25b4be344fbdfbeae7/nvidia_cuda_nvrtc-13.4.59-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:f6cb36996797989976bd021d89e263be379668be7a4249cc95a3d11590bda652", size = 53299359, upload-time = "2026-09-09T17:55:59.278Z" },
 ]
 
 [[package]]
 name = "nvidia-cuda-runtime"
-version = "13.2.75"
+version = "13.4.49"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/74/f1493b0774c6eaf0234512bb650e1ab90ce8f61fecf0b4aaf1fb416f571e/nvidia_cuda_runtime-13.2.75-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:72bf454902da594e0b833cadeddc8b7100ce1c7cf7ed9023943931be1aa913b7", size = 2321965, upload-time = "2026-04-13T09:38:26.359Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/cb/b5959bff298d114338aaf4bface538ca9f2a721c439618fb252162f6192e/nvidia_cuda_runtime-13.4.49-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:0b228cc646acda27e9b512b8b94417c3ff8b3d24a0ad9b1d6603dc6c2a908046", size = 2495545, upload-time = "2026-09-09T17:54:25.955Z" },
 ]
 
 [[package]]
 name = "nvidia-cudnn-cu13"
-version = "9.24.0.43"
+version = "9.26.0.51"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cublas" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/ba/791cffd048fe5b044e620df55267e3e95c0e6e07d50b41e377c03dfc910f/nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:71f181cd810e90f9b6023b01186fe82d13d65f0ec098581ee201d39fad769e4b", size = 553099438, upload-time = "2026-07-02T16:27:42.58Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/1b/ea72dd62f26ce3e0a7870b85148b75a5987507629b712deebeb87f7cce9a/nvidia_cudnn_cu13-9.26.0.51-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:9c976d539786698c71d6bcdbe2053b7485fae062ff7e1215d2f2ff67b1a2149a", size = 519150073, upload-time = "2026-09-10T16:47:58.332Z" },
 ]
 
 [[package]]
@@ -884,34 +881,26 @@ wheels = [
 
 [[package]]
 name = "nvidia-cufft"
-version = "12.2.0.46"
+version = "12.4.0.34"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-nvjitlink" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/3e/8d717a6e1f6e27b85b64650b1104dbcf6108c9dc7e27e9e26a0d8e936cc5/nvidia_cufft-12.2.0.46-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:a9667ae4d81b9e54ddbbad24a9e72334f89d4fc184566d05ef028e2760c820eb", size = 218258098, upload-time = "2026-04-13T09:52:04.915Z" },
+    { url = "https://files.pythonhosted.org/packages/55/60/70a14cd17aeea797ea7f05500d463ed62aaeb41afbe8a559d7de795dc79b/nvidia_cufft-12.4.0.34-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:dcfd1c860e242b03518eeb30d21deb8c9496e6660b0d3f5485a2ffc492a7185a", size = 161750088, upload-time = "2026-09-09T17:58:44.088Z" },
 ]
 
 [[package]]
 name = "nvidia-cufile"
-version = "1.17.1.22"
+version = "1.19.0.109"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/c5/661a73a9042fc5f81cdd5fe6e89f4170b3b33f7962e709987e2b5e5f1381/nvidia_cufile-1.17.1.22-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:87feaf8c3ad20d3d03a01933181801ff6892bace5c8f0b1e4b48f319d3e62d36", size = 1387670, upload-time = "2026-04-13T09:52:57.783Z" },
-]
-
-[[package]]
-name = "nvidia-curand"
-version = "10.4.2.55"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/bc/f02a1d180d288e49b1a4548698b59755e9c485ee39c041fdeaf4d2cc2117/nvidia_curand-10.4.2.55-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:b4080cab49d4939f8e46b2c195c76c698d2289835c36ede558836daa40000e70", size = 59920450, upload-time = "2026-04-13T09:54:07.224Z" },
+    { url = "https://files.pythonhosted.org/packages/31/26/1cdb2d99d62f2f43db4fde608252f67d4d2053ded5c3c4c29480b9c26dfd/nvidia_cufile-1.19.0.109-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:ef4dc0702f678699d7667cb7f170849dc2061dc16851d7e6cdf72670111660f6", size = 1506776, upload-time = "2026-09-09T17:58:55.777Z" },
 ]
 
 [[package]]
 name = "nvidia-cusolver"
-version = "12.2.0.1"
+version = "12.3.2.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cublas" },
@@ -919,18 +908,18 @@ dependencies = [
     { name = "nvidia-nvjitlink" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/97/a3c41eac54c89f6aac788d2b3ccd6642b32aa6b79650af3dedb8ee7c2bfa/nvidia_cusolver-12.2.0.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4693ea3c2a5d20369da7b5a4970a41df9b40f1b6f2ef9909c95f7c8c8c5ffb4d", size = 227391570, upload-time = "2026-04-13T09:55:12.999Z" },
+    { url = "https://files.pythonhosted.org/packages/94/31/60e4f547d5dfa84e34008293390074737eb1f418bcad2bd89d77c1b7786b/nvidia_cusolver-12.3.2.15-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:0e401b1ae1e484e5e17218b919f9a17ba3c273ab11e788a8bdedcdc245d98af3", size = 265647120, upload-time = "2026-09-09T17:59:55.174Z" },
 ]
 
 [[package]]
 name = "nvidia-cusparse"
-version = "12.7.10.1"
+version = "12.8.6.49"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-nvjitlink" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/bd/bad43b37bcf13167637bef26399693d517b95092d742e8749eda5f4a85f3/nvidia_cusparse-12.7.10.1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f0d110640aa63e7182fa787cc245afa07c5fb84ac30f1c4029e4fa3012353172", size = 150855566, upload-time = "2026-04-13T09:56:29.21Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/2d/14d85bbd61b780b8ff9f36af0e1f7e8d53a9243458db19b9b16f0eed1ee4/nvidia_cusparse-12.8.6.49-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f740691172baae1d498f754cfbb565933c7dbcd7b16544d69fa666283d0715d7", size = 170467084, upload-time = "2026-09-09T18:00:27.304Z" },
 ]
 
 [[package]]
@@ -1051,18 +1040,21 @@ wheels = [
 
 [[package]]
 name = "nvidia-nvshmem-cu13"
-version = "3.4.5"
+version = "3.7.2"
 source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nvidia-cuda-cccl" },
+]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/35/a9bf80a609e74e3b000fef598933235c908fcefcef9026042b8e6dfde2a9/nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:290f0a2ee94c9f3687a02502f3b9299a9f9fe826e6d0287ee18482e78d495b80", size = 60412546, upload-time = "2025-09-06T00:32:41.564Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/4a/037dfbbafc96ad1828ef62326f27970cae2c0eb271cf5b8e6922f32a7427/nvidia_nvshmem_cu13-3.7.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b9a4f843c62b5dded8ad33fd6d220e007dcd39f06cee549292f5ba14ce4c235c", size = 135397797, upload-time = "2026-07-17T19:25:26.4Z" },
 ]
 
 [[package]]
 name = "nvidia-nvtx"
-version = "13.2.75"
+version = "13.4.49"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/cc/314eac684677dced22b913b5d1b3d03adcbe59d6c7332c5d04f864cdb079/nvidia_nvtx-13.2.75-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:2d7c24fc582d841493c6dc2cf017c25e4428cf583a3bd9e9325a65f0ecc65f73", size = 153460, upload-time = "2026-04-13T09:46:23.256Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/d6/a8fe33fffe61a345902780523836896b3740faf33f8da7ff8db8619453c4/nvidia_nvtx-13.4.49-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:ddb11f33842a0155ea52be98c5763634ca8cc7f8e859117a4ee8306abc9922da", size = 154602, upload-time = "2026-09-09T17:56:10.781Z" },
 ]
 
 [[package]]
@@ -1152,6 +1144,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/f2/9e4de77a6271e07a76d2d58b11c091a979c191ed2939bf80067568b369d2/pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6f7b393a8b3da82f5c1fc0751e6d01ac6c55b93c18226a60bdfba4a724efafd1", size = 2066633, upload-time = "2026-08-28T09:58:58.531Z" },
     { url = "https://files.pythonhosted.org/packages/71/9d/881156dc404e27479c4246128d73538464cab4a239bec61995e227644c30/pydantic_core-2.46.5-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:9c4b71f10dd532fb7a5cbc8f58707779e64f03a258c2bf8bfbaecfcd9970b519", size = 2341866, upload-time = "2026-08-28T09:59:08.539Z" },
     { url = "https://files.pythonhosted.org/packages/fa/04/c81d4841331c2178b6fb09ae225425e110ed72d990c9fe556c4ec03d1013/pydantic_core-2.46.5-graalpy312-graalpy250_312_native-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8e24d8f05fa2d28513d94e877e9c75ad66175376209b3977f916e240e623193c", size = 2111034, upload-time = "2026-08-28T10:01:07.345Z" },
+]
+
+[[package]]
+name = "pyelftools"
+version = "0.33"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/11/767522582afab1b884d277de0e6e011640cb9d7292a38694b4b1a1df1ae8/pyelftools-0.33.tar.gz", hash = "sha256:660d82dcbeb8e83d1702bd97f223f761625da06111c0cc988eac6b8ab0c1b61f", size = 15068655, upload-time = "2026-05-29T12:56:22.553Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/2a/f9697576603dae937727827505a6126a066affb227034e77e6f9068910da/pyelftools-0.33-py3-none-any.whl", hash = "sha256:f215ad5f47d3f1373a21496a6c9e0707c622840d0622f23ff7ce08678b020036", size = 201178, upload-time = "2026-05-29T12:56:20.587Z" },
 ]
 
 [[package]]
@@ -1405,7 +1406,6 @@ requires-dist = [
 [[package]]
 name = "tirx-harness"
 source = { editable = "." }
-default-groups = ["harness"]
 dependencies = [
     { name = "apache-tvm-ffi" },
     { name = "apache-tvm-tirx" },
@@ -1446,8 +1446,8 @@ benchmark = [
     { name = "nvidia-cutlass-dsl", extra = ["cu13"] },
     { name = "safetensors" },
     { name = "tirx-kernels" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "torch-c-dlpack-ext" },
     { name = "triton" },
 ]
@@ -1489,8 +1489,8 @@ server = [
     { name = "nvidia-cutlass-dsl", extra = ["cu13"] },
     { name = "safetensors" },
     { name = "tirx-kernels" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
     { name = "torch-c-dlpack-ext" },
     { name = "triton" },
 ]
@@ -1502,7 +1502,7 @@ requires-dist = [
     { name = "kcoral", specifier = ">=0.1.2" },
     { name = "ml-dtypes", marker = "extra == 'test'" },
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "nvidia-cuda-nvrtc", specifier = ">=13.2" },
+    { name = "nvidia-cuda-nvrtc", specifier = ">=13.4" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "pip", marker = "extra == 'test'", specifier = ">=25.1" },
     { name = "pypandoc-binary", specifier = ">=1.17" },
@@ -1519,31 +1519,31 @@ provides-extras = ["test"]
 benchmark = [
     { name = "apache-tvm-ffi", specifier = "==0.1.16" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0" },
-    { name = "cupti-python", specifier = "==13.2.0" },
+    { name = "cupti-python", specifier = "==13.4.0" },
     { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },
     { name = "deep-gemm", marker = "python_full_version == '3.13.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.12.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.13.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" },
-    { name = "flash-linear-attention", specifier = "==0.5.2" },
+    { name = "flash-linear-attention", specifier = "==0.6.0" },
     { name = "flashinfer-python", url = "https://github.com/flashinfer-ai/whl/releases/download/nightly-v0.6.18-20260909/flashinfer_python-0.6.18.dev20260909-py3-none-any.whl" },
     { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "kcoral", specifier = ">=0.1.2" },
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "nvidia-cuda-nvrtc", specifier = ">=13.2" },
+    { name = "nvidia-cuda-nvrtc", specifier = ">=13.4" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "safetensors", specifier = "==0.8.0" },
     { name = "tirx-kernels", specifier = "==0.1.3" },
-    { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" },
-    { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" },
+    { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" },
+    { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" },
     { name = "torch-c-dlpack-ext", specifier = "==0.1.5" },
-    { name = "triton", specifier = "==3.8.0" },
+    { name = "triton", specifier = "==3.9.0" },
 ]
 common = [
     { name = "apache-tvm-ffi", specifier = "==0.1.16" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0" },
     { name = "kcoral", specifier = ">=0.1.2" },
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "nvidia-cuda-nvrtc", specifier = ">=13.2" },
+    { name = "nvidia-cuda-nvrtc", specifier = ">=13.4" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "tirx-kernels", specifier = "==0.1.3" },
 ]
@@ -1552,7 +1552,7 @@ harness = [
     { name = "apache-tvm-tirx", specifier = "==0.1.0" },
     { name = "kcoral", specifier = ">=0.1.2" },
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "nvidia-cuda-nvrtc", specifier = ">=13.2" },
+    { name = "nvidia-cuda-nvrtc", specifier = ">=13.4" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "pypandoc-binary", specifier = ">=1.17" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -1562,25 +1562,25 @@ harness = [
 server = [
     { name = "apache-tvm-ffi", specifier = "==0.1.16" },
     { name = "apache-tvm-tirx", specifier = "==0.1.0" },
-    { name = "cupti-python", specifier = "==13.2.0" },
+    { name = "cupti-python", specifier = "==13.4.0" },
     { name = "deep-gemm", marker = "python_full_version == '3.12.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp312-cp312-linux_x86_64.whl" },
     { name = "deep-gemm", marker = "python_full_version == '3.13.*'", url = "https://github.com/mlc-ai/package/releases/download/deepgemm-2.6.1-559d79f-cu132/deep_gemm-2.6.1%2B559d79f-cp313-cp313-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.12.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp312-cp312-linux_x86_64.whl" },
     { name = "flash-kda", marker = "python_full_version == '3.13.*'", url = "https://raw.githubusercontent.com/mlc-ai/package/719a9830cc5cb32449df0bfcfbadc0f57fa268d1/flash_kda-0.0.1%2B7afb9f4-cp313-cp313-linux_x86_64.whl" },
-    { name = "flash-linear-attention", specifier = "==0.5.2" },
+    { name = "flash-linear-attention", specifier = "==0.6.0" },
     { name = "flashinfer-python", url = "https://github.com/flashinfer-ai/whl/releases/download/nightly-v0.6.18-20260909/flashinfer_python-0.6.18.dev20260909-py3-none-any.whl" },
     { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "kcoral", specifier = ">=0.1.2" },
     { name = "kcoral", extras = ["server"] },
     { name = "numpy", specifier = ">=2.5.3" },
-    { name = "nvidia-cuda-nvrtc", specifier = ">=13.2" },
+    { name = "nvidia-cuda-nvrtc", specifier = ">=13.4" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = "==4.7.0" },
     { name = "safetensors", specifier = "==0.8.0" },
     { name = "tirx-kernels", specifier = "==0.1.3" },
-    { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" },
-    { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" },
+    { name = "torch", marker = "python_full_version == '3.12.*'", url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" },
+    { name = "torch", marker = "python_full_version == '3.13.*'", url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" },
     { name = "torch-c-dlpack-ext", specifier = "==0.1.5" },
-    { name = "triton", specifier = "==3.8.0" },
+    { name = "triton", specifier = "==3.9.0" },
 ]
 
 [[package]]
@@ -1613,19 +1613,22 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.14.0+cu132"
-source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }
+version = "2.15.0+cu134"
+source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }
 resolution-markers = [
     "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 dependencies = [
     { name = "cuda-bindings" },
-    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"] },
+    { name = "cuda-toolkit", extra = ["cudart", "cufft", "cufile", "cupti", "cusparse", "nvjitlink", "nvrtc", "nvtx"] },
+    { name = "cupti-python" },
     { name = "filelock" },
     { name = "fsspec" },
     { name = "jinja2" },
     { name = "networkx" },
+    { name = "nvidia-cublas" },
     { name = "nvidia-cudnn-cu13" },
+    { name = "nvidia-cusolver" },
     { name = "nvidia-cusparselt-cu13" },
     { name = "nvidia-nccl-cu13" },
     { name = "nvidia-nvshmem-cu13" },
@@ -1635,46 +1638,52 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:0b059371a41b7c868589b00ff60a9f72118bc9b3c0bf12e820c06eb2a3aab55b" },
+    { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:1c19ba829e928b6eed2f3d7d7013ce9c981328cc3f7910d7b8b362a617eb4bff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cuda-bindings", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = ">=13.0.3,<14" },
-    { name = "cuda-toolkit", extras = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "sys_platform == 'linux'", specifier = "==13.2.1" },
+    { name = "cuda-toolkit", extras = ["cudart", "cufft", "cufile", "cupti", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "sys_platform == 'linux'", specifier = "==13.4.1" },
+    { name = "cupti-python", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = "==13.4.0" },
     { name = "filelock" },
     { name = "fsspec", specifier = ">=0.8.5" },
     { name = "jinja2" },
     { name = "networkx", specifier = ">=2.5.1" },
-    { name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'", specifier = "==9.24.0.43" },
+    { name = "nvidia-cublas", marker = "sys_platform == 'linux'", specifier = ">=13.7.0.27,<=13.8.1.7" },
+    { name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'", specifier = "==9.26.0.51" },
+    { name = "nvidia-cusolver", marker = "sys_platform == 'linux'", specifier = "==12.3.2.15" },
     { name = "nvidia-cusparselt-cu13", marker = "sys_platform == 'linux'", specifier = "==0.8.1" },
     { name = "nvidia-nccl-cu13", marker = "sys_platform == 'linux'", specifier = "==2.30.7" },
-    { name = "nvidia-nvshmem-cu13", marker = "sys_platform == 'linux'", specifier = "==3.4.5" },
+    { name = "nvidia-nvshmem-cu13", marker = "sys_platform == 'linux'", specifier = "==3.7.2" },
     { name = "opt-einsum", marker = "extra == 'opt-einsum'", specifier = ">=3.3" },
     { name = "optree", marker = "extra == 'optree'", specifier = ">=0.13.0" },
     { name = "pyyaml", marker = "extra == 'pyyaml'" },
     { name = "setuptools", specifier = ">=77.0.3" },
     { name = "sympy", specifier = ">=1.13.3" },
-    { name = "triton", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = "~=3.8.0" },
-    { name = "typing-extensions", specifier = ">=4.10.0" },
+    { name = "triton", marker = "python_full_version < '3.16' and sys_platform == 'linux'", specifier = "~=3.9.0" },
+    { name = "typing-extensions", specifier = ">=4.13.0" },
 ]
 provides-extras = ["optree", "opt-einsum", "pyyaml"]
 
 [[package]]
 name = "torch"
-version = "2.14.0+cu132"
-source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }
+version = "2.15.0+cu134"
+source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 dependencies = [
     { name = "cuda-bindings" },
-    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"] },
+    { name = "cuda-toolkit", extra = ["cudart", "cufft", "cufile", "cupti", "cusparse", "nvjitlink", "nvrtc", "nvtx"] },
+    { name = "cupti-python" },
     { name = "filelock" },
     { name = "fsspec" },
     { name = "jinja2" },
     { name = "networkx" },
+    { name = "nvidia-cublas" },
     { name = "nvidia-cudnn-cu13" },
+    { name = "nvidia-cusolver" },
     { name = "nvidia-cusparselt-cu13" },
     { name = "nvidia-nccl-cu13" },
     { name = "nvidia-nvshmem-cu13" },
@@ -1684,28 +1693,31 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:c083c08cf72c207fefbd8bfca4935f8830af38cb1c6b9548bd589939b73f56c4" },
+    { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:ed75d71d0e287f43a6aa226423115ea14e2176e293eb7afc7b6a260ad29e3d85" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cuda-bindings", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = ">=13.0.3,<14" },
-    { name = "cuda-toolkit", extras = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "sys_platform == 'linux'", specifier = "==13.2.1" },
+    { name = "cuda-toolkit", extras = ["cudart", "cufft", "cufile", "cupti", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "sys_platform == 'linux'", specifier = "==13.4.1" },
+    { name = "cupti-python", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = "==13.4.0" },
     { name = "filelock" },
     { name = "fsspec", specifier = ">=0.8.5" },
     { name = "jinja2" },
     { name = "networkx", specifier = ">=2.5.1" },
-    { name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'", specifier = "==9.24.0.43" },
+    { name = "nvidia-cublas", marker = "sys_platform == 'linux'", specifier = ">=13.7.0.27,<=13.8.1.7" },
+    { name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'", specifier = "==9.26.0.51" },
+    { name = "nvidia-cusolver", marker = "sys_platform == 'linux'", specifier = "==12.3.2.15" },
     { name = "nvidia-cusparselt-cu13", marker = "sys_platform == 'linux'", specifier = "==0.8.1" },
     { name = "nvidia-nccl-cu13", marker = "sys_platform == 'linux'", specifier = "==2.30.7" },
-    { name = "nvidia-nvshmem-cu13", marker = "sys_platform == 'linux'", specifier = "==3.4.5" },
+    { name = "nvidia-nvshmem-cu13", marker = "sys_platform == 'linux'", specifier = "==3.7.2" },
     { name = "opt-einsum", marker = "extra == 'opt-einsum'", specifier = ">=3.3" },
     { name = "optree", marker = "extra == 'optree'", specifier = ">=0.13.0" },
     { name = "pyyaml", marker = "extra == 'pyyaml'" },
     { name = "setuptools", specifier = ">=77.0.3" },
     { name = "sympy", specifier = ">=1.13.3" },
-    { name = "triton", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = "~=3.8.0" },
-    { name = "typing-extensions", specifier = ">=4.10.0" },
+    { name = "triton", marker = "python_full_version < '3.16' and sys_platform == 'linux'", specifier = "~=3.9.0" },
+    { name = "typing-extensions", specifier = ">=4.13.0" },
 ]
 provides-extras = ["optree", "opt-einsum", "pyyaml"]
 
@@ -1714,8 +1726,8 @@ name = "torch-c-dlpack-ext"
 version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.14.0+cu132", source = { url = "https://download.pytorch.org/whl/cu132/torch-2.14.0%2Bcu132-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp312-cp312-manylinux_2_28_x86_64.whl" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.15.0+cu134", source = { url = "https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp313-cp313-manylinux_2_28_x86_64.whl" }, marker = "python_full_version >= '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/37/de/921b6491efce5c389a5ef9bbed3d2d6660005840dae488124173180859ab/torch_c_dlpack_ext-0.1.5.tar.gz", hash = "sha256:d06f0357d575d22a168cc77acb9020fc4bae30968ceb6718a055dcbe92bacabe", size = 12913, upload-time = "2026-01-12T11:25:08.484Z" }
 wheels = [
@@ -1754,11 +1766,10 @@ wheels = [
 
 [[package]]
 name = "triton"
-version = "3.8.0"
+version = "3.9.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/09/b7012e5bfae67640f268aa584caa80fe1674f6b0da949046b679972c33e3/triton-3.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e91ffa46d095b252248297292dd22bcbacd53a125a0c2eefbbbf74925a320bc3", size = 247972921, upload-time = "2026-08-28T15:55:53.157Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/b6/3394d5548404c1cabd1dadadd28d0b3f9478db1dff8180da53bb3f0a1e19/triton-3.8.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1f0497218e26b7d79773ad9c2a3fa3b539ee69f587a13fac2e552b1d322a8015", size = 247975122, upload-time = "2026-08-28T15:56:04.112Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/c9/af85b25e0d98bd921a7646ad1db1c8746250ee04b8f1595982d29b6283cf/triton-3.9.0-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5e52ab4e2f1d64f0ac494c9aa723697b793f81a91c4cae4c36608ca0bc4267bf", size = 285674620, upload-time = "2026-10-27T18:28:11.992Z" },
 ]
 
 [[package]]
