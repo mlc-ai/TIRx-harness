@@ -1412,7 +1412,8 @@ fn tmem_full_view(
 
 /// Base column and target CTAs of one shift (`tcgen05.shift` or the A shift
 /// of `tcgen05.mma.ashift`). PTX requires the address lane to be 32-aligned;
-/// the shift itself moves every 32-lane partition of the TMEM allocation.
+/// the shift itself moves every 32-lane partition of the TMEM allocation
+/// whichever aligned lane the address names (measured on SM100 and SM107).
 pub(crate) fn raw_tcgen05_shift_targets(
     context: &WarpContext,
     address: u32,

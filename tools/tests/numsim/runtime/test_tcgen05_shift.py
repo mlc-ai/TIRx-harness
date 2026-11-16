@@ -117,17 +117,13 @@ def test_tcgen05_shift_read_before_commit_completion_races(cta_group):
     synccheck(kernel, shift_inputs(cta_group)).require_clean()
 
 
-@pytest.mark.parametrize(
-    "column,lane,reason",
-    [
-        (1, 0, "tcgen05_shift_address_unmodeled"),
-        (0, 32, "tcgen05_shift_address_unmodeled"),
-    ],
-)
-def test_tcgen05_shift_unmeasured_addresses_are_incomplete(column, lane, reason):
-    assert_rejected(
-        shift_kernel(column=column, lane=lane), shift_inputs(1), reason, verdict="incomplete"
-    )
+@pytest.mark.parametrize("cta_group", (1, 2))
+@pytest.mark.parametrize("lane", (32, 64, 96))
+def test_tcgen05_shift_ignores_aligned_address_lane(cta_group, lane, tmp_path):
+    # SM107 hardware: every 32-aligned lane shifts all four partitions, as lane 0.
+    inputs = shift_inputs(cta_group)
+    outputs = run_checked(shift_kernel(cta_group, column=8, lane=lane), inputs, cache_dir=tmp_path)
+    np.testing.assert_array_equal(outputs.outputs["out"], shift_oracle(inputs["seed"], 8))
 
 
 @pytest.mark.parametrize(
@@ -135,6 +131,7 @@ def test_tcgen05_shift_unmeasured_addresses_are_incomplete(column, lane, reason)
     [
         (0, 16, "row address must name one aligned warp"),
         (28, 0, "not covered by any live allocation"),
+        *((column, 0, "misaligned") for column in (1, 2, 3, 5, 6)),
     ],
 )
 def test_tcgen05_shift_invalid_addresses_are_errors(column, lane, reason):

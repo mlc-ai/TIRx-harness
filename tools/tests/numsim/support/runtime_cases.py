@@ -1555,6 +1555,7 @@ RUNTIME_CASES = (
         tests=(
             "runtime/test_tcgen05_shift.py::test_tcgen05_shift_moves_each_partition_down_one_lane",
             "runtime/test_tcgen05_shift.py::test_tcgen05_shift_predicate_gates_issue",
+            "runtime/test_tcgen05_shift.py::test_tcgen05_shift_ignores_aligned_address_lane",
         ),
     ),
     RuntimeCase(

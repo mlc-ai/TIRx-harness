@@ -3954,23 +3954,22 @@ fn shift_entry(
     let physical = engine(warp).kernel().physical().clone();
     let lifecycle = engine(warp).kernel().services().tcgen();
     let address = address[lane];
-    // A B200 probe at lane 0 shifts all four lane partitions, which PTX's
-    // "for a warp" wording does not describe; another 32-aligned lane and a
-    // column PTX gives no alignment for (SM100 reportedly masks it down to a
-    // multiple of four) have no measured semantics. A misaligned lane is a
-    // PTX error that the shift itself reports.
-    let lane_field = address >> 16;
-    if lane_field % 32 == 0 && lane_field < 128 && (lane_field != 0 || address & 3 != 0) {
+    // PTX gives no column alignment, but SM107 hardware traps with a
+    // misaligned address unless the column is a multiple of four. The lane
+    // field only has to be 32-aligned: SM107 shifts all four lane partitions
+    // for every aligned lane, as the shift itself models.
+    if address & 3 != 0 {
         let operation = engine(warp).begin_current_operation(
             numeric_context,
             crate::StaticOpId::new(site.get()),
             OperationKind::TcgenWork,
         )?;
-        return Err(
-            crate::EngineError::analysis_incomplete("tcgen05_shift_address_unmodeled")
-                .with_operation_context(&operation)
-                .into(),
-        );
+        return Err(crate::EngineError::message(format!(
+            "tcgen05.shift column {} is misaligned: SM107 hardware requires a multiple of 4",
+            address & 0xffff
+        ))
+        .with_operation_context(&operation)
+        .into());
     }
     let tmem_anchor = raw_ldst_footprint_anchor(anchor.inner(), 4)?;
     let tmem_logical_buffer = anchor

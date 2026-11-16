@@ -13,18 +13,26 @@ from tests.numsim.runtime.test_tcgen05_shift import shift_inputs, shift_kernel, 
 
 CASES = [
     *(
-        pytest.param(cta_group, column, None, 1, id=f"cta{cta_group}-col{column}")
+        pytest.param(cta_group, column, 0, None, 1, id=f"cta{cta_group}-col{column}")
         for cta_group in (1, 2)
         for column in (0, 4, 24)
     ),
-    *(pytest.param(1, 0, True, issue, id=f"cta1-col0-predicate-issue{issue}") for issue in (0, 1)),
+    *(
+        pytest.param(cta_group, 8, lane, None, 1, id=f"cta{cta_group}-lane{lane}")
+        for cta_group in (1, 2)
+        for lane in (32, 96)
+    ),
+    *(
+        pytest.param(1, 0, 0, True, issue, id=f"cta1-col0-predicate-issue{issue}")
+        for issue in (0, 1)
+    ),
 ]
 
 
 @pytest.mark.numsim_gpu
-@pytest.mark.parametrize("cta_group,column,predicate,issue", CASES)
+@pytest.mark.parametrize("cta_group,column,lane,predicate,issue", CASES)
 def test_sm107_tcgen05_shift_matches_gpu(
-    cta_group, column, predicate, issue, pytestconfig, tmp_path
+    cta_group, column, lane, predicate, issue, pytestconfig, tmp_path
 ):
     require_numsim_gpu(pytestconfig)
     import torch
@@ -33,7 +41,7 @@ def test_sm107_tcgen05_shift_matches_gpu(
         pytest.skip("this differential targets an SM107 GPU")
     inputs = shift_inputs(cta_group, issue)
     result = run_paired_primfunc(
-        shift_kernel(cta_group, column=column, predicate=predicate),
+        shift_kernel(cta_group, column=column, lane=lane, predicate=predicate),
         inputs,
         outputs=("out",),
         cache_dir=tmp_path,
