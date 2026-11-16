@@ -90,15 +90,6 @@ def kernel(bar: T.handle):
 @T.function
 def invalid():
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
-    T.ptx.tcgen05.shift(T.uint32(0), cta_group=1)
-""",
-            r"'shift' is not a valid modifier for 'tcgen05'",
-        ),
-        (
-            """
-@T.function
-def invalid():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
         T.uint32(0),
         T.uint32(0),
@@ -128,6 +119,23 @@ def invalid():
 def test_target_parser_rejects_removed_tcgen05_families(source: str, message: str):
     with pytest.raises((AttributeError, ValueError), match=message):
         _parse(source)
+
+
+def test_tcgen05_shift_parses_but_remains_explicitly_unsupported():
+    from tirx_harness.numsim.transpiler.frontend import analyze
+
+    func = _parse(
+        """
+@T.function
+def kernel():
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    T.ptx["tcgen05.shift.cta_group::1.down"](T.uint32(0))
+"""
+    )
+    decoded = decode_ptx_call(_call(func, "tirx.ptx.tcgen05_shift"))
+    assert decoded.modifier("direction") == "down"
+    spec = analyze(func)
+    assert any("tcgen05_shift" in item for item in spec.unsupported)
 
 
 def test_target_parser_rejects_tensormap_prefetch_in_global_space():
