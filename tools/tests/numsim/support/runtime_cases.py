@@ -869,6 +869,13 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
+        target_ids=("call:tirx.ptx.cp_async_bulk_wait_group_proxy_async",),
+        tests=(
+            "runtime/test_bulk_wait_group_proxy_async.py::test_restricted_wait_completes_the_bulk_group",
+            "runtime/test_bulk_wait_group_proxy_async.py::test_restricted_wait_feeds_a_later_async_copy",
+        ),
+    ),
+    RuntimeCase(
         target_ids=(
             "call:tirx.ptx.cp_async_bulk_commit_group",
             "call:tirx.ptx.cp_async_bulk_wait_group",

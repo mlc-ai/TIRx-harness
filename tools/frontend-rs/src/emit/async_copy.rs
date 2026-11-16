@@ -105,8 +105,10 @@ pub fn red_async_parts(decoded: &DecodedPtx) -> AResult<RedAsyncParts> {
 
 /// The validated parts.
 
-fn wait_marker(bulk: bool, read_only: bool) -> &'static str {
-    if read_only {
+fn wait_marker(bulk: bool, read_only: bool, async_proxy_only: bool) -> &'static str {
+    if async_proxy_only {
+        "v2::async_copy::variant::BulkWaitGroupProxyAsync"
+    } else if read_only {
         "v2::async_copy::variant::BulkWaitGroupRead"
     } else if bulk {
         "v2::async_copy::variant::BulkWaitGroup"
@@ -152,8 +154,10 @@ pub fn decoded_group_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<GroupPart
     if decoded.modifier("api")? != "async" {
         return unsupported(format!("{op_name} requires api='async'"));
     }
+    let async_proxy_only = op_name == "tirx.ptx.cp_async_bulk_wait_group_proxy_async";
     let bulk = op_name == "tirx.ptx.cp_async_bulk_commit_group"
-        || op_name == "tirx.ptx.cp_async_bulk_wait_group";
+        || op_name == "tirx.ptx.cp_async_bulk_wait_group"
+        || async_proxy_only;
     if bulk && decoded.modifier("kind")? != "bulk" {
         return unsupported(format!("{op_name} requires kind='bulk'"));
     }
@@ -162,6 +166,7 @@ pub fn decoded_group_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<GroupPart
         "tirx.ptx.cp_async_wait_group"
             | "tirx.ptx.cp_async_wait_all"
             | "tirx.ptx.cp_async_bulk_wait_group"
+            | "tirx.ptx.cp_async_bulk_wait_group_proxy_async"
     );
     let expected_action = if op_name == "tirx.ptx.cp_async_wait_all" {
         "wait_all"
@@ -179,7 +184,11 @@ pub fn decoded_group_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<GroupPart
         } else {
             static_group(ctx, &decoded.scalar_operand("group")?, op_name)?
         };
-        let read_only = bulk && decoded.modifier("read")? == "read";
+        if async_proxy_only && decoded.modifier("sync_restrict")? != "sync_restrict::proxy::async" {
+            return unsupported(format!("{op_name} requires sync_restrict::proxy::async"));
+        }
+        // The restricted line has no `.read` slot; ptxas rejects the pair.
+        let read_only = bulk && !async_proxy_only && decoded.modifier("read")? == "read";
         let function = if bulk {
             "async_copy::cp_async_bulk_wait_group"
         } else {
@@ -187,7 +196,7 @@ pub fn decoded_group_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<GroupPart
         };
         return Ok(GroupParts {
             function,
-            marker: Some(wait_marker(bulk, read_only)),
+            marker: Some(wait_marker(bulk, read_only, async_proxy_only)),
             pending: Some(pending),
         });
     }

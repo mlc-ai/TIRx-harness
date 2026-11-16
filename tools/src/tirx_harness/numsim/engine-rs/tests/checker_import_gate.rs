@@ -172,6 +172,7 @@ const EFFECT_VOCABULARY: &[&str] = &[
     "AnalysisGapKind",
     "AsyncGroupCompletionActionId",
     "AsyncGroupMilestone",
+    "AsyncGroupWaitKind",
     "AsyncTokenId",
     "ClusterBarrierArrivalOutcome",
     "CompletionActionEffect",

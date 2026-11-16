@@ -238,6 +238,11 @@ pub mod variant {
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct BulkWaitGroupRead;
 
+    /// `cp.async.bulk.wait_group.sync_restrict::proxy::async N`: full
+    /// completion ordered only before later async-proxy accesses.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct BulkWaitGroupProxyAsync;
+
     /// Legacy `cp.async.mbarrier.arrive` form that increments pending arrivals.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct CpAsyncMbarrierArrive;
@@ -1700,7 +1705,7 @@ async fn execute_cp_async_wait_group(
             AsyncGroupDomain::CpAsync,
             context.active_mask().into_inner(),
             pending,
-            false,
+            crate::AsyncGroupWaitKind::Full,
         )
         .await?;
     finish(warp, &operation)
@@ -1747,7 +1752,7 @@ async fn execute_bulk_wait_group(
     context: ExecCtx,
     site: SiteId,
     pending: i64,
-    read_only: bool,
+    kind: crate::AsyncGroupWaitKind,
 ) -> Result<(), EngineError> {
     let operation = begin(warp, context, site, OperationKind::Barrier, true)?;
     engine(warp)
@@ -1756,14 +1761,14 @@ async fn execute_bulk_wait_group(
             AsyncGroupDomain::Bulk,
             context.active_mask().into_inner(),
             pending,
-            read_only,
+            kind,
         )
         .await?;
     finish(warp, &operation)
 }
 
 macro_rules! bulk_wait_variant {
-    ($marker:ident, $read_only:literal) => {
+    ($marker:ident, $kind:ident) => {
         instruction_variant! {
             [impl] cp_async_bulk_wait_group_spec, variant::$marker,
             i64 => ();
@@ -1773,14 +1778,22 @@ macro_rules! bulk_wait_variant {
                 site: SiteId,
                 pending: Self::Args,
             ) -> Result<Self::Output, EngineError> {
-                execute_bulk_wait_group(warp, context, site, pending, $read_only).await
+                execute_bulk_wait_group(
+                    warp,
+                    context,
+                    site,
+                    pending,
+                    crate::AsyncGroupWaitKind::$kind,
+                )
+                .await
             }
         }
     };
 }
 
-bulk_wait_variant!(BulkWaitGroup, false);
-bulk_wait_variant!(BulkWaitGroupRead, true);
+bulk_wait_variant!(BulkWaitGroup, Full);
+bulk_wait_variant!(BulkWaitGroupRead, Read);
+bulk_wait_variant!(BulkWaitGroupProxyAsync, AsyncProxyOnly);
 
 /// Both `cp.async.mbarrier.arrive` spellings commit the issuing lanes' prior
 /// classic `cp.async` work and bind one arrive-on per lane to that work's

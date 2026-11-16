@@ -7513,6 +7513,7 @@ impl GlobalRaceState {
         operation: &OperationContext,
         token: &AsyncTokenId,
         milestone: AsyncGroupMilestone,
+        with_proxy_bridges: bool,
     ) -> Result<(), String> {
         let _profile = ProfileTimer::new(ProfileKind::RaceGlobalAsyncAcquire);
         let Some(state) = self.async_tokens.get(token) else {
@@ -7532,6 +7533,13 @@ impl GlobalRaceState {
         .ok_or_else(|| {
             format!("global racecheck async token {token:?} has not reached {milestone:?}")
         })?;
+        // Without bridges the payload still orders the token's accesses
+        // before later same-proxy accesses; bridges stay dominated by the
+        // causal frontier, so dropping them keeps the clock invariant.
+        let mut clock = clock;
+        if !with_proxy_bridges {
+            clock.proxy_bridges = None;
+        }
         let payload = GlobalExecutionPayload {
             clock,
             read_observations: state.read_observations.clone(),
@@ -11359,6 +11367,7 @@ mod tests {
                 &first_issue,
                 &first_token,
                 AsyncGroupMilestone::FullComplete,
+                true,
             )
             .unwrap();
         state.retire_async_token(&first_token);
@@ -11398,6 +11407,7 @@ mod tests {
                 &second_issue,
                 &second_token,
                 AsyncGroupMilestone::FullComplete,
+                true,
             )
             .unwrap();
         state.retire_async_token(&second_token);
@@ -12478,6 +12488,7 @@ mod tests {
                     &operation(2, 0, 4, OperationKind::Barrier),
                     &token,
                     AsyncGroupMilestone::FullComplete,
+                    true,
                 )
                 .unwrap();
             assert_eq!(
@@ -12634,6 +12645,7 @@ mod tests {
                                     &wait,
                                     &consumer,
                                     AsyncGroupMilestone::FullComplete,
+                                    true,
                                 )
                                 .unwrap();
                         }
@@ -12752,6 +12764,7 @@ mod tests {
                     &operation(1, 0, 2, OperationKind::Barrier),
                     &token,
                     AsyncGroupMilestone::SourceReadComplete,
+                    true,
                 )
                 .unwrap();
             let pending = &state
@@ -12848,7 +12861,7 @@ mod tests {
             .unwrap();
         let wait = operation(0, 0, 2, OperationKind::Barrier);
         state
-            .acquire_async_token(&wait, &token, AsyncGroupMilestone::FullComplete)
+            .acquire_async_token(&wait, &token, AsyncGroupMilestone::FullComplete, true)
             .unwrap();
         state.retire_async_token(&token);
         commit(
@@ -13050,6 +13063,7 @@ mod tests {
                 &first_store_issue,
                 &first_store_token,
                 AsyncGroupMilestone::FullComplete,
+                true,
             )
             .unwrap();
         state.retire_async_token(&first_store_token);
@@ -13137,6 +13151,7 @@ mod tests {
                 &first_store_issue,
                 &first_store_token,
                 AsyncGroupMilestone::SourceReadComplete,
+                true,
             )
             .unwrap();
         state
@@ -13433,7 +13448,7 @@ mod tests {
             if observe_completion {
                 let wait = operation(0, 0, 2, OperationKind::Barrier);
                 state
-                    .acquire_async_token(&wait, &token, AsyncGroupMilestone::FullComplete)
+                    .acquire_async_token(&wait, &token, AsyncGroupMilestone::FullComplete, true)
                     .unwrap();
             }
             let fence = operation(0, 0, 3, OperationKind::Fence);
