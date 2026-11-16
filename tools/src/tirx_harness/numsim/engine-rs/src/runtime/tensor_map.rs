@@ -1078,18 +1078,13 @@ impl RuntimeTensorMap {
                 "8B flip is only valid for global-to-shared tensor copies",
             ));
         }
+        // 64B atomicity is store-only. SM100 and SM107 raise an illegal
+        // instruction for every global-to-shared load using it: tile and
+        // im2col, any element size, box, shared base, destination, and
+        // host-encoded or tensormap.replace-installed descriptors.
         if load && self.swizzle_atomicity == SwizzleAtomicity::B64 {
-            if self.element_type == TensorMapElementType::U6
-                || self.fp4_shared_layout == Some(Fp4SharedLayout::Align16Padded)
-            {
-                return Err(EngineError::message(
-                    "64B atomicity loads are invalid for U6 and padded FP4 TensorMaps",
-                ));
-            }
-            // Independent load probes trap on SM100 and on SM107 (NVIDIA VR NVL72
-            // ES, 128B-swizzle tile at a 1024B-aligned base); store is GPU-validated.
-            return Err(EngineError::analysis_incomplete(
-                "tma_64b_atomicity_load_unmodeled",
+            return Err(EngineError::message(
+                "64B swizzle atomicity is only valid for shared-to-global tensor copies",
             ));
         }
         Ok(())

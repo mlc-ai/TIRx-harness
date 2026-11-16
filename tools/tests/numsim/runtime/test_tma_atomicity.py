@@ -150,20 +150,26 @@ def test_tma_atomicity_direction_restrictions(tmp_path):
             "error",
             "8B flip is only valid for global-to-shared",
         ),
-        (False, "128B_ATOM_64B", None, "incomplete", "tma_64b_atomicity_load_unmodeled"),
+        (
+            False,
+            "128B_ATOM_64B",
+            None,
+            "error",
+            "64B swizzle atomicity is only valid for shared-to-global",
+        ),
         (
             False,
             "128B_ATOM_64B",
             "uint6",
             "error",
-            "64B atomicity loads are invalid for U6 and padded FP4",
+            "64B swizzle atomicity is only valid for shared-to-global",
         ),
         (
             False,
             "128B_ATOM_64B",
             "fp4",
             "error",
-            "64B atomicity loads are invalid for U6 and padded FP4",
+            "64B swizzle atomicity is only valid for shared-to-global",
         ),
     ):
         if dtype is None:
