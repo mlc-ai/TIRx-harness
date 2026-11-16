@@ -725,6 +725,7 @@ RUNTIME_CASES = (
             "runtime/test_scalar_control.py::test_fetch_register_models_logical_coordinates_and_uses_stable_time_tokens",
             "runtime/test_scalar_control.py::test_fetch_register_separates_launched_warps_from_sm100_warp_identifier_capacity",
             "runtime/test_launch_resource_facts.py::test_smid_defaults_to_zero_in_execution_and_both_checkers",
+            "runtime/test_locality_domain.py::test_locality_domain_registers_follow_ptx_placement_rules",
         ),
     ),
     RuntimeCase(

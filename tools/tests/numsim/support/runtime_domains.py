@@ -140,6 +140,8 @@ FETCH_REGISTERS_32 = (
     "clock_hi",
     "globaltimer_lo",
     "globaltimer_hi",
+    "locality_domain_id",
+    "locality_domain_supplemental_sm",
 )
 FETCH_REGISTERS_64 = ("gridid", "clock64", "globaltimer")
 

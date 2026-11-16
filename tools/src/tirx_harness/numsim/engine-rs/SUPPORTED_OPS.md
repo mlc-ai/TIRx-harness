@@ -67,7 +67,7 @@ A listed operation may still reject modifier, dtype, shape, or layout values out
 | `tirx.cuda.mbarrier_wait_acquire_cluster` | synchronization | modeled |  |
 | `tirx.cuda.mma_fill` | warp_matrix_instruction | modeled |  |
 | `tirx.cuda.mma_store` | warp_matrix_instruction | modeled |  |
-| `tirx.cuda.mov_sreg` | pure_scalar | deterministic_representative | logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero |
+| `tirx.cuda.mov_sreg` | pure_scalar | deterministic_representative | logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero; clusters alternate between two locality domains and CTAs between guaranteed and supplemental SMs |
 | `tirx.cuda.nano_sleep` | synchronization | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.printf` | synchronization | deterministic_representative | NumSim preserves logical values/readiness but uses deterministic representatives for hardware timing, approximate division, profiling annotations, and output |
 | `tirx.cuda.reduce_add_sync_u32` | pure_scalar | modeled |  |

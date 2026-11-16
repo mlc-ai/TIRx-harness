@@ -83,6 +83,8 @@ def _expected_register32(register: str) -> np.ndarray:
         "clock_hi": zero,
         "globaltimer_lo": zero,
         "globaltimer_hi": zero,
+        "locality_domain_id": cluster % np.uint32(2),
+        "locality_domain_supplemental_sm": (cta + cluster // np.uint32(2)) % np.uint32(2),
     }
     return values[register].view(np.int32)
 
