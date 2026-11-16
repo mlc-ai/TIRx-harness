@@ -16,7 +16,7 @@ from tirx_harness import numsim
 def test_three_dimensional_launch_coordinates_match_gpu(pytestconfig, tmp_path):
     require_numsim_gpu(pytestconfig)
     inputs = {"output": np.full((*GRID_3D[::-1], 16), -1, dtype=np.int32)}
-    device = run_gpu_primfunc(three_dimensional_launch, inputs, outputs=("output",), arch="sm_100a")
+    device = run_gpu_primfunc(three_dimensional_launch, inputs, outputs=("output",))
     module = numsim.transpile(three_dimensional_launch, cache_dir=tmp_path)
     simulated = numsim.Engine().run(module, inputs, outputs=("output",))
 

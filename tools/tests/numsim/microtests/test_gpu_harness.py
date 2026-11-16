@@ -27,5 +27,5 @@ def test_gpu_tensor_map_abi_without_instruction_analysis(pytestconfig, monkeypat
 
     monkeypatch.setattr(frontend, "analyze", unavailable)
     inputs["descriptor"] = PairedTensorMap(base, **metadata)
-    gpu = run_gpu_primfunc(kernel, inputs, outputs=("output",), arch="sm_100a")
+    gpu = run_gpu_primfunc(kernel, inputs, outputs=("output",))
     np.testing.assert_array_equal(gpu["output"], expected)

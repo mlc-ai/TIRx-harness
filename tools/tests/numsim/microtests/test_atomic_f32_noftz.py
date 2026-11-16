@@ -18,7 +18,7 @@ from tests.numsim.runtime.test_atomic_f32_noftz import (
 def noftz_compiler(pytestconfig):
     require_numsim_gpu(pytestconfig)
     try:
-        _compile_gpu(atomic_kernel("atom", 1, "global"), arch="sm_100a")
+        _compile_gpu(atomic_kernel("atom", 1, "global"))
     except RuntimeError as error:
         if "Illegal modifier '.noftz' for instruction 'atom'" not in str(error):
             raise

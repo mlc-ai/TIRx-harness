@@ -20,5 +20,5 @@ def test_inactive_tcgen_boundary_matches_gpu(pytestconfig, case):
     kernel, inputs, _ = inactive_boundary_case(case)
     cpu = run_checked(kernel, inputs, outputs=("out",))
     np.testing.assert_array_equal(cpu.outputs["out"], inputs["seed"])
-    gpu = run_gpu_primfunc(kernel, inputs, outputs=("out",), arch="sm_100a")
+    gpu = run_gpu_primfunc(kernel, inputs, outputs=("out",))
     np.testing.assert_array_equal(gpu["out"], inputs["seed"])
