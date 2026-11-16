@@ -5,7 +5,7 @@ import pytest
 
 from tests.numsim.runtime.test_tcgen05_block_tmem import block_tmem_case
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
-from tests.numsim.support.execution import run_checked
+from tests.numsim.support.execution import assert_rejected, run_checked
 
 SPARSE_NARROW_CASES = [
     (1, 64, False, 0, 1, False),
@@ -123,20 +123,16 @@ def test_sparse_narrow_layouts_and_codecs(case, tmp_path):
     np.testing.assert_array_equal(result.outputs["out"], expected)
 
 
-# Cover both sparse M shapes and existing shared/TMEM narrow codecs.
+# PTX Table 51 defines the f8f6f4 K bit only for dense K=64, and SM107 raises
+# an illegal instruction for sparse K=128 with every operand format.
 SPARSE_NARROW_K128_CASES = [
     (1, 128, False, 0, 1, False),
-    (1, 128, False, 1, 0, False, True, True),
-    (2, 256, True, 0, 1, False, False, True),
     (1, 64, False, 3, 4, False),
-    (1, 128, True, 5, 3, False),
-    (2, 128, True, 4, 5, False),
-    (2, 256, False, 5, 1, False),
+    (2, 256, True, 5, 1, False),
 ]
 
 
 @pytest.mark.parametrize("case", SPARSE_NARROW_K128_CASES)
-def test_sparse_narrow_k128(case, tmp_path):
-    kernel, args, expected = sparse_narrow_case(*case, packed_k=64)
-    result = run_checked(kernel, args, cache_dir=tmp_path)
-    np.testing.assert_array_equal(result.outputs["out"], expected)
+def test_sparse_narrow_k128_is_invalid(case, tmp_path):
+    kernel, args, _ = sparse_narrow_case(*case, packed_k=64)
+    assert_rejected(kernel, args, "raw f8f6f4 sparse K=128 is invalid", cache_dir=tmp_path)

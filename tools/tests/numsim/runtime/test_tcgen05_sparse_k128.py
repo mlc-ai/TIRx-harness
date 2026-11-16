@@ -1,17 +1,32 @@
-"""SM107 sparse MXF8 K128 extends payload and metadata, not the MMA lifecycle."""
+"""SM107 sparse MXF8 K128 extends payload and metadata, not the MMA lifecycle.
+
+SM107 hardware runs sparse K=128 only with a 6- or 4-bit B operand and raises an
+illegal instruction for E4M3/E5M2 B, whatever the A format, scale IDs or
+transposes; NumSim rejects those forms.
+"""
 
 import numpy as np
 import pytest
 
 from tests.numsim.runtime.test_tcgen05_block_tmem import block_tmem_case
 from tests.numsim.runtime.test_tcgen05_ti16 import ti16_kernel
-from tests.numsim.support.execution import run_checked
+from tests.numsim.support.execution import assert_rejected, run_checked
 
+# cta, tmem_a, A format, B format, transpose A, transpose B
 SPARSE_K128_CASES = [
-    (1, False, 0, 1, False, False),
     (1, True, 3, 4, False, False),
     (2, False, 5, 3, False, False),
     (2, True, 4, 5, False, False),
+    (1, False, 0, 3, False, False),
+    (1, False, 1, 3, True, False),
+    (2, False, 0, 3, False, False),
+    (2, True, 1, 4, False, False),
+    (1, True, 5, 3, False, False),
+    (2, True, 5, 4, False, False),
+]
+# 8-bit B traps on SM107, including MN-major B (which requires 8-bit B).
+SPARSE_K128_8BIT_B_CASES = [
+    (1, False, 0, 1, False, False),
     (1, False, 1, 0, True, True),
     (2, True, 3, 1, False, True),
 ]
@@ -69,3 +84,11 @@ def test_sparse_k128_packing_scales_and_transpose(case, tmp_path):
     kernel, args, expected = sparse_k128_case(*case)
     result = run_checked(kernel, args, cache_dir=tmp_path)
     np.testing.assert_array_equal(result.outputs["out"].view(np.float32), expected)
+
+
+@pytest.mark.parametrize("case", SPARSE_K128_8BIT_B_CASES)
+def test_sparse_k128_rejects_8bit_b(case, tmp_path):
+    kernel, args, _ = sparse_k128_case(*case)
+    assert_rejected(
+        kernel, args, "sparse K=128 requires an E2M3, E3M2 or E2M1 B operand", cache_dir=tmp_path
+    )

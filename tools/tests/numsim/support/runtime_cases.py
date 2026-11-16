@@ -184,6 +184,7 @@ RUNTIME_CASES = (
         tests=(
             "runtime/test_tcgen05_sparse_block.py::test_sparse_block_scales_and_metadata",
             "runtime/test_tcgen05_sparse_k128.py::test_sparse_k128_packing_scales_and_transpose",
+            "runtime/test_tcgen05_sparse_k128.py::test_sparse_k128_rejects_8bit_b",
         ),
     ),
     RuntimeCase(
@@ -212,7 +213,7 @@ RUNTIME_CASES = (
             "runtime/test_tcgen05_tf32.py::test_tf32_sparse_metadata",
             "runtime/test_tcgen05_sparse_b16.py::test_sparse_b16_layouts_and_codecs",
             "runtime/test_tcgen05_sparse_narrow.py::test_sparse_narrow_layouts_and_codecs",
-            "runtime/test_tcgen05_sparse_narrow.py::test_sparse_narrow_k128",
+            "runtime/test_tcgen05_sparse_narrow.py::test_sparse_narrow_k128_is_invalid",
         ),
     ),
     RuntimeCase(
