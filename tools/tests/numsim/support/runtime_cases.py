@@ -869,6 +869,12 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
+        target_ids=("call:tirx.ptx.fence_alias_sync_restrict_read",),
+        tests=(
+            "runtime/test_fence_alias_read_release.py::test_alias_read_release_fence_has_no_numerical_effect",
+        ),
+    ),
+    RuntimeCase(
         target_ids=("call:tirx.ptx.cp_async_bulk_wait_group_proxy_async",),
         tests=(
             "runtime/test_bulk_wait_group_proxy_async.py::test_restricted_wait_completes_the_bulk_group",

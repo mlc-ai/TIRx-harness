@@ -3453,7 +3453,10 @@ impl crate::engine_mode::EngineModeImpl for SyncCheckMode {
     fn observes_analysis_gap(_state: &Self::LaunchState, kind: AnalysisGapKind) -> bool {
         !matches!(
             kind,
-            AnalysisGapKind::AtomicLaneSerialization | AnalysisGapKind::TcgenMma
+            AnalysisGapKind::AtomicLaneSerialization
+                | AnalysisGapKind::TcgenMma
+                // Synccheck consumes no generic memory fence ordering.
+                | AnalysisGapKind::ReadOnlyReleaseFence
         )
     }
 
