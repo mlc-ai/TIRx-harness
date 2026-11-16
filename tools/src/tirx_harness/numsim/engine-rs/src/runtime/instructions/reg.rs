@@ -154,6 +154,8 @@ pub mod variant {
     scalar_markers!(
         F16, F16Ftz, F16x2, F16x2Ftz, Bf16, Bf16x2, F32, F32Ftz, F32Rn, F32Rm, F32RnFtz, F64
     );
+    /// `sin`/`cos` `.2pi.ftz.f32`: the source is in cycles (1.0 is one turn).
+    scalar_markers!(F32FtzCycles);
     scalar_markers!(Eq, Ne, Lt, Le, Gt, Ge, Equ, Neu, Ltu, Leu, Gtu, Geu, Num, Nan);
     scalar_markers!(Unmodified, Rn, Rz, Rm, Rp, Rmi, Rs);
     scalar_markers!(Approx, Full);
@@ -2488,6 +2490,12 @@ unary_variant!(cos_spec, variant::F32, f32, |value: f32| {
 });
 unary_variant!(cos_spec, variant::F32Ftz, f32, |value: f32| {
     crate::scalar::ptx_cos_approx_f32(value, true)
+});
+unary_variant!(sin_spec, variant::F32FtzCycles, f32, |value: f32| {
+    crate::scalar::ptx_sin_cycles_approx_ftz_f32(value)
+});
+unary_variant!(cos_spec, variant::F32FtzCycles, f32, |value: f32| {
+    crate::scalar::ptx_cos_cycles_approx_ftz_f32(value)
 });
 
 register_variant! {
