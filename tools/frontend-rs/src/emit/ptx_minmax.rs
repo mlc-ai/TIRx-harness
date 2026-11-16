@@ -32,7 +32,10 @@ pub fn resolve_ptx_minmax(decoded: &DecodedPtx) -> AResult<RegisterCall> {
     for name in source_names {
         sources.push(decoded.scalar_operand(name)?);
     }
-    let instruction = if op_name == "tirx.ptx.max" || op_name == "tirx.ptx.max3" {
+    let instruction = if matches!(
+        op_name,
+        "tirx.ptx.max" | "tirx.ptx.max3" | "tirx.ptx.max_int8x4"
+    ) {
         "max"
     } else {
         "min"
@@ -83,10 +86,10 @@ pub fn resolve_ptx_minmax(decoded: &DecodedPtx) -> AResult<RegisterCall> {
         rust_type = "f64";
     } else if matches!(
         ptx_type,
-        "s16" | "s32" | "s64" | "u16" | "u32" | "u64" | "s16x2" | "u16x2"
+        "s16" | "s32" | "s64" | "u16" | "u32" | "u64" | "s16x2" | "u16x2" | "s8x4" | "u8x4"
     ) {
         let signed = ptx_type.starts_with('s');
-        let packed = ptx_type.ends_with("x2");
+        let packed = ptx_type.ends_with("x2") || ptx_type.ends_with("x4");
         rust_type = match (packed, signed, &ptx_type[1..]) {
             (true, _, _) => "u32",
             (false, true, "16") => "i16",

@@ -8,13 +8,8 @@ from tvm_tirx import ir
 
 _DEVICE_PREFIXES = ("tirx.cuda.", "tirx.ptx.")
 
-# Register-only forms with explicitly unsupported semantics: WGMMA and new PTX 9.5 forms.
+# Register-only forms with explicitly unsupported semantics: WGMMA.
 _INTENTIONAL_REGISTER_ONLY_PTX_REJECTIONS = {
-    "tirx.ptx.add_int_sm107f",
-    "tirx.ptx.max_int8x4",
-    "tirx.ptx.min_int8x4",
-    "tirx.ptx.neg_int_sm107f",
-    "tirx.ptx.sub_int_sm107f",
     "tirx.ptx.wgmma_b1_rs",
     "tirx.ptx.wgmma_b1_ss",
     "tirx.ptx.wgmma_int_rs",
