@@ -8,8 +8,13 @@ from tvm_tirx import ir
 
 _DEVICE_PREFIXES = ("tirx.cuda.", "tirx.ptx.")
 
-# These register-only forms require the unsupported WGMMA execution model.
+# Register-only forms with explicitly unsupported semantics: WGMMA and new PTX 9.5 forms.
 _INTENTIONAL_REGISTER_ONLY_PTX_REJECTIONS = {
+    "tirx.ptx.add_int_sm107f",
+    "tirx.ptx.max_int8x4",
+    "tirx.ptx.min_int8x4",
+    "tirx.ptx.neg_int_sm107f",
+    "tirx.ptx.sub_int_sm107f",
     "tirx.ptx.wgmma_b1_rs",
     "tirx.ptx.wgmma_b1_ss",
     "tirx.ptx.wgmma_int_rs",
@@ -73,7 +78,7 @@ def test_registry_retains_reviewed_ops_absent_from_target_table():
     assert set(schema["ptx_table_names"]) <= rebuilt
 
 
-def test_register_only_ptx_rejections_are_intentionally_nonlocal():
+def test_register_only_ptx_rejections_are_explicit():
     specs = {spec["ir_name"]: spec for spec in native_frontend.registry_ops()}
     register_only = {
         name
