@@ -1086,7 +1086,8 @@ impl RuntimeTensorMap {
                     "64B atomicity loads are invalid for U6 and padded FP4 TensorMaps",
                 ));
             }
-            // The independent SM100 load probe traps; store is GPU-validated.
+            // Independent load probes trap on SM100 and on SM107 (NVIDIA VR NVL72
+            // ES, 128B-swizzle tile at a 1024B-aligned base); store is GPU-validated.
             return Err(EngineError::analysis_incomplete(
                 "tma_64b_atomicity_load_unmodeled",
             ));
