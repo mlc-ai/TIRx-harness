@@ -765,7 +765,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.tcgen05_mma_ws_ti16_ts_mask", "raw_tcgen_mma", crate::emit::raw_tcgen::emit_mma).reason(TCGEN_MMA_WS_TI16),
     OpRow::new("tirx.ptx.tcgen05_mma_ws_ts", "raw_tcgen_mma", crate::emit::raw_tcgen::emit_mma).reason(TCGEN_MMA_DENSE),
     OpRow::new("tirx.ptx.tcgen05_relinquish_alloc_permit", "tcgen_control", crate::emit::tcgen05::emit).reason(tcgen_control_reason!()).suspends(true),
-    OpRow::new("tirx.ptx.tcgen05_shift", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.tcgen05_shift", "raw_tcgen_shift", crate::emit::raw_tcgen::emit_shift).reason("instruction predicates gate shift issue; each 32-lane TMEM partition moves lanes 1-31 of the eight 32-bit columns at the address down one lane in every target CTA, records those reads and writes as asynchronous TCGEN work completed by tcgen05.commit, and fails closed on a nonzero lane field or a column not a multiple of four"),
     OpRow::new("tirx.ptx.tcgen05_st", "raw_tcgen", crate::emit::raw_tcgen::emit_ldst).reason(TCGEN_TRANSFER),
     OpRow::new("tirx.ptx.tcgen05_st_split", "raw_tcgen", crate::emit::raw_tcgen::emit_ldst).reason(TCGEN_TRANSFER),
     OpRow::new("tirx.ptx.tcgen05_wait", "tcgen_control", crate::emit::tcgen05::emit).support("ordering_only").reason(tcgen_control_reason!("validates .sync.aligned full-warp participation before draining pending TCGEN work")).suspends(true),
