@@ -441,6 +441,19 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
+        target_ids=(
+            "call:tirx.ptx.add_int_sm107f",
+            "call:tirx.ptx.max_int8x4",
+            "call:tirx.ptx.min_int8x4",
+            "call:tirx.ptx.neg_int_sm107f",
+            "call:tirx.ptx.sub_int_sm107f",
+        ),
+        tests=(
+            "runtime/test_ptx_packed_int_sm107f.py::test_sm107_packed_integer_forms_match_lane_oracle",
+            "microtests/test_sm107_packed_int.py::test_sm107_packed_integer_forms_gpu",
+        ),
+    ),
+    RuntimeCase(
         target_ids=("call:tirx.ptx.clmad",),
         tests=("runtime/test_ptx_clmad.py::test_ptx_clmad_hi_and_lo_match_independent_gf2_oracle",),
     ),

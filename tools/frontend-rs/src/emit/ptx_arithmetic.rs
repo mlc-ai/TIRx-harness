@@ -33,6 +33,7 @@ fn instruction_of(op_name: &str) -> &'static str {
         "tirx.ptx.add"
         | "tirx.ptx.add_half"
         | "tirx.ptx.add_int"
+        | "tirx.ptx.add_int_sm107f"
         | "tirx.ptx.add_mixed_vec_up"
         | "tirx.ptx.add_mixed_vec_down_f16"
         | "tirx.ptx.add_mixed_vec_down_bf16" => "add",
@@ -45,6 +46,7 @@ fn instruction_of(op_name: &str) -> &'static str {
         | "tirx.ptx.mul_mixed_vec_f16_bf16" => "mul",
         "tirx.ptx.mad_int" | "tirx.ptx.mad_f" => "mad",
         "tirx.ptx.sub_int"
+        | "tirx.ptx.sub_int_sm107f"
         | "tirx.ptx.sub"
         | "tirx.ptx.sub_half"
         | "tirx.ptx.sub_mixed_vec_up"
@@ -325,7 +327,12 @@ pub fn resolve_ptx_arithmetic(decoded: &DecodedPtx) -> AResult<RegisterCall> {
         result_rust_type = ptx_type.to_owned();
     } else if matches!(
         op_name,
-        "tirx.ptx.add_int" | "tirx.ptx.sub_int" | "tirx.ptx.mul_int" | "tirx.ptx.mad_int"
+        "tirx.ptx.add_int"
+            | "tirx.ptx.add_int_sm107f"
+            | "tirx.ptx.sub_int"
+            | "tirx.ptx.sub_int_sm107f"
+            | "tirx.ptx.mul_int"
+            | "tirx.ptx.mad_int"
     ) {
         // The decoder checks the canonical table's type/modifier domain.
         let marker = required_marker(PTX_TYPE_MARKERS, ptx_type)?;
@@ -339,7 +346,8 @@ pub fn resolve_ptx_arithmetic(decoded: &DecodedPtx) -> AResult<RegisterCall> {
             );
         }
         variant = integer_variant;
-        let packed = ptx_type.ends_with("x2");
+        // Packed 16x2/8x4 lanes travel in one `.b32` carrier.
+        let packed = ptx_type.ends_with("x2") || ptx_type.ends_with("x4");
         let signed = ptx_type.starts_with('s') && !packed;
         let width = if packed { "32" } else { &ptx_type[1..] };
         expected_destination = format!("{}{width}", if signed { "int" } else { "uint" });

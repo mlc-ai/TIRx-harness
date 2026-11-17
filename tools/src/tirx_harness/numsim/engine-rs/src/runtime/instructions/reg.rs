@@ -147,7 +147,7 @@ pub mod variant {
     }
 
     scalar_markers!(I8, I16, I32, I64, U8, U16, U32, U64, B16, B32, B64, B128, Pred);
-    scalar_markers!(I16x2, U16x2);
+    scalar_markers!(I16x2, U16x2, I8x4, U8x4);
     scalar_markers!(B16x4, B32x4, B64x2);
     scalar_markers!(PolicyRange, PolicyFraction, PolicyConvert);
     scalar_markers!(ClmadHi, ClmadLo, Hi, Lo);
@@ -555,6 +555,53 @@ fn add_16x2(lhs: u32, rhs: u32) -> u32 {
 }
 binary_variant!(add_spec, variant::I16x2, u32, add_16x2);
 binary_variant!(add_spec, variant::U16x2, u32, add_16x2);
+
+/// Apply `operation` to each 16-bit lane of two `.b32` carriers independently.
+fn lanes_16x2(lhs: u32, rhs: u32, operation: impl Fn(u16, u16) -> u16) -> u32 {
+    u32::from(operation(lhs as u16, rhs as u16))
+        | (u32::from(operation((lhs >> 16) as u16, (rhs >> 16) as u16)) << 16)
+}
+
+/// Apply `operation` to each 8-bit lane of two `.b32` carriers independently.
+fn lanes_8x4(lhs: u32, rhs: u32, operation: impl Fn(u8, u8) -> u8) -> u32 {
+    let (lhs, rhs) = (lhs.to_le_bytes(), rhs.to_le_bytes());
+    u32::from_le_bytes(std::array::from_fn(|lane| operation(lhs[lane], rhs[lane])))
+}
+
+// sm_107f/sm_120f packed forms (PTX ISA 9.2). Plain forms wrap per lane, so
+// signed and unsigned share bits; `.sat` clamps each lane to its own type's
+// MININT..MAXINT, and `.relu` clamps a negative selected lane to zero.
+binary_variant!(add_spec, variant::I8x4, u32, |a, b| lanes_8x4(a, b, u8::wrapping_add));
+binary_variant!(add_spec, variant::U8x4, u32, |a, b| lanes_8x4(a, b, u8::wrapping_add));
+binary_variant!(sub_spec, variant::I8x4, u32, |a, b| lanes_8x4(a, b, u8::wrapping_sub));
+binary_variant!(sub_spec, variant::U8x4, u32, |a, b| lanes_8x4(a, b, u8::wrapping_sub));
+binary_variant!(add_spec, variant::IntegerArithmetic<variant::U32, variant::Lo, variant::Sat>,
+    u32, u32::saturating_add);
+binary_variant!(add_spec, variant::IntegerArithmetic<variant::U16x2, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_16x2(a, b, u16::saturating_add));
+binary_variant!(add_spec, variant::IntegerArithmetic<variant::I16x2, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_16x2(a, b, |x, y| (x as i16).saturating_add(y as i16) as u16));
+binary_variant!(add_spec, variant::IntegerArithmetic<variant::U8x4, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_8x4(a, b, u8::saturating_add));
+binary_variant!(add_spec, variant::IntegerArithmetic<variant::I8x4, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_8x4(a, b, |x, y| (x as i8).saturating_add(y as i8) as u8));
+binary_variant!(sub_spec, variant::IntegerArithmetic<variant::U8x4, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_8x4(a, b, u8::saturating_sub));
+binary_variant!(sub_spec, variant::IntegerArithmetic<variant::I8x4, variant::Lo, variant::Sat>,
+    u32, |a, b| lanes_8x4(a, b, |x, y| (x as i8).saturating_sub(y as i8) as u8));
+// `d[i] = -iA[i]` stored into an 8-bit lane: -(-128) wraps to -128, as neg.s32 does.
+unary_variant!(neg_spec, variant::I8x4, u32, |value| lanes_8x4(value, 0, |x, _| (x as i8)
+    .wrapping_neg() as u8));
+binary_variant!(min_spec, variant::U8x4, u32, |a, b| lanes_8x4(a, b, u8::min));
+binary_variant!(max_spec, variant::U8x4, u32, |a, b| lanes_8x4(a, b, u8::max));
+binary_variant!(min_spec, variant::I8x4, u32, |a, b| lanes_8x4(a, b, |x, y| (x as i8)
+    .min(y as i8) as u8));
+binary_variant!(max_spec, variant::I8x4, u32, |a, b| lanes_8x4(a, b, |x, y| (x as i8)
+    .max(y as i8) as u8));
+binary_variant!(min_spec, variant::IntegerMinMax<variant::I8x4, variant::Relu>, u32,
+    |a, b| lanes_8x4(a, b, |x, y| (x as i8).min(y as i8).max(0) as u8));
+binary_variant!(max_spec, variant::IntegerMinMax<variant::I8x4, variant::Relu>, u32,
+    |a, b| lanes_8x4(a, b, |x, y| (x as i8).max(y as i8).max(0) as u8));
 
 fn minmax_16x2<const SIGNED: bool, const RELU: bool, const MAX: bool>(a: u32, b: u32) -> u32 {
     let mut result = 0;
@@ -2896,6 +2943,8 @@ macro_rules! register_types {
 register_types!(
     variant::I16x2 => u32,
     variant::U16x2 => u32,
+    variant::I8x4 => u32,
+    variant::U8x4 => u32,
     variant::I8 => i8,
     variant::I16 => i16,
     variant::I32 => i32,

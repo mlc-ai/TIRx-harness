@@ -41,7 +41,17 @@ pub fn resolve_ptx_integer_arithmetic(decoded: &DecodedPtx) -> AResult<RegisterC
     let variant: String;
     let argument_rust_types: Vec<String>;
     let result_rust_type: String;
-    if matches!(
+    if op_name == "tirx.ptx.neg_int_sm107f" {
+        // `neg.s8x4`: four signed byte lanes in one `.b32` carrier.
+        let ptx_type = decoded.modifier("type")?;
+        if ptx_type != "s8x4" {
+            return unsupported(format!("unsupported PTX packed integer type {:?}", ptx_type));
+        }
+        instruction = "neg";
+        variant = "v2::reg::variant::I8x4".to_owned();
+        argument_rust_types = vec!["u32".to_owned(); operands.sources.len()];
+        result_rust_type = "u32".to_owned();
+    } else if matches!(
         op_name,
         "tirx.ptx.div" | "tirx.ptx.rem" | "tirx.ptx.sad" | "tirx.ptx.neg_int"
     ) {

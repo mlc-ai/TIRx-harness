@@ -70,6 +70,7 @@ const PREDICATED_UNARY: &str = "existing rounded or hardware-approximate numeric
 const APPROXIMATE_UNARY: &str = "all table spellings and instruction predicates are accepted; half ex2 applies each format's subnormal contract independently per component; lg2 supports f32 with/without FTZ; rsqrt.f64 preserves full inputs without FTZ, while rsqrt.approx.ftz.f64 shares reciprocal's 1.11.20 upper-word, canonical-NaN and FTZ contract; approximate results are stable representatives, not hardware-identical bits";
 const SIGN_OPERATIONS: &str = "f32/f64/f16/bf16 and packed-half sign operations honor legal FTZ forms and instruction predicates; abs.f64 passes NaNs through unchanged; otherwise ISA-unspecified NaNs use a stable sign-only representative";
 const MINMAX_VARIANTS: &str = "table min/max variants: integer and packed-16 selection/relu, FP32 two/three-source selection, scalar/packed half and FP64; legal abs, FTZ, NaN and xorsign.abs modifiers; unspecified NaN payloads use deterministic representatives; instruction predication supported";
+const PACKED_INTEGER_LANES: &str = "sm_107f/sm_120f packed integer forms: each .u8x4/.s8x4 (and .u16x2/.s16x2) lane of the .b32 carrier is independent; plain add/sub/neg wrap per lane (neg of -128 stays -128), .sat clamps each lane (and add.sat.u32) to its type's MININT..MAXINT, min/max select per lane with signedness, .relu clamps negative s8x4 lanes to 0; instruction predicates gate operand reads and destination writes";
 const PREDICATED_REGISTER_OUTPUTS: &str = "instruction predicates gate source evaluation and all destinations with one snapshotted mask; preserve_dst retains inactive data and Boolean truth for predicate outputs, otherwise inactive results use a zero representative";
 const UNIFORM_LOAD: &str = "scalar/v2/v4 global loads with uniform issuing-lane addresses and natural alignment; uses ordinary load footprints under the PTX read-only-data precondition; instruction predicates are snapshotted before result writes and keep preserves inactive destinations; no separate cache or launch-wide immutability checks; TVM-table wide and bit-compatible carriers use PTX-sized memory accesses; stores chop low bits and loads sign-extend signed types or zero-extend other types before reinterpreting the destination, including exact half NaN payloads";
 const MBARRIER_DROP: &str = "arrive_drop lowers future-phase expected arrivals and consumes the current pending count; reuses arrival state, release ordering, expect_tx and noComplete checks; state-result predicates gate operand evaluation, arrival and state writeback with one lane mask; release arrivals publish ordinary memory; relaxed arrivals preserve counter/phase and TCGEN thread-fence execution ordering without publishing ordinary memory; noComplete requires release semantics";
@@ -266,7 +267,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.add", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(FLOAT_ARITHMETIC),
     OpRow::new("tirx.ptx.add_half", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).support("deterministic_representative").reason(HALF_ARITHMETIC),
     OpRow::new("tirx.ptx.add_int", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(INTEGER_ARITHMETIC),
-    OpRow::new("tirx.ptx.add_int_sm107f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.add_int_sm107f", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(PACKED_INTEGER_LANES),
     OpRow::new("tirx.ptx.add_mixed_vec_down_bf16", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
     OpRow::new("tirx.ptx.add_mixed_vec_down_f16", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
     OpRow::new("tirx.ptx.add_mixed_vec_up", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
@@ -540,7 +541,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.match_any_sync", "warp_collective", crate::emit::ptx_warp::emit).reason(WARP_PREDICATES),
     OpRow::new("tirx.ptx.max", "register_minmax", crate::emit::ptx_minmax::emit).support("deterministic_representative").reason(MINMAX_VARIANTS),
     OpRow::new("tirx.ptx.max3", "register_minmax", crate::emit::ptx_minmax::emit).support("deterministic_representative").reason(MINMAX_VARIANTS),
-    OpRow::new("tirx.ptx.max_int8x4", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.max_int8x4", "register_minmax", crate::emit::ptx_minmax::emit).reason(PACKED_INTEGER_LANES),
     OpRow::new("tirx.ptx.mbarrier_arrive", "synchronization", crate::emit::sync::emit).reason(MBARRIER_ARRIVAL).suspends(true),
     OpRow::new("tirx.ptx.mbarrier_arrive_count_state", "synchronization", crate::emit::sync::emit).reason(MBARRIER_STATE_ARRIVAL).suspends(true),
     OpRow::new("tirx.ptx.mbarrier_arrive_drop", "synchronization", crate::emit::sync::emit).reason(MBARRIER_DROP).suspends(true),
@@ -591,7 +592,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.mbarrier_try_wait_report_value_hint", "synchronization", crate::emit::sync::emit).reason(MBARRIER_REPORT_QUERY).suspends(true),
     OpRow::new("tirx.ptx.min", "register_minmax", crate::emit::ptx_minmax::emit).support("deterministic_representative").reason(MINMAX_VARIANTS),
     OpRow::new("tirx.ptx.min3", "register_minmax", crate::emit::ptx_minmax::emit).support("deterministic_representative").reason(MINMAX_VARIANTS),
-    OpRow::new("tirx.ptx.min_int8x4", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.min_int8x4", "register_minmax", crate::emit::ptx_minmax::emit).reason(PACKED_INTEGER_LANES),
     OpRow::new("tirx.ptx.mma", "warp_matrix_instruction", crate::emit::matrix::emit).reason(MMA_PREDICATES),
     OpRow::new("tirx.ptx.mma_f16acc", "warp_matrix_instruction", crate::emit::matrix::emit).reason(MMA_PREDICATES),
     OpRow::new("tirx.ptx.mma_f16c_f32d", "warp_matrix_instruction", crate::emit::matrix::emit).reason(MMA_PREDICATES),
@@ -642,7 +643,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.neg", "register_unary", crate::emit::ptx_unary::emit).support("deterministic_representative").reason(SIGN_OPERATIONS),
     OpRow::new("tirx.ptx.neg_half", "register_unary", crate::emit::ptx_unary::emit).support("deterministic_representative").reason(SIGN_OPERATIONS),
     OpRow::new("tirx.ptx.neg_int", "register_integer_arithmetic", crate::emit::ptx_integer_arithmetic::emit).reason(PREDICATED_REGISTER_OUTPUTS),
-    OpRow::new("tirx.ptx.neg_int_sm107f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.neg_int_sm107f", "register_integer_arithmetic", crate::emit::ptx_integer_arithmetic::emit).reason(PACKED_INTEGER_LANES),
     OpRow::new("tirx.ptx.not", "register_bit_manipulation", crate::emit::ptx_bitops::emit).reason(BIT_MANIPULATION_PREDICATES),
     OpRow::new("tirx.ptx.or", "register_bit_manipulation", crate::emit::ptx_bitops::emit).reason(BIT_MANIPULATION_PREDICATES),
     OpRow::new("tirx.ptx.popc", "register_bit_manipulation", crate::emit::ptx_bitops::emit).reason(BIT_MANIPULATION_PREDICATES),
@@ -702,7 +703,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.ptx.sub", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(FLOAT_ARITHMETIC),
     OpRow::new("tirx.ptx.sub_half", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).support("deterministic_representative").reason(HALF_ARITHMETIC),
     OpRow::new("tirx.ptx.sub_int", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(INTEGER_ARITHMETIC),
-    OpRow::new("tirx.ptx.sub_int_sm107f", "unreviewed_target_ptx", crate::emit::calls::rejected).support("rejected").reason(UNREVIEWED_TARGET_PTX_REASON),
+    OpRow::new("tirx.ptx.sub_int_sm107f", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit).reason(PACKED_INTEGER_LANES),
     OpRow::new("tirx.ptx.sub_mixed_vec_down_bf16", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
     OpRow::new("tirx.ptx.sub_mixed_vec_down_f16", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
     OpRow::new("tirx.ptx.sub_mixed_vec_up", "destination_passing_arithmetic", crate::emit::ptx_arithmetic::emit),
