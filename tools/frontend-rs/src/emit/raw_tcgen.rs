@@ -33,6 +33,7 @@ pub struct State {
 /// The engine functions (below `v2::`) the raw TCGEN lowerings call.
 pub const CP: &str = "tcgen05::cp";
 pub const MMA: &str = "tcgen05::mma";
+pub const SHIFT: &str = "tcgen05::shift";
 
 fn ldst_shape(shape: &str) -> Option<(&'static str, i64)> {
     Some(match shape {
@@ -431,6 +432,41 @@ pub fn decoded_tcgen_cp_parts(decoded: &DecodedPtx) -> AResult<CpParts> {
 }
 
 /// The parsed parts.
+
+pub struct ShiftParts {
+    pub address: ObjectRef,
+    pub cta_group: i64,
+    pub predicate: Option<ObjectRef>,
+}
+
+pub fn decoded_tcgen_shift_parts(decoded: &DecodedPtx) -> AResult<ShiftParts> {
+    decoded.require_void()?;
+    let op_name = decoded.op_name.as_str();
+    let action = decoded.modifier("action")?;
+    let direction = decoded.modifier("direction")?;
+    if action != "shift" || direction != "down" {
+        return unsupported(format!(
+            "{op_name} requires action='shift' and direction='down', got {:?}",
+            [action, direction]
+        ));
+    }
+    let cta_group = decoded.cta_group(None)?;
+    let address = decoded.scalar_operand("taddr")?;
+    require_operand_dtype(decoded, "taddr", &address, &["int32", "uint32"])?;
+    if let Some(predicate) = &decoded.predicate {
+        require_operand_dtype(
+            decoded,
+            "predicate",
+            predicate,
+            crate::dtypes::predicate_dtypes(),
+        )?;
+    }
+    Ok(ShiftParts {
+        address,
+        cta_group,
+        predicate: decoded.predicate.clone(),
+    })
+}
 
 // ----------------------------------------------------------------------
 // tcgen05.mma
@@ -2004,6 +2040,40 @@ impl<'a> Emitter<'a> {
         )
     }
 
+    /// `emit_ptx_tcgen_shift`.
+    pub fn emit_ptx_tcgen_shift(
+        &mut self,
+        decoded: &DecodedPtx,
+        parts: &ShiftParts,
+        source_op_id: i64,
+    ) -> AResult<()> {
+        let op_name = &decoded.op_name;
+        let region = self.open_shadow_predicated_region(
+            parts.predicate.as_ref(),
+            "raw_tcgen_shift_issue",
+            &format!("{op_name} predicate must lower to bool or integer"),
+        )?;
+        let address = self.raw_tcgen_v2_register(
+            &parts.address,
+            "u32",
+            &format!("{op_name} address"),
+            source_op_id,
+        )?;
+        let (anchor, access, logical_name) = self.tmem_anchor()?;
+        self.emit_raw_tcgen_stateful(
+            SHIFT,
+            source_op_id,
+            format!(
+                "({}, {address})",
+                named_buffer("v2::Tmem", &anchor, &logical_name)
+            ),
+            &format!("v2::tcgen05::variant::Shift<{}, {access}>", parts.cta_group),
+            region.context.as_deref(),
+        );
+        self.close_predicated_region(region);
+        Ok(())
+    }
+
     /// Replace the artifact layout
     /// marker using kernel-static architecture.
     fn specialize_f8f6f4_descriptor_layout(
@@ -2109,6 +2179,14 @@ pub fn emit_copy(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustVa
     let parts = decoded_tcgen_cp_parts(decoded)?;
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_ptx_tcgen_cp(decoded, &parts, source_op_id)?;
+    Ok(None)
+}
+
+pub fn emit_shift(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    let decoded = call.table()?;
+    let parts = decoded_tcgen_shift_parts(decoded)?;
+    let source_op_id = call.source_op_id(emitter)?;
+    emitter.emit_ptx_tcgen_shift(decoded, &parts, source_op_id)?;
     Ok(None)
 }
 

@@ -377,7 +377,6 @@ impl AnalysisGapDomain {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum AnalysisGapKind {
     TcgenMma,
-    TcgenShift,
     ClusterBarrierUnaligned,
     AtomicLaneSerialization,
 }
@@ -385,7 +384,7 @@ pub(crate) enum AnalysisGapKind {
 impl AnalysisGapKind {
     pub(crate) const fn domain(self) -> AnalysisGapDomain {
         match self {
-            Self::TcgenMma | Self::TcgenShift => AnalysisGapDomain::Tcgen,
+            Self::TcgenMma => AnalysisGapDomain::Tcgen,
             Self::ClusterBarrierUnaligned => AnalysisGapDomain::ClusterBarrier,
             Self::AtomicLaneSerialization => AnalysisGapDomain::Atomic,
         }
@@ -394,7 +393,6 @@ impl AnalysisGapKind {
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::TcgenMma => "tcgen05.mma",
-            Self::TcgenShift => "tcgen05.shift",
             Self::ClusterBarrierUnaligned => "cluster_barrier_unaligned_unmodeled",
             Self::AtomicLaneSerialization => "atomic_lane_serialization_unmodeled",
         }

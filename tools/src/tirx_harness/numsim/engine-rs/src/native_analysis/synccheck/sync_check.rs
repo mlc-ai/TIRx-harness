@@ -3453,9 +3453,7 @@ impl crate::engine_mode::EngineModeImpl for SyncCheckMode {
     fn observes_analysis_gap(_state: &Self::LaunchState, kind: AnalysisGapKind) -> bool {
         !matches!(
             kind,
-            AnalysisGapKind::AtomicLaneSerialization
-                | AnalysisGapKind::TcgenMma
-                | AnalysisGapKind::TcgenShift
+            AnalysisGapKind::AtomicLaneSerialization | AnalysisGapKind::TcgenMma
         )
     }
 
@@ -4767,13 +4765,12 @@ mod tests {
     #[test]
     fn numeric_only_async_gaps_are_outside_synccheck_scope() {
         let state = SyncCheckLaunchState::new();
-        for kind in [AnalysisGapKind::TcgenMma, AnalysisGapKind::TcgenShift] {
-            assert!(
-                !<SyncCheckMode as crate::engine_mode::EngineModeImpl>::observes_analysis_gap(
-                    &state, kind
-                )
-            );
-        }
+        assert!(
+            !<SyncCheckMode as crate::engine_mode::EngineModeImpl>::observes_analysis_gap(
+                &state,
+                AnalysisGapKind::TcgenMma
+            )
+        );
     }
 
     #[test]

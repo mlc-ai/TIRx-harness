@@ -1565,6 +1565,14 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
+        target_ids=("call:tirx.ptx.tcgen05_shift",),
+        tests=(
+            "runtime/test_tcgen05_shift.py::test_tcgen05_shift_moves_each_partition_down_one_lane",
+            "runtime/test_tcgen05_shift.py::test_tcgen05_shift_predicate_gates_issue",
+            "runtime/test_tcgen05_shift.py::test_tcgen05_shift_ignores_aligned_address_lane",
+        ),
+    ),
+    RuntimeCase(
         target_ids=(
             "call:tirx.ptx.tcgen05_alloc",
             "call:tirx.ptx.tcgen05_alloc_exclusive",

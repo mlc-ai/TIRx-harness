@@ -121,7 +121,7 @@ def test_target_parser_rejects_removed_tcgen05_families(source: str, message: st
         _parse(source)
 
 
-def test_tcgen05_shift_parses_but_remains_explicitly_unsupported():
+def test_tcgen05_shift_parses_and_is_supported():
     from tirx_harness.numsim.transpiler.frontend import analyze
 
     func = _parse(
@@ -135,7 +135,7 @@ def kernel():
     decoded = decode_ptx_call(_call(func, "tirx.ptx.tcgen05_shift"))
     assert decoded.modifier("direction") == "down"
     spec = analyze(func)
-    assert any("tcgen05_shift" in item for item in spec.unsupported)
+    assert not any("tcgen05_shift" in item for item in spec.unsupported), spec.unsupported
 
 
 def test_target_parser_rejects_tensormap_prefetch_in_global_space():

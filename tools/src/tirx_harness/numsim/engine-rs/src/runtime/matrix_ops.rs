@@ -4,6 +4,7 @@ use crate::{
     TcgenLifecycleHub, TmemAccessMode, WarpContext, WarpValue, FLOAT8_E5M2,
 };
 
+use super::tcgen_ops::RawTcgenTmemAccess;
 use super::{write_runtime_bytes, PhysicalPtr, RuntimeBuffer};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1409,6 +1410,76 @@ fn tmem_full_view(
         .map_err(EngineError::from)
 }
 
+/// Base column and target CTAs of one shift (`tcgen05.shift` or the A shift
+/// of `tcgen05.mma.ashift`). PTX requires the address lane to be 32-aligned;
+/// the shift itself moves every 32-lane partition of the TMEM allocation
+/// whichever aligned lane the address names (measured on SM100 and SM107).
+pub(crate) fn raw_tcgen05_shift_targets(
+    context: &WarpContext,
+    address: u32,
+    cta_group: usize,
+) -> Result<(usize, Vec<usize>), EngineError> {
+    let base_row = ((address >> 16) & 0xffff) as usize;
+    let base_col = (address & 0xffff) as usize;
+    if base_row % 32 != 0 || base_row >= 128 {
+        return Err(EngineError::message(
+            "tcgen05.shift row address must name one aligned warp",
+        ));
+    }
+    let pair_base = context.cta_id_in_cluster() & !1_usize;
+    let targets: Vec<usize> = if cta_group == 1 {
+        vec![context.cta_id_in_cluster()]
+    } else if cta_group == 2 {
+        if pair_base + 1 >= context.topology().ctas_per_cluster() {
+            return Err(EngineError::message(
+                "tcgen05.shift cta_group::2 has no paired CTA",
+            ));
+        }
+        vec![pair_base, pair_base + 1]
+    } else {
+        return Err(EngineError::message(
+            "tcgen05.shift cta_group must be 1 or 2",
+        ));
+    };
+    Ok((base_col, targets))
+}
+
+/// TMEM reads and writes of one standalone `tcgen05.shift`: in each 32-lane
+/// partition, lanes 1..=31 are read and lanes 0..=30 written, over `COLUMNS`
+/// columns of every target CTA.
+pub(crate) fn raw_tcgen05_shift_footprints<const COLUMNS: usize>(
+    context: &WarpContext,
+    address: u32,
+    cta_group: usize,
+    issuing_lane: usize,
+) -> Result<(Vec<RawTcgenTmemAccess>, Vec<RawTcgenTmemAccess>), EngineError> {
+    let (base_col, targets) = raw_tcgen05_shift_targets(context, address, cta_group)?;
+    let mut reads = Vec::with_capacity(targets.len() * 124 * COLUMNS);
+    let mut writes = Vec::with_capacity(targets.len() * 124 * COLUMNS);
+    for target in targets {
+        for lane in 0..128_i64 {
+            for column in base_col..base_col + COLUMNS {
+                let access = (
+                    issuing_lane,
+                    issuing_lane,
+                    Some(target),
+                    lane,
+                    0,
+                    column as i64,
+                    4,
+                );
+                if lane % 32 != 0 {
+                    reads.push(access);
+                }
+                if lane % 32 != 31 {
+                    writes.push(access);
+                }
+            }
+        }
+    }
+    Ok((reads, writes))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn raw_tcgen05_shift<const COLUMNS: usize>(
     physical: &PhysicalMemory,
@@ -1425,23 +1496,7 @@ pub fn raw_tcgen05_shift<const COLUMNS: usize>(
             "tcgen05.shift requires one issuing lane",
         ));
     }
-    let base_row = ((address >> 16) & 0xffff) as usize;
-    let base_col = (address & 0xffff) as usize;
-    if base_row % 32 != 0 || base_row >= 128 {
-        return Err(EngineError::message(
-            "tcgen05.shift row address must name one aligned warp",
-        ));
-    }
-    let pair_base = context.cta_id_in_cluster() & !1_usize;
-    let targets: Vec<usize> = if cta_group == 1 {
-        vec![context.cta_id_in_cluster()]
-    } else if cta_group == 2 {
-        vec![pair_base, pair_base + 1]
-    } else {
-        return Err(EngineError::message(
-            "tcgen05.shift cta_group must be 1 or 2",
-        ));
-    };
+    let (base_col, targets) = raw_tcgen05_shift_targets(context, address, cta_group)?;
     for target in targets {
         lifecycle.validate_access_range_at_cta(*context, target, base_col, COLUMNS, access_mode)?;
         let view = tmem_full_view(physical, context, anchor, target)?;

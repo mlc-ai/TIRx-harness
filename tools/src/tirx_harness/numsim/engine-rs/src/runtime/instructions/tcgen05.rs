@@ -8,7 +8,7 @@ use super::{
     begin, finish, Address, BufferHandle, DescriptorDomain, EngineError, ExecCtx, Register, Shared,
     SiteId, Tmem, WarpHandle, R,
 };
-use crate::runtime::matrix_ops::raw_tcgen05_shift;
+use crate::runtime::matrix_ops::{raw_tcgen05_shift, raw_tcgen05_shift_footprints};
 use crate::runtime::tcgen_ops::{
     raw_tcgen05_cp, raw_tcgen05_cp_footprints, raw_tcgen05_cta1_dense_tmem_layout,
     raw_tcgen05_dense_f32_tmem_footprints, raw_tcgen05_f8_shared_footprints,
@@ -3954,22 +3954,52 @@ fn shift_entry(
     let physical = engine(warp).kernel().physical().clone();
     let lifecycle = engine(warp).kernel().services().tcgen();
     let address = address[lane];
-    // The instruction participates in TCGEN ordering, but its in-place TMEM
-    // read/write footprint is not yet exposed to Racecheck. Keep the ordering
-    // token while failing closed if a checked kernel actually executes shift.
-    let operation = begin_raw_gap(
-        warp,
-        issue_context,
-        site,
-        crate::AnalysisGapKind::TcgenShift,
-        cta_group as u32,
-    )?;
+    // PTX gives no column alignment, but SM107 hardware traps with a
+    // misaligned address unless the column is a multiple of four. The lane
+    // field only has to be 32-aligned: SM107 shifts all four lane partitions
+    // for every aligned lane, as the shift itself models.
+    if address & 3 != 0 {
+        let operation = engine(warp).begin_current_operation(
+            numeric_context,
+            crate::StaticOpId::new(site.get()),
+            OperationKind::TcgenWork,
+        )?;
+        return Err(crate::EngineError::message(format!(
+            "tcgen05.shift column {} is misaligned: SM107 hardware requires a multiple of 4",
+            address & 0xffff
+        ))
+        .with_operation_context(&operation)
+        .into());
+    }
+    let tmem_anchor = raw_ldst_footprint_anchor(anchor.inner(), 4)?;
+    let tmem_logical_buffer = anchor
+        .logical_buffer()
+        .unwrap_or("raw_tcgen05_tmem")
+        .to_owned();
+    let operation = begin(warp, issue_context, site, OperationKind::TcgenWork, true)?;
     engine(warp).tcgen_instruction_issue(
         operation.as_ref(),
         cta_group as u32,
         TcgenPipelineOperation::Shift,
         None,
-        |_, _| Ok(()),
+        |_, record_tmem| {
+            let (reads, writes) =
+                raw_tcgen05_shift_footprints::<8>(&numeric_context, address, cta_group, lane)?;
+            record_tmem(
+                OperationKind::Load,
+                &tmem_anchor,
+                &tmem_logical_buffer,
+                access,
+                &reads,
+            )?;
+            record_tmem(
+                OperationKind::Store,
+                &tmem_anchor,
+                &tmem_logical_buffer,
+                access,
+                &writes,
+            )
+        },
         || {
             raw_tcgen05_shift::<8>(
                 &physical,
