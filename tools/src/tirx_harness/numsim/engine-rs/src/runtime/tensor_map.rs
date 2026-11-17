@@ -33,6 +33,7 @@ pub struct RuntimeTensorMap {
     fill_mode: TensorMapFillMode,
     transfer_template: Arc<TensorMapTransferTemplate>,
     im2col: Option<TensorMapIm2col>,
+    alloc_class: TensorMapAllocClass,
 }
 
 /// Im2col adds spatial bounds to a two-dimensional (channels, pixels) box.
@@ -131,12 +132,60 @@ pub(super) struct RuntimeTensorMapImage {
     swizzle_atomicity: SwizzleAtomicity,
     fill_mode: TensorMapFillMode,
     im2col: Option<TensorMapIm2col>,
+    /// `None` until bound or replaced: the host encoder's default, derived
+    /// from the encoded geometry.
+    alloc_class: Option<TensorMapAllocClass>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fp4SharedLayout {
     Align8Packed,
     Align16Padded,
+}
+
+/// `CU_DEVICE_ATTRIBUTE_TENSOR_MAP_LARGE_ALLOC_MIN_SIZE`, which NumSim fixes
+/// at 128 KiB: the SM107 override-address requirement and the measured
+/// host-encoding class threshold (VR200, CUDA 13.5) both use it.
+pub(super) const TENSOR_MAP_LARGE_ALLOC_MIN_SIZE: usize = 128 * 1024;
+
+/// PTX Tensor Allocation Size (small or large).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TensorMapAllocClass {
+    Small,
+    Large,
+}
+
+impl TensorMapAllocClass {
+    /// The class cuTensorMapEncode* chooses, measured on VR200 (CUDA 13.5):
+    /// large exactly when the encoded tensor span reaches 128 KiB,
+    /// independently of the allocation. The span is dim * element size for
+    /// rank 1 and outermost stride * outermost dim otherwise; every measured
+    /// point (including a 32-byte tensor with a 1 MiB row stride) agrees with
+    /// it, and with the alternative last-byte extent as well.
+    fn encoded_default(shape: &[usize], strides: &[usize], element_bits: usize) -> Self {
+        let span = match (shape, strides) {
+            ([dimension], _) => (*dimension as u128 * element_bits as u128).div_ceil(8),
+            (_, [.., stride]) => *stride as u128 * *shape.last().unwrap() as u128,
+            _ => 0,
+        };
+        if span >= TENSOR_MAP_LARGE_ALLOC_MIN_SIZE as u128 {
+            Self::Large
+        } else {
+            Self::Small
+        }
+    }
+
+    /// `.alloc_class` qualifiers; `alloc_same` (`None`) keeps the class.
+    pub(crate) fn from_ptx(qualifier: &str) -> Result<Option<Self>, EngineError> {
+        match qualifier {
+            "alloc_small" => Ok(Some(Self::Small)),
+            "alloc_large" => Ok(Some(Self::Large)),
+            "alloc_same" => Ok(None),
+            _ => Err(EngineError::message(format!(
+                "unknown TensorMap allocation class {qualifier:?}"
+            ))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -303,6 +352,15 @@ impl RuntimeTensorMapImage {
             swizzle_atomicity: tensor_map.swizzle_atomicity,
             fill_mode: tensor_map.fill_mode,
             im2col: tensor_map.im2col.clone(),
+            // Keep the encoder's default implicit, so a bound host map keeps
+            // its exact bytes; an explicit class stays explicit.
+            alloc_class: (tensor_map.alloc_class
+                != TensorMapAllocClass::encoded_default(
+                    &tensor_map.global_shape,
+                    &tensor_map.global_strides,
+                    tensor_map.element_bits,
+                ))
+            .then_some(tensor_map.alloc_class),
         }
     }
 
@@ -314,7 +372,9 @@ impl RuntimeTensorMapImage {
             )));
         }
         let base_byte_offset = u64::try_from(self.base_byte_offset)
-            .map_err(|_| EngineError::message("TensorMap base byte offset does not fit u64"))?;
+            .ok()
+            .filter(|offset| *offset < 1 << 56)
+            .ok_or_else(|| EngineError::message("TensorMap base byte offset does not fit 56 bits"))?;
         let mut bytes = vec![
             0_u8;
             if self.im2col.is_some() {
@@ -324,7 +384,14 @@ impl RuntimeTensorMapImage {
             }
         ];
         bytes[0..8].copy_from_slice(&self.allocation_id.to_le_bytes());
-        bytes[8..16].copy_from_slice(&base_byte_offset.to_le_bytes());
+        bytes[8..15].copy_from_slice(&base_byte_offset.to_le_bytes()[..7]);
+        // Byte 15 is the allocation class; host images leave the encoder's
+        // geometry-derived default implicit (zero).
+        bytes[15] = match self.alloc_class {
+            None => 0,
+            Some(TensorMapAllocClass::Small) => 1,
+            Some(TensorMapAllocClass::Large) => 2,
+        };
 
         for (axis, dimension) in self.physical_global_shape.iter().copied().enumerate() {
             if dimension == 0 || dimension as u128 > MAX_GLOBAL_DIMENSION {
@@ -494,10 +561,20 @@ impl RuntimeTensorMapImage {
         };
         let host_address = flags & (1 << 5) != 0;
         let allocation_id = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        let base_byte_offset = usize::try_from(u64::from_le_bytes(
-            bytes[8..16].try_into().unwrap(),
-        ))
-        .map_err(|_| EngineError::message("TensorMap base byte offset does not fit usize"))?;
+        let mut offset_bytes = [0_u8; 8];
+        offset_bytes[..7].copy_from_slice(&bytes[8..15]);
+        let base_byte_offset = usize::try_from(u64::from_le_bytes(offset_bytes))
+            .map_err(|_| EngineError::message("TensorMap base byte offset does not fit usize"))?;
+        let alloc_class = match bytes[15] {
+            0 => None,
+            1 => Some(TensorMapAllocClass::Small),
+            2 => Some(TensorMapAllocClass::Large),
+            code => {
+                return Err(EngineError::message(format!(
+                    "NumSim TensorMap image has unknown allocation class code {code}"
+                )))
+            }
+        };
         let mut physical_global_shape = [0_usize; 5];
         for (axis, dimension) in physical_global_shape.iter_mut().enumerate() {
             let start = 16 + axis * 4;
@@ -576,6 +653,7 @@ impl RuntimeTensorMapImage {
             swizzle_atomicity: SwizzleAtomicity::from_tag(bytes[63]),
             fill_mode,
             im2col,
+            alloc_class,
         })
     }
 
@@ -717,7 +795,7 @@ impl RuntimeTensorMapImage {
                 *stride = 16;
             }
         }
-        RuntimeTensorMap::new_with_layout(
+        let mut tensor_map = RuntimeTensorMap::new_with_layout(
             view,
             global_shape,
             global_strides,
@@ -736,13 +814,31 @@ impl RuntimeTensorMapImage {
             self.fill_mode,
             self.interleave_bytes,
             self.im2col.clone(),
-        )
+        )?;
+        tensor_map.alloc_class = self.alloc_class();
+        Ok(tensor_map)
     }
 
     pub(super) fn replace_global_address(&mut self, address: BufferView) {
         self.allocation_id = address.allocation().as_u64();
         self.base_byte_offset = address.byte_offset();
         self.host_address = false;
+    }
+
+    pub(super) fn alloc_class(&self) -> TensorMapAllocClass {
+        self.alloc_class.unwrap_or_else(|| {
+            TensorMapAllocClass::encoded_default(
+                &self.physical_global_shape[..self.rank],
+                &self.physical_global_strides[..self.rank - 1],
+                self.element_type.bits(),
+            )
+        })
+    }
+
+    /// Fix the class before other fields change: replacing geometry does not
+    /// re-run the host encoder's choice.
+    pub(super) fn set_alloc_class(&mut self, alloc_class: TensorMapAllocClass) {
+        self.alloc_class = Some(alloc_class);
     }
 
     pub(super) const fn is_host_address(&self) -> bool {
@@ -989,12 +1085,14 @@ impl RuntimeTensorMap {
                 "TMA override address must be 16-byte aligned",
             ));
         }
-        if address.byte_len() < 128 * 1024 {
+        if address.byte_len() < TENSOR_MAP_LARGE_ALLOC_MIN_SIZE {
             return Err(EngineError::out_of_bounds(
                 "TMA override address requires 128 KiB of accessible memory",
             ));
         }
         let mut image = RuntimeTensorMapImage::from_tensor_map(self);
+        // Overridden dimensions do not re-run the encoder's class choice.
+        image.set_alloc_class(self.alloc_class);
         image.replace_global_address(address);
         if dimensions.is_empty() {
             if !lower_strides.is_empty() || upper_strides != 0 {
@@ -1051,6 +1149,38 @@ impl RuntimeTensorMap {
             }
         }
         image.materialize(memory, rank)
+    }
+
+    /// PTX makes an out-of-bounds TMA access through a large allocation class
+    /// undefined unless `[global_addr, global_addr +
+    /// CU_DEVICE_ATTRIBUTE_TENSOR_MAP_LARGE_ALLOC_MIN_SIZE)` is accessible.
+    /// VR200 happened to zero-fill such a box over a 64-byte allocation, but
+    /// one benign observation does not define the behavior, so it stays an
+    /// error.
+    fn require_alloc_class_bounds(&self, origin: &[i64]) -> Result<(), EngineError> {
+        if self.alloc_class != TensorMapAllocClass::Large
+            || self.view.byte_len() >= TENSOR_MAP_LARGE_ALLOC_MIN_SIZE
+        {
+            return Ok(());
+        }
+        let deltas = &self.transfer_template.max_coordinate_deltas;
+        let in_bounds = origin.len() == deltas.len()
+            && origin.iter().zip(deltas.iter()).zip(&self.global_shape).all(
+                |((&coordinate, &delta), &extent)| {
+                    coordinate >= 0
+                        && coordinate
+                            .checked_add(delta)
+                            .and_then(|last| usize::try_from(last).ok())
+                            .is_some_and(|last| last < extent)
+                },
+            );
+        if in_bounds {
+            Ok(())
+        } else {
+            Err(EngineError::message(
+                "out-of-bounds TMA access through a large allocation-class TensorMap requires 128 KiB (CU_DEVICE_ATTRIBUTE_TENSOR_MAP_LARGE_ALLOC_MIN_SIZE) of accessible memory from its global address",
+            ))
+        }
     }
 
     pub(crate) const fn rank(&self) -> usize {
@@ -1561,6 +1691,8 @@ impl RuntimeTensorMap {
             swizzle_bytes,
             swizzle_atomicity,
         )?);
+        let alloc_class =
+            TensorMapAllocClass::encoded_default(&global_shape, &global_strides, element_bits);
         let mut physical_global_shape = [1_usize; 5];
         physical_global_shape[..rank].copy_from_slice(&global_shape);
         let mut physical_global_strides = [0_usize; 4];
@@ -1582,6 +1714,7 @@ impl RuntimeTensorMap {
             swizzle_atomicity,
             fill_mode,
             transfer_template,
+            alloc_class,
             im2col,
         })
     }
@@ -2170,6 +2303,7 @@ impl TensorMapTransferTemplate {
             )));
         }
         tensor_map.validate_u6_origin(origin)?;
+        tensor_map.require_alloc_class_bounds(origin)?;
         for (&coordinate, &max_delta) in origin.iter().zip(&self.max_coordinate_deltas) {
             coordinate
                 .checked_add(max_delta)
@@ -3061,6 +3195,9 @@ impl RawTmaS2gTransferPlan {
                 .count();
             origins.truncate(valid);
         }
+        for origin in &origins {
+            tensor_map.require_alloc_class_bounds(origin)?;
+        }
         let (lane, source_buffer, _, absolute_base) = raw_tma_shared_base(source, context)?;
         tensor_map.validate_swizzle_direction(false)?;
         let (destination_runs, mut source_runs) =
@@ -3128,6 +3265,7 @@ impl RawTmaS2gTransferPlan {
                 "align16 padded FP4 TensorMap does not support shared-to-global Tensor Copy",
             ));
         }
+        tensor_map.require_alloc_class_bounds(origin)?;
         let template = &tensor_map.transfer_template;
         let geometry = template.geometry;
         let (lane, source_buffer, _base_relative, base_absolute) =
@@ -3826,7 +3964,7 @@ mod tests {
         let image = RuntimeTensorMapImage {
             allocation_id: u64::MAX,
             im2col: None,
-            base_byte_offset: usize::MAX,
+            base_byte_offset: (1 << 56) - 1,
             host_address: true,
             rank: 5,
             physical_global_shape: [maximum_dimension; 5],
@@ -3839,12 +3977,86 @@ mod tests {
             swizzle_bytes: Some(128),
             swizzle_atomicity: SwizzleAtomicity::B16,
             fill_mode: TensorMapFillMode::Zero,
+            alloc_class: Some(TensorMapAllocClass::Large),
         };
 
         let encoded = image.encode().unwrap();
         assert_eq!(encoded.len(), TENSOR_MAP_PAYLOAD_BYTES);
         assert_eq!(u32::from_le_bytes(encoded[16..20].try_into().unwrap()), 0);
         assert_eq!(RuntimeTensorMapImage::decode(&encoded).unwrap(), image);
+        assert!(RuntimeTensorMapImage {
+            base_byte_offset: 1 << 56,
+            ..image.clone()
+        }
+        .encode()
+        .is_err());
+        let mut invalid = encoded.clone();
+        invalid[15] = 3;
+        assert!(RuntimeTensorMapImage::decode(&invalid).is_err());
+    }
+
+    #[test]
+    fn host_encoding_default_class_follows_the_measured_128_kib_span() {
+        use TensorMapAllocClass::{Large, Small};
+        for (shape, strides, bits, expected) in [
+            (vec![32764], vec![], 32, Small),
+            (vec![32768], vec![], 32, Large),
+            (vec![131071], vec![], 8, Small),
+            (vec![131072], vec![], 8, Large),
+            (vec![64, 256], vec![256], 32, Small),
+            (vec![64, 512, 2], vec![256, 131072], 32, Large),
+            // 32 bytes of data with a 1 MiB row stride: the span decides.
+            (vec![4, 2], vec![1 << 20], 32, Large),
+        ] {
+            assert_eq!(
+                TensorMapAllocClass::encoded_default(&shape, &strides, bits),
+                expected,
+                "{shape:?} {strides:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn allocation_class_round_trips_and_gates_large_out_of_bounds_boxes() {
+        let (_, map) = make_map(vec![0; 256], vec![8, 8], vec![32], vec![4, 4], 32, None, None);
+        assert_eq!(map.alloc_class, TensorMapAllocClass::Small);
+        let mut host = RuntimeTensorMapImage::from_tensor_map(&map);
+        host.alloc_class = None;
+        assert_eq!(host.encode().unwrap()[15], 0);
+        assert_eq!(host.alloc_class(), TensorMapAllocClass::Small);
+        for (code, alloc_class) in [
+            (1, TensorMapAllocClass::Small),
+            (2, TensorMapAllocClass::Large),
+        ] {
+            let mut image = host.clone();
+            image.set_alloc_class(alloc_class);
+            let encoded = image.encode().unwrap();
+            assert_eq!(encoded[15], code);
+            let decoded = RuntimeTensorMapImage::decode(&encoded).unwrap();
+            assert_eq!(decoded, image);
+            // The class is descriptor state only: it never changes geometry.
+            for allocation_bytes in [256, TENSOR_MAP_LARGE_ALLOC_MIN_SIZE] {
+                let global = GlobalMemory::new();
+                let allocation = global.allocate_zeroed(allocation_bytes).unwrap();
+                let mut relocated = decoded.clone();
+                relocated.relocate(allocation, 0);
+                let materialized = relocated.materialize(&global, 2).unwrap();
+                assert_eq!(materialized.alloc_class, alloc_class);
+                assert_eq!(
+                    RuntimeTensorMapImage::from_tensor_map(&materialized).alloc_class(),
+                    alloc_class
+                );
+                assert!(materialized.require_alloc_class_bounds(&[4, 4]).is_ok());
+                for origin in [[5, 0], [0, 5], [-1, 0], [0, -1]] {
+                    let result = materialized.require_alloc_class_bounds(&origin);
+                    assert_eq!(
+                        result.is_err(),
+                        alloc_class == TensorMapAllocClass::Large
+                            && allocation_bytes < TENSOR_MAP_LARGE_ALLOC_MIN_SIZE
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -3908,6 +4120,7 @@ mod tests {
             swizzle_bytes: None,
             swizzle_atomicity: SwizzleAtomicity::B16,
             fill_mode: TensorMapFillMode::Zero,
+            alloc_class: None,
         };
 
         image.write(&global, &descriptor).unwrap();

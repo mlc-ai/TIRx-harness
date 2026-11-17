@@ -1086,7 +1086,9 @@ def _decode_tensor_maps(array: np.ndarray) -> tuple[_DecodedTensorMap, ...]:
         flags = int(image[60])
         if flags & 0x80 != _TENSOR_MAP_FLAG_MAGIC or flags & (1 << 5) == 0:
             continue
-        if int.from_bytes(image[8:16].tobytes(), "little") != 0:
+        # Bytes 8..15 are the zero host base offset; byte 15 is the allocation
+        # class (unspecified, small or large) set by tensormap.replace.
+        if int.from_bytes(image[8:15].tobytes(), "little") != 0 or int(image[15]) > 2:
             continue
         rank = int(image[59]) & 0b111
         dtype_code = int(image[59]) >> 3
