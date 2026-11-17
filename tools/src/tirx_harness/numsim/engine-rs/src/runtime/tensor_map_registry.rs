@@ -8,7 +8,7 @@ use crate::{
     PhysicalAllocationId, PhysicalByteSpan, PhysicalMemory, WarpContext, WarpMask,
 };
 
-use super::tensor_map::{RuntimeTensorMapImage, TENSOR_MAP_DESCRIPTOR_BYTES};
+use super::tensor_map::{RuntimeTensorMapImage, TensorMapAllocClass, TENSOR_MAP_DESCRIPTOR_BYTES};
 use super::{read_runtime_bytes, write_runtime_bytes, PhysicalPtr, PointerSpace, RuntimeTensorMap};
 
 #[derive(Clone)]
@@ -195,6 +195,8 @@ impl RuntimeTensorMapRegistry {
         Ok(())
     }
 
+    /// `alloc_class` is the `.alloc_class` qualifier. PTX ISA 9.5: without
+    /// one, the replacement sets the allocation class to small.
     pub fn replace_global_address(
         &self,
         physical: &PhysicalMemory,
@@ -202,12 +204,108 @@ impl RuntimeTensorMapRegistry {
         mask: WarpMask,
         descriptor: &PhysicalPtr,
         address: &PhysicalPtr,
+        alloc_class: &str,
     ) -> Result<(), EngineError> {
+        let alloc_class = TensorMapAllocClass::from_ptx(alloc_class)?;
         let replacement = address.resolve_uniform_global_remainder_view(physical, context, mask)?;
         self.replace_image(physical, context, mask, descriptor, |image| {
             image.replace_global_address(replacement);
+            if let Some(alloc_class) = alloc_class {
+                image.set_alloc_class(alloc_class);
+            }
             Ok(())
         })
+    }
+
+    /// The field-less `tensormap.replace.alloc_class` form.
+    pub fn replace_alloc_class(
+        &self,
+        physical: &PhysicalMemory,
+        context: &WarpContext,
+        mask: WarpMask,
+        descriptor: &PhysicalPtr,
+        alloc_class: &str,
+    ) -> Result<(), EngineError> {
+        let Some(alloc_class) = TensorMapAllocClass::from_ptx(alloc_class)? else {
+            return Err(EngineError::message(
+                "field-less tensormap.replace requires .alloc_small or .alloc_large",
+            ));
+        };
+        self.replace_image(physical, context, mask, descriptor, |image| {
+            image.set_alloc_class(alloc_class);
+            Ok(())
+        })
+    }
+
+    /// A lane's `tensormap.query` descriptor address: 128-byte aligned and
+    /// inside a global or local-CTA shared object.
+    pub fn require_query_address(
+        context: &WarpContext,
+        lane: usize,
+        descriptor: &PhysicalPtr,
+    ) -> Result<(), EngineError> {
+        let mask = WarpMask::from_bits(1 << lane);
+        Self::descriptor_space(descriptor, mask, "tensormap.query")?;
+        if descriptor.resolve_uniform(context, mask)?.byte_offset() % TENSOR_MAP_DESCRIPTOR_BYTES != 0
+        {
+            return Err(EngineError::message(
+                "tensormap.query requires 128-byte alignment",
+            ));
+        }
+        descriptor.lane_read_byte_offset(lane, TENSOR_MAP_DESCRIPTOR_BYTES)?;
+        Ok(())
+    }
+
+    /// `tensormap.query.alloc_class_large` for one issuing lane.
+    pub fn query_alloc_class_large(
+        physical: &PhysicalMemory,
+        context: &WarpContext,
+        lane: usize,
+        descriptor: &PhysicalPtr,
+    ) -> Result<bool, EngineError> {
+        Self::require_query_address(context, lane, descriptor)?;
+        let mask = WarpMask::from_bits(1 << lane);
+        let (_, image) = Self::read_lane_image(physical, context, mask, descriptor)?;
+        Ok(image.alloc_class() == TensorMapAllocClass::Large)
+    }
+
+    fn descriptor_space(
+        descriptor: &PhysicalPtr,
+        mask: WarpMask,
+        instruction: &str,
+    ) -> Result<PointerSpace, EngineError> {
+        let space = descriptor.pointer_space_for_mask(mask)?;
+        if !matches!(space, PointerSpace::Global | PointerSpace::Shared) {
+            return Err(EngineError::message(format!(
+                "{instruction} requires global or local-CTA shared memory"
+            )));
+        }
+        if space == PointerSpace::Shared {
+            descriptor.require_ptx_space_for_mask(super::PtxStateSpace::SharedCta, mask)?;
+        }
+        Ok(space)
+    }
+
+    /// The image read by the first lane of `mask`, at its payload offset.
+    fn read_lane_image(
+        physical: &PhysicalMemory,
+        context: &WarpContext,
+        mask: WarpMask,
+        descriptor: &PhysicalPtr,
+    ) -> Result<(usize, RuntimeTensorMapImage), EngineError> {
+        let lane = mask.first_active().expect("one descriptor lane");
+        let offset = descriptor.lane_read_byte_offset(lane, TENSOR_MAP_DESCRIPTOR_BYTES)?;
+        let image = RuntimeTensorMapImage::read_payload(|delta, count| {
+            read_runtime_bytes(
+                physical,
+                context,
+                descriptor.buffer(),
+                lane,
+                offset + delta,
+                count,
+            )
+        })?;
+        Ok((offset, image))
     }
 
     pub fn replace_field(
@@ -236,15 +334,7 @@ impl RuntimeTensorMapRegistry {
         let Some(lane) = mask.first_active() else {
             return Ok(());
         };
-        let space = descriptor.pointer_space_for_mask(mask)?;
-        if !matches!(space, PointerSpace::Global | PointerSpace::Shared) {
-            return Err(EngineError::message(
-                "tensormap.replace requires global or local-CTA shared memory",
-            ));
-        }
-        if space == PointerSpace::Shared {
-            descriptor.require_ptx_space_for_mask(super::PtxStateSpace::SharedCta, mask)?;
-        }
+        let space = Self::descriptor_space(descriptor, mask, "tensormap.replace")?;
         let address = descriptor.resolve_uniform(context, mask)?;
         if address.byte_offset() % TENSOR_MAP_DESCRIPTOR_BYTES != 0 {
             return Err(EngineError::message(
@@ -255,17 +345,8 @@ impl RuntimeTensorMapRegistry {
             descriptor.lane_read_byte_offset(active, TENSOR_MAP_DESCRIPTOR_BYTES)?;
             descriptor.lane_write_byte_offset(active, TENSOR_MAP_DESCRIPTOR_BYTES)?;
         }
-        let offset = descriptor.lane_read_byte_offset(lane, TENSOR_MAP_DESCRIPTOR_BYTES)?;
-        let mut image = RuntimeTensorMapImage::read_payload(|delta, count| {
-            read_runtime_bytes(
-                physical,
-                context,
-                descriptor.buffer(),
-                lane,
-                offset + delta,
-                count,
-            )
-        })?;
+        let (offset, mut image) = Self::read_lane_image(physical, context, mask, descriptor)?;
+        image.set_alloc_class(image.alloc_class());
         update(&mut image)?;
         let bytes = image.encode()?;
         // Shared descriptors are ordinary shared bytes. Publication happens

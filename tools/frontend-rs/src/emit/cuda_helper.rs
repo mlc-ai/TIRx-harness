@@ -994,8 +994,10 @@ impl<'a> Emitter<'a> {
                 )?;
                 self.emit_tensor_map_replace(
                     source_op_id,
+                    // The helper's unqualified global_address replacement
+                    // resets the allocation class to small (PTX ISA 9.5).
                     format!(
-                        "({}, {registry}.clone(), {})",
+                        "({}, {registry}.clone(), {}, \"alloc_small\")",
                         abi::address("v2::Global", &descriptor, None),
                         abi::address("v2::Global", &address, None)
                     ),

@@ -974,8 +974,11 @@ pub fn ptx_cache_hint_call(
 }
 
 pub struct TensorMapReplaceFacts {
+    /// Empty for the field-less `.alloc_class` form.
     pub field: String,
     pub index: Option<i64>,
+    /// The `.alloc_class` qualifier, empty when absent.
+    pub alloc_class: String,
 }
 
 /// The replacement fields whose new value is an immediate.
@@ -993,8 +996,11 @@ pub fn tensor_map_replace_facts(decoded: &DecodedPtx) -> AResult<TensorMapReplac
     let op_name = decoded.op_name.as_str();
     // The target table owns the entry's field domain. Carry the decoded field
     // through to the existing image update, including box_dim/element_stride.
-    let field = decoded.modifier("field")?;
-    let expected_type = if field == "global_address" || field == "global_stride" {
+    let field = decoded.modifier_or_empty("field");
+    let alloc_class = decoded.modifier_or_empty("alloc_class");
+    let expected_type = if field.is_empty() {
+        ""
+    } else if field == "global_address" || field == "global_stride" {
         "b64"
     } else {
         "b32"
@@ -1003,7 +1009,13 @@ pub fn tensor_map_replace_facts(decoded: &DecodedPtx) -> AResult<TensorMapReplac
     if decoded.modifier("mode")? != "tile"
         || !matches!(space, "" | "global" | "shared::cta")
         || decoded.modifier("width")? != "b1024"
-        || decoded.modifier("type")? != expected_type
+        || decoded.modifier_or_empty("type") != expected_type
+        || !matches!(
+            (field, alloc_class),
+            ("", "alloc_small" | "alloc_large")
+                | ("global_address", "" | "alloc_small" | "alloc_large" | "alloc_same")
+                | (_, "")
+        )
     {
         return unsupported(format!(
             "{op_name} requires tiled global/shared-CTA b1024.{expected_type} replacement"
@@ -1016,9 +1028,11 @@ pub fn tensor_map_replace_facts(decoded: &DecodedPtx) -> AResult<TensorMapReplac
             "{op_name}.addr must be a physical descriptor pointer"
         ));
     }
-    let value = decoded.scalar_operand("new_val")?;
-    if is_immediate_replace_field(field) && int_imm(&value).is_none() {
-        return unsupported(format!("{op_name}.new_val must be an immediate"));
+    if !field.is_empty() {
+        let value = decoded.scalar_operand("new_val")?;
+        if is_immediate_replace_field(field) && int_imm(&value).is_none() {
+            return unsupported(format!("{op_name}.new_val must be an immediate"));
+        }
     }
     let mut index = None;
     if op_name == "tirx.ptx.tensormap_replace_dim" || op_name == "tirx.ptx.tensormap_replace_stride"
@@ -1042,6 +1056,7 @@ pub fn tensor_map_replace_facts(decoded: &DecodedPtx) -> AResult<TensorMapReplac
     Ok(TensorMapReplaceFacts {
         field: field.to_owned(),
         index,
+        alloc_class: alloc_class.to_owned(),
     })
 }
 
@@ -1998,7 +2013,26 @@ impl<'a> Emitter<'a> {
         let space = v2_memory_space_rust(&space_token)?;
         let destination = abi::address(space, &descriptor, None);
 
-        if op_name == "tirx.ptx.tensormap_replace_address" {
+        if facts.field.is_empty() {
+            self.emit_raw_tma_stateful(
+                "sync::tensormap_replace",
+                source_op_id,
+                &format!(
+                    "({destination}, {registry}.clone(), {})",
+                    json_string(&facts.alloc_class)
+                ),
+                Some(&format!("v2::sync::variant::TensorMapAllocClass<{space}>")),
+                None,
+            );
+            return Ok(());
+        }
+        if facts.field == "global_address" {
+            // PTX ISA 9.5: without `.alloc_class` the class becomes small.
+            let alloc_class = if facts.alloc_class.is_empty() {
+                "alloc_small"
+            } else {
+                facts.alloc_class.as_str()
+            };
             let operand = reinterpret("uint64", &decoded.scalar_operand("new_val")?)?;
             let address_value = self.raw_tma_global_pointer(&operand)?;
 
@@ -2011,8 +2045,9 @@ impl<'a> Emitter<'a> {
                 "sync::tensormap_replace",
                 source_op_id,
                 &format!(
-                    "({destination}, {registry}.clone(), {})",
-                    abi::address("v2::Global", &address, None)
+                    "({destination}, {registry}.clone(), {}, {})",
+                    abi::address("v2::Global", &address, None),
+                    json_string(alloc_class)
                 ),
                 Some(&format!("v2::sync::variant::TensorMapAddress<{space}>")),
                 None,
@@ -2039,6 +2074,83 @@ impl<'a> Emitter<'a> {
             None,
         );
         Ok(())
+    }
+
+    /// `tensormap.query.alloc_class_large`: one predicate per issuing lane,
+    /// read from that lane's descriptor.
+    fn emit_raw_tensor_map_query(
+        &mut self,
+        decoded: &DecodedPtx,
+        destination: &ObjectRef,
+        source_op_id: i64,
+    ) -> AResult<()> {
+        let op_name = decoded.op_name.clone();
+        // SM107 checks the descriptor address of every lane that reaches the
+        // query, so evaluate and check it before the instruction predicate.
+        let space_token = decoded.modifier("space")?.to_owned();
+        let descriptor_value = self.emit_address_pointer(
+            &decoded.scalar_operand("addr")?,
+            &space_token,
+            None,
+            "ctx.active_mask()",
+        )?;
+        require_physical_pointer(
+            &descriptor_value,
+            &format!("{op_name} descriptor did not resolve to a physical address"),
+        )?;
+        let descriptor = self.control_name("tensor_map_query_descriptor");
+        self.emit_line(&format!(
+            "let {descriptor} = ({}).clone();",
+            descriptor_value.code
+        ));
+        let space = v2_memory_space_rust(&space_token)?;
+        let check = stateful(
+            "sync::tensormap_query",
+            &self.v2_site(Some(source_op_id)),
+            &abi::address(space, &format!("{descriptor}.clone()"), None),
+            Some(&format!("v2::sync::variant::TensorMapQueryAddress<{space}>")),
+            None,
+        );
+        self.emit_line(&format!("{check};"));
+        let region = self.open_shadow_predicated_region(
+            decoded.predicate.as_ref(),
+            "tensor_map_query",
+            &format!("{op_name} predicate must lower to bool or integer"),
+        )?;
+        let site = self.v2_site(Some(source_op_id));
+        let invocation = stateful(
+            "sync::tensormap_query",
+            &site,
+            &abi::address(space, &descriptor, None),
+            Some(&format!(
+                "v2::sync::variant::TensorMapQueryAllocClassLarge<{space}>"
+            )),
+            None,
+        );
+        let predicate = self.control_name("tensor_map_query_predicate");
+        let result = self.control_name("tensor_map_query_u32");
+        self.emit_line(&format!("let {predicate} = v2_register_out({invocation});"));
+        self.emit_line(&format!(
+            "let {result} = WarpValue::from_fn(|lane| u32::from({predicate}[lane]));"
+        ));
+        self.emit_explicit_buffer_store(
+            destination,
+            RustValue::new(result, "u32", Uniformity::Varying),
+            source_op_id,
+            None,
+            None,
+            None,
+        )?;
+        let mask = region.mask.clone();
+        self.close_predicated_region(region);
+        self.finish_predicated_destinations(
+            decoded,
+            &[Some(destination.clone())],
+            &dtype_of(destination)?,
+            &mask,
+            source_op_id,
+            true,
+        )
     }
 
     fn emit_raw_tensor_map_fence(
@@ -2899,6 +3011,28 @@ pub fn emit_replace(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<Rus
     emitter.record_pointer_write(&decoded.scalar_operand("addr")?, decoded.modifier("space")?)?;
     let source_op_id = call.source_op_id(emitter)?;
     emitter.emit_raw_tma_statement(decoded, &parts, source_op_id)?;
+    Ok(None)
+}
+
+pub fn emit_query(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    let decoded = call.table()?;
+    validate(decoded)?;
+    let op_name = decoded.op_name.as_str();
+    let operands = crate::emit::register_call::require_register_call(decoded, false)?;
+    let [destination] = operands.destinations.as_slice() else {
+        return unsupported(format!("{op_name} requires one predicate destination"));
+    };
+    if decoded.modifier("query")? != "alloc_class_large"
+        || !matches!(decoded.modifier("space")?, "" | "global")
+        || decoded.modifier("width")? != "b1024"
+    {
+        return unsupported(format!(
+            "{op_name} requires global or generic b1024.alloc_class_large"
+        ));
+    }
+    let destination = destination.clone();
+    let source_op_id = call.source_op_id(emitter)?;
+    emitter.emit_raw_tensor_map_query(decoded, &destination, source_op_id)?;
     Ok(None)
 }
 

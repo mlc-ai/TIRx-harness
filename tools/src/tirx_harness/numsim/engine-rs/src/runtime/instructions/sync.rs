@@ -60,6 +60,11 @@ sync_instruction!(
     tensormap_replace
 );
 sync_instruction!(
+    tensor_map_query_spec,
+    TensorMapQueryVariant,
+    tensormap_query
+);
+sync_instruction!(
     tensor_map_copy_spec,
     TensorMapCopyVariant,
     tensormap_cp_fenceproxy
@@ -77,6 +82,10 @@ pub mod variant {
     pub struct TensorMapCopy<Scope>(PhantomData<fn() -> Scope>);
     pub struct TensorMapField<Space>(PhantomData<fn() -> Space>);
     pub struct TensorMapAddress<Space>(PhantomData<fn() -> Space>);
+    pub struct TensorMapAllocClass<Space>(PhantomData<fn() -> Space>);
+    pub struct TensorMapQueryAllocClassLarge<Space>(PhantomData<fn() -> Space>);
+    /// The address check every lane that reaches a query performs.
+    pub struct TensorMapQueryAddress<Space>(PhantomData<fn() -> Space>);
 
     pub struct Report<V>(PhantomData<fn(V)>);
 
@@ -1390,12 +1399,13 @@ instruction_variant! {
         Address<S>,
         crate::runtime::RuntimeTensorMapRegistry,
         Address<super::Global>,
+        &'static str,
     ) => ();
     fn execute(
         warp: &mut super::Engine,
         context: ExecCtx,
         site: SiteId,
-        (address, registry, replacement): Self::Args,
+        (address, registry, replacement, alloc_class): Self::Args,
     ) -> Result<(), EngineError> {
         execute_tensor_map_replace(warp, context, site, address, |physical, ctx, descriptor| {
             registry.replace_global_address(
@@ -1404,8 +1414,109 @@ instruction_variant! {
                 ctx.active_mask(),
                 descriptor,
                 replacement.inner(),
+                alloc_class,
             )
         })
+    }
+}
+instruction_variant! {
+    [impl<S: super::mem::SpaceVariant>] tensor_map_replace_spec, variant::TensorMapAllocClass<S>,
+    (Address<S>, crate::runtime::RuntimeTensorMapRegistry, &'static str) => ();
+    fn execute(
+        warp: &mut super::Engine,
+        context: ExecCtx,
+        site: SiteId,
+        (address, registry, alloc_class): Self::Args,
+    ) -> Result<(), EngineError> {
+        execute_tensor_map_replace(warp, context, site, address, |physical, ctx, descriptor| {
+            registry.replace_alloc_class(physical, ctx, ctx.active_mask(), descriptor, alloc_class)
+        })
+    }
+}
+
+// SM107 (VR200) faults on an invalid descriptor address of any lane that
+// reaches `@p tensormap.query`, even when `p` is false, while `@p ld` and
+// `@p tensormap.replace` honor the predicate. Generated code runs this check
+// with the control-flow mask before applying the instruction predicate.
+instruction_variant! {
+    [impl<S: super::mem::SpaceVariant>] tensor_map_query_spec,
+    variant::TensorMapQueryAddress<S>,
+    Address<S> => ();
+    fn execute(
+        _warp: &mut super::Engine,
+        context: ExecCtx,
+        _site: SiteId,
+        address: Self::Args,
+    ) -> Result<(), EngineError> {
+        let ctx = context.into_inner();
+        let mask = ctx.active_mask();
+        let pointer = address.inner();
+        for lane in mask {
+            let lane_mask = crate::WarpMask::from_bits(1 << lane);
+            pointer
+                .require_ptx_space_for_mask(S::PTX_SPACE, lane_mask)
+                .and_then(|()| {
+                    crate::runtime::RuntimeTensorMapRegistry::require_query_address(
+                        &ctx, lane, pointer,
+                    )
+                })
+                .map_err(|error| {
+                    EngineError::message(format!(
+                        "tensormap.query lane {lane} has an invalid descriptor address, which faults on SM107 hardware even when the instruction predicate is false: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+}
+
+instruction_variant! {
+    [impl<S: super::mem::SpaceVariant>] tensor_map_query_spec,
+    variant::TensorMapQueryAllocClassLarge<S>,
+    Address<S> => R<bool>;
+    fn execute(
+        warp: &mut super::Engine,
+        context: ExecCtx,
+        site: SiteId,
+        address: Self::Args,
+    ) -> Result<R<bool>, EngineError> {
+        let ctx = context.into_inner();
+        let mask = ctx.active_mask();
+        let mut result = crate::WarpValue::splat(false);
+        if mask.is_empty() {
+            return Ok(R::from_inner(result));
+        }
+        let pointer = address.inner().with_byte_storage_access_width(128)?;
+        pointer.require_ptx_space_for_mask(S::PTX_SPACE, mask)?;
+        let warp = engine(warp);
+        // Each lane reads its own whole 1024-bit object, as an ordinary
+        // weak load; the class does not depend on tensormap-proxy state.
+        let operation =
+            warp.begin_optional_pointer_operation(ctx, site.get(), OperationKind::Load, &pointer)?;
+        warp.physical_pointer_access(
+            operation.as_ref(),
+            OperationKind::Load,
+            &pointer,
+            None,
+            mask,
+            128,
+            false,
+            false,
+            crate::MemoryAccessSemantics::plain(),
+            || {
+                for lane in mask {
+                    result[lane] = crate::runtime::RuntimeTensorMapRegistry::query_alloc_class_large(
+                        warp.kernel().physical(),
+                        &ctx,
+                        lane,
+                        &pointer,
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
+        warp.finish_optional_operation(&operation)?;
+        Ok(R::from_inner(result))
     }
 }
 

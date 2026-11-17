@@ -118,6 +118,20 @@ RUNTIME_CASES = (
         tests=("runtime/test_tcgen05_ti16.py::test_sparse_ti16_metadata",),
     ),
     RuntimeCase(
+        target_ids=(
+            "call:tirx.ptx.tensormap_query",
+            "call:tirx.ptx.tensormap_replace_address_alloc_class",
+            "call:tirx.ptx.tensormap_replace_alloc_class",
+        ),
+        tests=(
+            "runtime/test_tensormap_alloc_class.py::test_query_reports_class_after_each_replace",
+            "runtime/test_tensormap_alloc_class.py::test_tma_copy_is_unchanged_by_class",
+            "runtime/test_tensormap_alloc_class.py::test_large_class_out_of_bounds_tma_needs_min_size_allocation",
+            "runtime/test_tensormap_alloc_class.py::test_host_encoded_default_class",
+            "runtime/test_tensormap_alloc_class.py::test_predicated_off_query_lanes_need_valid_descriptors",
+        ),
+    ),
+    RuntimeCase(
         target_ids=("call:tirx.ptx.tensormap_replace_swizzle_mode_sm103a",),
         tests=("runtime/test_tma_swizzle96.py::test_swizzle96_documented_layout",),
     ),
