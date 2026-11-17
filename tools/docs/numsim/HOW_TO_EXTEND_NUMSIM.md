@@ -309,12 +309,11 @@ construction. If it does not, these are the touch points, in order:
    plus a matching `TcgenAccumulatorDtype` variant (`runtime/tcgen_work.rs`);
    adding a domain is a reviewed decision.
 
-A missing physical footprint must be declared explicitly. Only
-`raw_tcgen05_mma_tf32_ts_cta1`, the two sparse
-entries (`AnalysisGapKind::TcgenMma`), and `tcgen05.shift`
-(`AnalysisGapKind::TcgenShift`) open one; every other entry records its own
-accesses. A new variant of a gap-free family models its footprint too; a new gap
-emission needs its own justification.
+A missing physical footprint must be declared explicitly. Only the two sparse
+block-scale entries (`tcgen05_mma_sp_block_scale_collector_ab_{ss,ts}`, through
+`AnalysisGapKind::TcgenMma`) open one; every other entry, `tcgen05.shift`
+included, records its own accesses. A new variant of a gap-free family models
+its footprint too; a new gap emission needs its own justification.
 
 ## Adding a new checker
 
