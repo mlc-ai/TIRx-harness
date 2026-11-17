@@ -407,6 +407,8 @@ def test_fetch_register_form_domain_is_the_exact_modeled_register_set():
         "clock_hi",
         "globaltimer_lo",
         "globaltimer_hi",
+        "locality_domain_id",
+        "locality_domain_supplemental_sm",
     }
     registers64 = {"gridid", "clock64", "globaltimer"}
 

@@ -22,7 +22,7 @@ use tvm_tirx::tvm_ffi::object::ObjectRef;
 use tvm_tirx::tvm_ffi::ObjectRefCore;
 
 const REDUCTION_FLOATS: [&str; 4] = ["float16", "bfloat16", "float32", "float64"];
-const FETCH_REGISTERS_32: [&str; 39] = [
+const FETCH_REGISTERS_32: [&str; 41] = [
     "smid",
     "tid.x",
     "tid.y",
@@ -62,6 +62,8 @@ const FETCH_REGISTERS_32: [&str; 39] = [
     "clock_hi",
     "globaltimer_lo",
     "globaltimer_hi",
+    "locality_domain_id",
+    "locality_domain_supplemental_sm",
 ];
 const FETCH_REGISTERS_64: [&str; 3] = ["gridid", "clock64", "globaltimer"];
 
@@ -967,6 +969,17 @@ impl<'a> Emitter<'a> {
             "cluster_nctaid.x" => Some("ctx.topology().ctas_per_cluster()".to_owned()),
             "cluster_ctarank" => Some("ctx.cta_id_in_cluster()".to_owned()),
             "cluster_nctarank" => Some("ctx.topology().ctas_per_cluster()".to_owned()),
+            // The launch places clusters on locality domains and CTAs on
+            // guaranteed or supplemental SMs; PTX only fixes the domain per
+            // cluster and the flag per CTA. A correct kernel must hold for
+            // every placement, so model two domains and mixed flags to
+            // exercise both paths: domain = cluster % 2, and the flag
+            // alternates across the CTAs of a cluster and across cluster
+            // pairs, so single-CTA clusters see all four combinations.
+            "locality_domain_id" => Some("ctx.cluster_id() % 2".to_owned()),
+            "locality_domain_supplemental_sm" => {
+                Some("(ctx.cta_id_in_cluster() + ctx.cluster_id() / 2) % 2".to_owned())
+            }
             "ntid.x" => Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned()),
             _ => None,
         };

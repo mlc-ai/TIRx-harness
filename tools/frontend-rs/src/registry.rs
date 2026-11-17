@@ -220,7 +220,7 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("tirx.cuda.mbarrier_wait_acquire_cluster", "synchronization", crate::emit::sync::emit_legacy).suspends(true),
     OpRow::new("tirx.cuda.mma_fill", "warp_matrix_instruction", crate::emit::matrix::emit_legacy),
     OpRow::new("tirx.cuda.mma_store", "warp_matrix_instruction", crate::emit::matrix::emit_legacy),
-    OpRow::new("tirx.cuda.mov_sreg", "pure_scalar", crate::emit::pure::cuda_mov_sreg).support("deterministic_representative").reason("logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero"),
+    OpRow::new("tirx.cuda.mov_sreg", "pure_scalar", crate::emit::pure::cuda_mov_sreg).support("deterministic_representative").reason("logical launch registers are modeled; physical SM ID, hardware clock, and grid-launch tokens use zero; clusters alternate between two locality domains and CTAs between guaranteed and supplemental SMs"),
     OpRow::new("tirx.cuda.nano_sleep", "synchronization", crate::emit::sync::emit_legacy).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE).suspends(true),
     OpRow::new("tirx.cuda.printf", "synchronization", crate::emit::sync::emit_legacy).support("deterministic_representative").reason(DETERMINISTIC_REPRESENTATIVE).suspends(true),
     OpRow::new("tirx.cuda.reduce_add_sync_u32", "pure_scalar", crate::emit::pure::cuda_reduce_add_sync_u32),
