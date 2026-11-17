@@ -1283,7 +1283,13 @@ fn execute_tma_cache_hint(
     bulk_group: bool,
 ) -> Result<(), EngineError> {
     validate_tma_descriptor_rank(&tensor_map, descriptor_rank, label)?;
-    let _ = coordinate_operands;
+    // Tile, gather4 and im2col forms all start their bounding boxes at the
+    // innermost (first) coordinate operand.
+    if let Some(inner) = coordinate_operands.first() {
+        for lane in context.active_mask().into_inner() {
+            tensor_map.inner().validate_box_start(inner[lane])?;
+        }
+    }
     if !bulk_group {
         // Tensor prefetch changes cache residency only, which NumSim does not
         // model. Its descriptor/rank/runtime operands are still validated.

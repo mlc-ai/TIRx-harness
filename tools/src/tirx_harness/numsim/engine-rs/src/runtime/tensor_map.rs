@@ -1090,6 +1090,37 @@ impl RuntimeTensorMap {
         Ok(())
     }
 
+    /// PTX 5.5.3.1: the address of a tiled-mode bounding box must be 16-byte
+    /// aligned; tile::gather4 inherits the tile-mode rules for each row box.
+    /// The global address and every outer global stride are already 16-byte
+    /// multiples, so only the innermost start offset can misalign it. SM107
+    /// raises an illegal instruction for a uint32 start at inner coordinate
+    /// 1, 2 or -2 (4, 8, -8 bytes), while 0, 4 and -4 (0, 16, -16 bytes)
+    /// copy and zero-fill normally, so out-of-bounds starts follow the same
+    /// byte rule. Packed FP4 starts 2 and 16 also trap while 32 and 64 copy,
+    /// and tensor prefetch/applypriority trap at uint32 starts 1 and 2.
+    ///
+    /// PTX 5.5.4 states no address rule for im2col, but SM107 traps the same
+    /// way for a uint32 channel start of 1 or 2 and copies at 0 and 4, so the
+    /// im2col channel coordinate (also the innermost one) is checked too.
+    pub(crate) fn validate_box_start(&self, inner: i64) -> Result<(), EngineError> {
+        let bits = i128::from(inner) * self.transfer_element_bits() as i128;
+        if bits.rem_euclid(128) != 0 {
+            let (mode, source) = if self.im2col.is_some() {
+                ("im2col channel", "SM107 measurement; PTX 5.5.4 states no rule")
+            } else {
+                ("tiled", "PTX 5.5.3.1; SM107 raises an illegal instruction")
+            };
+            return Err(EngineError::message(format!(
+                "{mode} TMA bounding box address must be 16-byte aligned ({source}): \
+                 inner coordinate {inner} of {}-bit elements starts {bits} bits from \
+                 the tensor base",
+                self.transfer_element_bits(),
+            )));
+        }
+        Ok(())
+    }
+
     fn validate_u6_origin(&self, origin: &[i64]) -> Result<(), EngineError> {
         if self.element_bits == 6
             && origin.first().is_some_and(|value| value.rem_euclid(128) != 0)
@@ -2550,6 +2581,9 @@ impl RawTmaG2cTransferPlan {
         multicast: bool,
     ) -> Result<Self, EngineError> {
         let origins = tensor_map.im2col_origins(origin, mode, info)?;
+        if let Some(&channel) = origin.first() {
+            tensor_map.validate_box_start(channel)?;
+        }
         let mut layout = raw_tma_g2c_layout(
             context,
             destination,
@@ -2590,6 +2624,9 @@ impl RawTmaG2cTransferPlan {
             return Err(EngineError::message(
                 "tiled load requires a tiled TensorMap",
             ));
+        }
+        if let Some(&inner) = origin.first() {
+            tensor_map.validate_box_start(inner)?;
         }
         let layout = raw_tma_g2c_layout(
             context,
@@ -3006,6 +3043,9 @@ impl RawTmaS2gTransferPlan {
                 "align16 padded FP4 TensorMap does not support shared-to-global Tensor Copy",
             ));
         }
+        if let Some(&channel) = origin.first() {
+            tensor_map.validate_box_start(channel)?;
+        }
         let count = if mode == Im2colMode::Spatial {
             tensor_map.rank() - 2
         } else {
@@ -3079,6 +3119,9 @@ impl RawTmaS2gTransferPlan {
             return Err(EngineError::message(
                 "tiled store requires a tiled TensorMap",
             ));
+        }
+        if let Some(&inner) = origin.first() {
+            tensor_map.validate_box_start(inner)?;
         }
         if tensor_map.fp4_shared_layout == Some(Fp4SharedLayout::Align16Padded) {
             return Err(EngineError::message(
@@ -3548,6 +3591,8 @@ fn raw_tma_gather4_layout(
             "TensorMap gather4 source bounding box must contain one row",
         ));
     }
+    // Each gathered row is its own bounding box starting at `column`.
+    tensor_map.validate_box_start(column)?;
     let gather_origins = rows
         .iter()
         .copied()
@@ -4196,14 +4241,16 @@ mod tests {
         ] {
             let element_bytes = element_bits / 8;
             let element_count = 16 / element_bytes;
-            let source_bytes = (0..16)
+            // The box starts 16 bytes in (PTX 5.5.3.1 alignment) and its
+            // second half lies past the 24-byte tensor.
+            let source_bytes = (0..24)
                 .map(|index| (index as u8).wrapping_mul(11).wrapping_add(3))
                 .collect::<Vec<_>>();
             let global = GlobalMemory::new();
             let allocation = global.allocate_from_bytes(source_bytes.clone()).unwrap();
             let tensor_map = RuntimeTensorMap::new(
                 global.full_view(allocation).unwrap(),
-                vec![element_count],
+                vec![element_count * 3 / 2],
                 vec![],
                 vec![element_count],
                 vec![1],
@@ -4218,7 +4265,7 @@ mod tests {
             let physical = PhysicalMemory::with_global(topology, global);
             let context = topology.warp_contexts().next().unwrap();
             let (destination, destination_buffer, _) = shared_destination(&physical, 16);
-            let origin = [i64::try_from(element_count / 2).unwrap()];
+            let origin = [i64::try_from(element_count).unwrap()];
             let operation = async_issue_operation(&context);
             let (accesses, _) =
                 RawTmaG2cTransferPlan::new(&context, &destination, &tensor_map, &origin, 1, false)
@@ -4238,11 +4285,11 @@ mod tests {
             let actual =
                 read_runtime_bytes(&physical, &context, &destination_buffer, 0, 0, 16).unwrap();
             let valid_bytes = 8_usize;
-            let mut expected = source_bytes[valid_bytes..].to_vec();
+            let mut expected = source_bytes[16..].to_vec();
             expected
                 .extend(std::iter::repeat_n(0x7ff7_u16.to_le_bytes(), valid_bytes / 2).flatten());
             assert_eq!(actual, expected);
-            let expected_footprint = (valid_bytes..16)
+            let expected_footprint = (16..16 + valid_bytes)
                 .map(|offset| (PhysicalAllocationId::from(allocation), offset))
                 .collect::<BTreeSet<_>>();
             assert_eq!(
@@ -4253,13 +4300,13 @@ mod tests {
     }
 
     #[test]
-    fn fp4_tensor_store_preserves_odd_origin_nibbles() {
+    fn fp4_tensor_box_start_must_be_16_byte_aligned() {
         let global = GlobalMemory::new();
-        let allocation = global.allocate_zeroed(16).unwrap();
+        let allocation = global.allocate_zeroed(32).unwrap();
         let tensor_map = RuntimeTensorMap::new(
             global.full_view(allocation).unwrap(),
-            vec![32, 1],
-            vec![16],
+            vec![64, 1],
+            vec![32],
             vec![32, 1],
             vec![1, 1],
             4,
@@ -4272,25 +4319,39 @@ mod tests {
         let topology = LaunchTopology::new(1, 1, 1).unwrap();
         let physical = PhysicalMemory::with_global(topology, global.clone());
         let context = topology.warp_contexts().next().unwrap();
-        let (source, source_buffer, _) = shared_destination(&physical, 16);
+        let (shared, shared_buffer, _) = shared_destination(&physical, 16);
         let source_bytes = (0..16)
             .map(|index| (index as u8).wrapping_mul(19).wrapping_add(0x21))
             .collect::<Vec<_>>();
-        write_runtime_bytes(&physical, &context, &source_buffer, 0, 0, &source_bytes).unwrap();
+        write_runtime_bytes(&physical, &context, &shared_buffer, 0, 0, &source_bytes).unwrap();
 
-        let writes = RawTmaS2gTransferPlan::new(&context, &source, &tensor_map, &[1, 0])
+        // Packed FP4 starts must be whole 16-byte (32-element) units: odd
+        // nibbles and packed-but-unaligned bytes are both rejected.
+        // Stores already reject negative starts.
+        for (inner, store) in [(1_i64, true), (2, true), (16, true), (-2, false), (-16, false)] {
+            let mut results = vec![
+                RawTmaG2cTransferPlan::new(&context, &shared, &tensor_map, &[inner, 0], 1, false)
+                    .map(|_| ()),
+            ];
+            if store {
+                results.push(
+                    RawTmaS2gTransferPlan::new(&context, &shared, &tensor_map, &[inner, 0])
+                        .map(|_| ()),
+                );
+            }
+            for result in results {
+                let message = result.unwrap_err().to_string();
+                assert!(message.contains("16-byte aligned"), "{inner}: {message}");
+            }
+        }
+        let writes = RawTmaS2gTransferPlan::new(&context, &shared, &tensor_map, &[32, 0])
             .unwrap()
             .execute(&physical, &context, &tensor_map, None)
             .unwrap();
         crate::memory::publish_deferred_global_writes(&writes).unwrap();
         let actual = global.snapshot_allocation_bytes(allocation).unwrap();
         let mut expected = vec![0_u8; 16];
-        for local_element in 0..31 {
-            let source_nibble =
-                (source_bytes[local_element / 2] >> ((local_element % 2) * 4)) & 0x0f;
-            let global_element = local_element + 1;
-            expected[global_element / 2] |= source_nibble << ((global_element % 2) * 4);
-        }
+        expected.extend_from_slice(&source_bytes);
         assert_eq!(actual, expected);
     }
 
@@ -4372,7 +4433,7 @@ mod tests {
     #[test]
     fn tensor_reduction_applies_each_in_bounds_element_once() {
         let global = GlobalMemory::new();
-        let initial = [10_u32, 20, 30, 40];
+        let initial = [10_u32, 20, 30, 40, 50, 60, 70];
         let allocation = global
             .allocate_from_bytes(
                 initial
@@ -4383,7 +4444,7 @@ mod tests {
             .unwrap();
         let tensor_map = RuntimeTensorMap::new(
             global.full_view(allocation).unwrap(),
-            vec![4],
+            vec![7],
             vec![],
             vec![4],
             vec![1],
@@ -4398,6 +4459,8 @@ mod tests {
         let physical = PhysicalMemory::with_global(topology, global.clone());
         let context = topology.warp_contexts().next().unwrap();
         let (source, source_buffer, _) = shared_destination(&physical, 16);
+        // The box starts at the 16-byte-aligned element 4; its last element
+        // lies past the tensor.
         let contributions = [1_u32, 2, 3, 99];
         let contribution_bytes = contributions
             .into_iter()
@@ -4414,7 +4477,7 @@ mod tests {
         .unwrap();
         let operation = async_issue_operation(&context);
         let (_, destination_accesses) =
-            RawTmaS2gTransferPlan::new(&context, &source, &tensor_map, &[1])
+            RawTmaS2gTransferPlan::new(&context, &source, &tensor_map, &[4])
                 .unwrap()
                 .accesses(
                     &operation,
@@ -4426,7 +4489,7 @@ mod tests {
         assert!(destination_accesses.iter().all(|access| {
             access.descriptor().memory_semantics() == MemoryAccessSemantics::async_reduction()
         }));
-        let writes = RawTmaS2gTransferPlan::new(&context, &source, &tensor_map, &[1])
+        let writes = RawTmaS2gTransferPlan::new(&context, &source, &tensor_map, &[4])
             .unwrap()
             .execute(
                 &physical,
@@ -4441,7 +4504,7 @@ mod tests {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect::<Vec<_>>();
-        assert_eq!(actual, vec![10, 21, 32, 43]);
+        assert_eq!(actual, vec![10, 20, 30, 40, 51, 62, 73]);
     }
 
     #[test]
