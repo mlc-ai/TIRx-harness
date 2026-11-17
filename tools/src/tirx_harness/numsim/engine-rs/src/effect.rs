@@ -359,6 +359,7 @@ pub enum AnalysisGapDomain {
     Tcgen,
     ClusterBarrier,
     Atomic,
+    MemoryOrder,
 }
 
 impl AnalysisGapDomain {
@@ -367,6 +368,7 @@ impl AnalysisGapDomain {
             Self::Tcgen => "tcgen",
             Self::ClusterBarrier => "cluster_barrier",
             Self::Atomic => "atomic",
+            Self::MemoryOrder => "memory_order",
         }
     }
 }
@@ -379,6 +381,10 @@ pub(crate) enum AnalysisGapKind {
     TcgenMma,
     ClusterBarrierUnaligned,
     AtomicLaneSerialization,
+    /// `fence.alias.sync_restrict::read.release.sys`: a system-scope release
+    /// of prior reads only. Racecheck's whole-frontier release heads publish
+    /// it as `fence.release.sys`, which can hide races on prior writes.
+    ReadOnlyReleaseFence,
 }
 
 impl AnalysisGapKind {
@@ -387,6 +393,7 @@ impl AnalysisGapKind {
             Self::TcgenMma => AnalysisGapDomain::Tcgen,
             Self::ClusterBarrierUnaligned => AnalysisGapDomain::ClusterBarrier,
             Self::AtomicLaneSerialization => AnalysisGapDomain::Atomic,
+            Self::ReadOnlyReleaseFence => AnalysisGapDomain::MemoryOrder,
         }
     }
 
@@ -395,6 +402,7 @@ impl AnalysisGapKind {
             Self::TcgenMma => "tcgen05.mma",
             Self::ClusterBarrierUnaligned => "cluster_barrier_unaligned_unmodeled",
             Self::AtomicLaneSerialization => "atomic_lane_serialization_unmodeled",
+            Self::ReadOnlyReleaseFence => "fence.alias.sync_restrict::read.release.sys",
         }
     }
 }

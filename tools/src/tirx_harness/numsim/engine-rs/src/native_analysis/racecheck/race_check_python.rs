@@ -635,6 +635,7 @@ fn race_incomplete_to_py<'py>(
                     AnalysisGapDomain::Tcgen => "tcgen_access_unmodeled",
                     AnalysisGapDomain::ClusterBarrier => "cluster_barrier_unaligned_unmodeled",
                     AnalysisGapDomain::Atomic => "atomic_lane_serialization_unmodeled",
+                    AnalysisGapDomain::MemoryOrder => "read_only_release_fence_unmodeled",
                 },
             )?;
             value.set_item("operation", dynamic_op_to_py(py, operation)?)?;

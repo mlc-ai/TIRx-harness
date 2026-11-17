@@ -341,6 +341,7 @@ pub const BARRIER_CLUSTER_ARRIVE: &str = "sync::barrier_cluster_arrive";
 pub const BARRIER_CLUSTER_WAIT: &str = "sync::barrier_cluster_wait";
 pub const CLC_TRY_CANCEL: &str = "control::clc_try_cancel";
 pub const FENCE: &str = "sync::fence";
+pub const FENCE_ALIAS_READ_RELEASE: &str = "sync::fence_alias_read_release";
 pub const FENCE_MBARRIER_INIT: &str = "sync::fence_mbarrier_init";
 pub const FENCE_PROXY_ASYNC: &str = "sync::fence_proxy_async";
 pub const GRIDDEPCONTROL: &str = "control::griddepcontrol";
@@ -1346,6 +1347,8 @@ pub enum SyncParts {
     /// The proxy space.
     FenceProxy(String),
     FenceMbarrierInit,
+    /// `fence.alias.sync_restrict::read.release.sys`.
+    FenceAliasReadRelease,
     /// Whether the action is `wait`.
     Griddepcontrol(bool),
     /// `(sem, scope)`.
@@ -1422,6 +1425,23 @@ pub fn ptx_sync_parts(ctx: &Ctx, decoded: &DecodedPtx) -> AResult<SyncParts> {
         }
         return Ok(SyncParts::FenceMbarrierInit);
     }
+    if op_name == "tirx.ptx.fence_alias_sync_restrict_read" {
+        for (name, value) in [
+            ("proxykind", "alias"),
+            ("sync_restrict", "sync_restrict::read"),
+            ("sem", "release"),
+            ("scope", "sys"),
+        ] {
+            if decoded.modifier(name)? != value {
+                return unsupported(format!(
+                    "{op_name} requires {name}={:?}, got {:?}",
+                    value,
+                    decoded.modifier(name)?
+                ));
+            }
+        }
+        return Ok(SyncParts::FenceAliasReadRelease);
+    }
     if op_name == "tirx.ptx.griddepcontrol" {
         let action = decoded_grid_action(decoded)?;
         return Ok(SyncParts::Griddepcontrol(action == "wait"));
@@ -1448,9 +1468,10 @@ pub fn ptx_sync_kind(
     allow_invalid_setmaxnreg: bool,
 ) -> AResult<SyncCallKind> {
     Ok(match parts {
-        SyncParts::CheckLayout(_) | SyncParts::PendingCount(..) | SyncParts::Fence(..) => {
-            SyncCallKind::OrderingMarker
-        }
+        SyncParts::CheckLayout(_)
+        | SyncParts::PendingCount(..)
+        | SyncParts::Fence(..)
+        | SyncParts::FenceAliasReadRelease => SyncCallKind::OrderingMarker,
         SyncParts::Inval(_) => SyncCallKind::MbarrierInval,
         SyncParts::BarReduce(_) => SyncCallKind::BarSync,
         SyncParts::NamedBarrier(_) => match op_name {
@@ -1987,6 +2008,7 @@ impl<'a> Emitter<'a> {
             }
             SyncParts::FenceProxy(_)
             | SyncParts::FenceMbarrierInit
+            | SyncParts::FenceAliasReadRelease
             | SyncParts::Griddepcontrol(_)
             | SyncParts::Fence(..) => {
                 let region = self.open_shadow_predicated_region(
@@ -2418,6 +2440,10 @@ impl<'a> Emitter<'a> {
                 None,
             ),
             SyncParts::FenceMbarrierInit => self.emit_fence_mbarrier_init(source_op_id),
+            SyncParts::FenceAliasReadRelease => {
+                let call = self.plain_sync_call(FENCE_ALIAS_READ_RELEASE, source_op_id, &[]);
+                self.emit_line(&format!("{call};"));
+            }
             SyncParts::Griddepcontrol(_) => self.emit_griddepcontrol(source_op_id),
             SyncParts::Fence(sem, scope) => self.emit_sync_stateful(
                 FENCE,

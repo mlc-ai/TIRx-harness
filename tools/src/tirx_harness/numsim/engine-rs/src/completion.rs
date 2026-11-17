@@ -538,6 +538,7 @@ pub(crate) enum AwaitedOperation {
     CpAsyncWaitGroupRead,
     BulkWaitGroup,
     BulkWaitGroupRead,
+    BulkWaitGroupProxyAsync,
     /// Recorded at park time rather than reconstructed: the warp is waiting for
     /// a peer to release an overlapping atomic-RMW linearization reservation.
     AtomicLinearization,
@@ -564,6 +565,7 @@ impl fmt::Display for AwaitedOperation {
             Self::CpAsyncWaitGroupRead => "cp.async.wait_group.read",
             Self::BulkWaitGroup => "cp.async.bulk.wait_group",
             Self::BulkWaitGroupRead => "cp.async.bulk.wait_group.read",
+            Self::BulkWaitGroupProxyAsync => "cp.async.bulk.wait_group.sync_restrict::proxy::async",
             Self::AtomicLinearization => "atom.linearize",
             Self::SemanticProgress => "engine.semantic_progress",
             Self::DeclaredWordWait => "wait_until",

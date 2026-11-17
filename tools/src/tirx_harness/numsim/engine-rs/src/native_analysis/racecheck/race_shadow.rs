@@ -1646,6 +1646,15 @@ impl BarrierClockPayload {
         }
     }
 
+    /// The causal frontier alone: an acquirer is ordered after the clock's
+    /// accesses only for later accesses through the same proxy.
+    pub fn from_clock_without_proxy_bridges(clock: RaceVectorClock) -> Self {
+        Self {
+            proxy_bridges: None,
+            ..Self::from_clock_for_mask(clock, WarpMask::EMPTY)
+        }
+    }
+
     pub const fn clock(&self) -> &RaceVectorClock {
         &self.clock
     }

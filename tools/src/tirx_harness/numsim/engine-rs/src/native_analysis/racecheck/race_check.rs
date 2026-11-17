@@ -28,7 +28,8 @@ use crate::effect::{
 use crate::transactional_interval_map::TransactionalIntervalMap;
 use crate::{
     profile_count, AnalysisGapEffect, AnalysisGapKind,
-    AsyncGroupCompletionActionId, AsyncGroupMilestone, AsyncTokenId, BarrierClockPayload,
+    AsyncGroupCompletionActionId, AsyncGroupMilestone, AsyncGroupWaitKind, AsyncTokenId,
+    BarrierClockPayload,
     CheckerLaunchContext, ClusterBarrierId, ClusterBarrierParticipantExitEvidence,
     CompletionActionEffect, CompletionEffect, DynamicOpId, EngineError, EngineModeImpl,
     ExecutionReport, LanePhysicalAccess, LaunchTopology, MemoryAccessSemantics, OperationContext,
@@ -5095,6 +5096,7 @@ impl RaceCheckLaunchState {
             } => {
                 let mut payload: Option<BarrierClockPayload> = None;
                 let mut retired_tokens = Vec::new();
+                let kind = outcome.plan().kind();
                 for group in outcome.groups() {
                     for member in group.members() {
                         let clocks = state
@@ -5117,7 +5119,16 @@ impl RaceCheckLaunchState {
                                 group.milestone()
                             ))
                         })?;
-                        let acquired = BarrierClockPayload::from_clock(clock.clone());
+                        // The restricted wait orders the completed accesses
+                        // before later async-proxy accesses only, so it takes
+                        // the causal frontier without the completion's
+                        // async-to-generic proxy bridges, and keeps the token
+                        // for a later unrestricted wait.
+                        let acquired = if kind.async_proxy_only() {
+                            BarrierClockPayload::from_clock_without_proxy_bridges(clock.clone())
+                        } else {
+                            BarrierClockPayload::from_clock(clock.clone())
+                        };
                         if let Some(payload) = &mut payload {
                             payload
                                 .merge(&acquired)
@@ -5125,7 +5136,7 @@ impl RaceCheckLaunchState {
                         } else {
                             payload = Some(acquired);
                         }
-                        if !outcome.plan().read_only() {
+                        if kind == AsyncGroupWaitKind::Full {
                             retired_tokens.push(member.token().clone());
                         }
                     }
@@ -5906,12 +5917,18 @@ impl RaceCheckLaunchState {
                 } => {
                     let mut global = self.global_for_warp(operation.id().global_warp_id())?;
                     let mut retired = Vec::new();
+                    let kind = outcome.plan().kind();
                     for group in outcome.groups() {
                         for member in group.members() {
                             global
-                                .acquire_async_token(operation, member.token(), group.milestone())
+                                .acquire_async_token(
+                                    operation,
+                                    member.token(),
+                                    group.milestone(),
+                                    !kind.async_proxy_only(),
+                                )
                                 .map_err(EngineError::message)?;
-                            if !outcome.plan().read_only() {
+                            if kind == AsyncGroupWaitKind::Full {
                                 retired.push(member.token().clone());
                             }
                         }
@@ -12298,7 +12315,13 @@ mod tests {
 
             let wait_operation = operation(0, sequence + 2, OperationKind::Barrier);
             let wait_plan = hub
-                .wait_plan(&context, AsyncGroupDomain::Bulk, lane_zero, 0, false)
+                .wait_plan(
+                    &context,
+                    AsyncGroupDomain::Bulk,
+                    lane_zero,
+                    0,
+                    crate::AsyncGroupWaitKind::Full,
+                )
                 .unwrap();
             before(
                 &state,

@@ -112,6 +112,34 @@ pub enum AsyncGroupMilestone {
     FullComplete,
 }
 
+/// What a group wait waits for, and which later accesses it orders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AsyncGroupWaitKind {
+    /// Full completion, ordered before every later access of the waiter.
+    Full,
+    /// `.read`: source reads complete; destination writes stay pending.
+    Read,
+    /// `.sync_restrict::proxy::async`: full completion, ordered only before
+    /// later async-proxy accesses (PTX ISA 9.7.10.28.6.2).
+    AsyncProxyOnly,
+}
+
+impl AsyncGroupWaitKind {
+    pub const fn read_only(self) -> bool {
+        matches!(self, Self::Read)
+    }
+
+    pub const fn async_proxy_only(self) -> bool {
+        matches!(self, Self::AsyncProxyOnly)
+    }
+
+    /// Whether waited groups stay committed so a later wait can still
+    /// establish the ordering this one did not.
+    const fn retains_waited_groups(self) -> bool {
+        !matches!(self, Self::Full)
+    }
+}
+
 /// Exact source and destination footprints owned by one async-group token.
 /// No-payload operations retain empty footprint slices while using the same
 /// issue, commit, completion, and wait lifecycle.
@@ -411,7 +439,7 @@ pub struct AsyncGroupWaitPlan {
     domain: AsyncGroupDomain,
     lanes: Box<[u8]>,
     pending_groups: usize,
-    read_only: bool,
+    kind: AsyncGroupWaitKind,
 }
 
 impl AsyncGroupWaitPlan {
@@ -431,8 +459,12 @@ impl AsyncGroupWaitPlan {
         self.pending_groups
     }
 
+    pub const fn kind(&self) -> AsyncGroupWaitKind {
+        self.kind
+    }
+
     pub const fn read_only(&self) -> bool {
-        self.read_only
+        self.kind.read_only()
     }
 }
 
@@ -953,10 +985,10 @@ impl DomainState {
     fn commit_wait_completion(
         &mut self,
         pending_groups: usize,
-        read_only: bool,
+        kind: AsyncGroupWaitKind,
     ) -> Vec<AsyncGroupWaitedGroup> {
         let target_count = self.wait_prefix_len(pending_groups);
-        let milestone = if read_only {
+        let milestone = if kind.read_only() {
             AsyncGroupMilestone::SourceReadComplete
         } else {
             AsyncGroupMilestone::FullComplete
@@ -967,7 +999,7 @@ impl DomainState {
             .take(target_count)
             .map(|group| group.waited(milestone))
             .collect::<Vec<_>>();
-        if read_only {
+        if kind.retains_waited_groups() {
             let mut index = 0;
             self.committed_groups.retain(|group| {
                 let in_waited_prefix = index < target_count;
@@ -1080,7 +1112,7 @@ impl AsyncGroupHub {
         domain: AsyncGroupDomain,
         mask: WarpMask,
         pending_groups: i64,
-        read_only: bool,
+        kind: AsyncGroupWaitKind,
     ) -> Result<usize, EngineError> {
         if domain == AsyncGroupDomain::Release {
             return Err(EngineError::message(
@@ -1092,10 +1124,10 @@ impl AsyncGroupHub {
             mask,
             &crate::DiagnosticLabel::new("async-group wait"),
         )?;
-        if read_only && domain == AsyncGroupDomain::CpAsync {
-            return Err(EngineError::message(
-                "cp.async.wait_group does not support the bulk .read modifier",
-            ));
+        if kind != AsyncGroupWaitKind::Full && domain == AsyncGroupDomain::CpAsync {
+            return Err(EngineError::message(format!(
+                "cp.async.wait_group does not support the bulk {kind:?} wait"
+            )));
         }
         usize::try_from(pending_groups).map_err(|_| {
             EngineError::message(format!(
@@ -1459,9 +1491,9 @@ impl AsyncGroupHub {
         domain: AsyncGroupDomain,
         mask: WarpMask,
         pending_groups: i64,
-        read_only: bool,
+        kind: AsyncGroupWaitKind,
     ) -> Result<AsyncGroupWaitPlan, EngineError> {
-        let pending_groups = Self::validate_wait(context, domain, mask, pending_groups, read_only)?;
+        let pending_groups = Self::validate_wait(context, domain, mask, pending_groups, kind)?;
         Ok(AsyncGroupWaitPlan {
             global_warp_id: context.global_warp_id(),
             domain,
@@ -1471,7 +1503,7 @@ impl AsyncGroupHub {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             pending_groups,
-            read_only,
+            kind,
         })
     }
 
@@ -1603,7 +1635,7 @@ impl AsyncGroupHub {
             groups.extend(
                 state.lanes[lane]
                     .domain_mut(plan.domain())
-                    .commit_wait_completion(plan.pending_groups(), plan.read_only()),
+                    .commit_wait_completion(plan.pending_groups(), plan.kind()),
             );
         }
         Ok(AsyncGroupWaitOutcome {
@@ -1618,9 +1650,9 @@ impl AsyncGroupHub {
         domain: AsyncGroupDomain,
         mask: WarpMask,
         pending_groups: i64,
-        read_only: bool,
+        kind: AsyncGroupWaitKind,
     ) -> Result<(), EngineError> {
-        let plan = self.wait_plan(context, domain, mask, pending_groups, read_only)?;
+        let plan = self.wait_plan(context, domain, mask, pending_groups, kind)?;
         while self.apply_next_wait_completion(&plan)?.is_some() {}
         self.complete_wait(plan)?;
         Ok(())
@@ -1873,11 +1905,20 @@ impl CompletionSource for AsyncGroupHub {
                     .loop_frames()
                     .iter()
                     .map(|frame| i64::try_from(frame.iteration_ordinal()).unwrap_or(i64::MAX));
-                let awaited_operation = match (waiter.plan.domain(), waiter.plan.read_only()) {
-                    (AsyncGroupDomain::CpAsync, false) => AwaitedOperation::CpAsyncWaitGroup,
-                    (AsyncGroupDomain::CpAsync, true) => AwaitedOperation::CpAsyncWaitGroupRead,
-                    (AsyncGroupDomain::Bulk, false) => AwaitedOperation::BulkWaitGroup,
-                    (AsyncGroupDomain::Bulk, true) => AwaitedOperation::BulkWaitGroupRead,
+                let awaited_operation = match (waiter.plan.domain(), waiter.plan.kind()) {
+                    (AsyncGroupDomain::CpAsync, AsyncGroupWaitKind::Full) => {
+                        AwaitedOperation::CpAsyncWaitGroup
+                    }
+                    (AsyncGroupDomain::CpAsync, _) => AwaitedOperation::CpAsyncWaitGroupRead,
+                    (AsyncGroupDomain::Bulk, AsyncGroupWaitKind::Full) => {
+                        AwaitedOperation::BulkWaitGroup
+                    }
+                    (AsyncGroupDomain::Bulk, AsyncGroupWaitKind::Read) => {
+                        AwaitedOperation::BulkWaitGroupRead
+                    }
+                    (AsyncGroupDomain::Bulk, AsyncGroupWaitKind::AsyncProxyOnly) => {
+                        AwaitedOperation::BulkWaitGroupProxyAsync
+                    }
                     (AsyncGroupDomain::Release, _) => unreachable!("release waits are rejected"),
                 };
                 BlockedOperation::new(
@@ -1925,7 +1966,7 @@ mod tests {
 
     use super::{
         AsyncGroupDomain, AsyncGroupHub, AsyncGroupIssueBatchEffect, AsyncGroupIssueEffect,
-        AsyncGroupMilestone, GroupCompletion,
+        AsyncGroupMilestone, AsyncGroupWaitKind, GroupCompletion,
     };
     use crate::{
         CompletionSource, DynamicOpId, GlobalMemory, LaunchTopology, MemoryAccessClass,
@@ -2042,8 +2083,14 @@ mod tests {
             .unwrap();
         hub.commit(&context, AsyncGroupDomain::CpAsync, mask)
             .unwrap();
-        hub.wait_group(&context, AsyncGroupDomain::CpAsync, mask, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::CpAsync,
+            mask,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2085,14 +2132,26 @@ mod tests {
             hub.issue(&context, AsyncGroupDomain::Bulk, mask).unwrap();
             hub.commit(&context, AsyncGroupDomain::Bulk, mask).unwrap();
         }
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 1, true)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            1,
+            AsyncGroupWaitKind::Read,
+        )
+        .unwrap();
         let error = hub.validate_quiescent().unwrap_err().to_string();
         assert!(error.contains("3 execution batch(es) / 3 issue(s) pending full completion"));
         assert!(error.contains("1 batch(es) still reading source"));
         assert!(error.contains("2 batch(es) with source reads complete"));
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2104,8 +2163,14 @@ mod tests {
         hub.issue(&context, AsyncGroupDomain::Bulk, mask).unwrap();
         hub.commit(&context, AsyncGroupDomain::Bulk, mask).unwrap();
 
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 0, true)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            0,
+            AsyncGroupWaitKind::Read,
+        )
+        .unwrap();
 
         let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
         for lane in mask {
@@ -2124,6 +2189,58 @@ mod tests {
     }
 
     #[test]
+    fn bulk_proxy_async_wait_completes_fully_and_keeps_groups_for_a_later_wait() {
+        let context = context();
+        let hub = AsyncGroupHub::new(context.topology());
+        let mask = context.active_mask();
+        hub.issue(&context, AsyncGroupDomain::Bulk, mask).unwrap();
+        hub.commit(&context, AsyncGroupDomain::Bulk, mask).unwrap();
+
+        let wait = |kind| {
+            let plan = hub
+                .wait_plan(&context, AsyncGroupDomain::Bulk, mask, 0, kind)
+                .unwrap();
+            while hub.apply_next_wait_completion(&plan).unwrap().is_some() {}
+            hub.complete_wait(plan).unwrap()
+        };
+        let restricted = wait(AsyncGroupWaitKind::AsyncProxyOnly);
+        assert_eq!(restricted.groups().len(), mask.len());
+        assert!(restricted
+            .groups()
+            .iter()
+            .all(|group| group.milestone() == AsyncGroupMilestone::FullComplete));
+        hub.validate_quiescent().unwrap();
+        {
+            let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
+            for lane in mask {
+                let bulk = state.lanes[lane].domain(AsyncGroupDomain::Bulk);
+                assert_eq!(bulk.committed_groups.len(), 1);
+            }
+        }
+
+        // An unrestricted wait still observes, then drains, the same groups.
+        let full = wait(AsyncGroupWaitKind::Full);
+        assert_eq!(
+            full.groups()
+                .iter()
+                .map(|group| group.id())
+                .collect::<Vec<_>>(),
+            restricted
+                .groups()
+                .iter()
+                .map(|group| group.id())
+                .collect::<Vec<_>>()
+        );
+        let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
+        for lane in mask {
+            assert!(state.lanes[lane]
+                .domain(AsyncGroupDomain::Bulk)
+                .committed_groups
+                .is_empty());
+        }
+    }
+
+    #[test]
     fn wait_cannot_observe_completion_before_mode_publication() {
         let context = context();
         let lane = WarpMask::from_lanes([0]).unwrap();
@@ -2131,7 +2248,13 @@ mod tests {
         hub.issue(&context, AsyncGroupDomain::Bulk, lane).unwrap();
         hub.commit(&context, AsyncGroupDomain::Bulk, lane).unwrap();
         let wait_plan = hub
-            .wait_plan(&context, AsyncGroupDomain::Bulk, lane, 0, true)
+            .wait_plan(
+                &context,
+                AsyncGroupDomain::Bulk,
+                lane,
+                0,
+                AsyncGroupWaitKind::Read,
+            )
             .unwrap();
         let action = hub.pending_completion_actions().remove(0);
 
@@ -2175,8 +2298,14 @@ mod tests {
         let hub = AsyncGroupHub::new(context.topology());
         let mask = context.active_mask();
         hub.commit(&context, AsyncGroupDomain::Bulk, mask).unwrap();
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 0, true)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            0,
+            AsyncGroupWaitKind::Read,
+        )
+        .unwrap();
         let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
         for lane in mask {
             assert!(state.lanes[lane].bulk.committed_groups.is_empty());
@@ -2210,8 +2339,14 @@ mod tests {
             .is_empty());
         drop(state);
 
-        hub.wait_group(&context, AsyncGroupDomain::CpAsync, full_mask, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::CpAsync,
+            full_mask,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2250,8 +2385,14 @@ mod tests {
                 WarpMask::from_lanes([group.id().lane()]).unwrap()
             );
         }
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2265,8 +2406,14 @@ mod tests {
             hub.commit(&context, AsyncGroupDomain::Bulk, mask).unwrap();
         }
         for pending in [i64::MAX, 255, 64] {
-            hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, pending, false)
-                .unwrap();
+            hub.wait_group(
+                &context,
+                AsyncGroupDomain::Bulk,
+                mask,
+                pending,
+                AsyncGroupWaitKind::Full,
+            )
+            .unwrap();
             let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
             for lane in mask {
                 assert_eq!(
@@ -2276,10 +2423,22 @@ mod tests {
             }
         }
         assert!(hub
-            .wait_group(&context, AsyncGroupDomain::Bulk, mask, -1, false)
+            .wait_group(
+                &context,
+                AsyncGroupDomain::Bulk,
+                mask,
+                -1,
+                AsyncGroupWaitKind::Full
+            )
             .is_err());
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, mask, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            mask,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2357,8 +2516,14 @@ mod tests {
         assert!(hub.apply_first_enabled_completion().unwrap().is_none());
 
         for context in &contexts {
-            hub.wait_group(context, AsyncGroupDomain::CpAsync, lane, 0, false)
-                .unwrap();
+            hub.wait_group(
+                context,
+                AsyncGroupDomain::CpAsync,
+                lane,
+                0,
+                AsyncGroupWaitKind::Full,
+            )
+            .unwrap();
         }
         hub.issue(&contexts[1], AsyncGroupDomain::CpAsync, lane)
             .unwrap();
@@ -2370,8 +2535,14 @@ mod tests {
         assert!(hub.active_completion_warps[1].load(Ordering::Acquire));
         assert_eq!(hub.pump().unwrap().completed_operations, 1);
         assert!(!hub.active_completion_warps[1].load(Ordering::Acquire));
-        hub.wait_group(&contexts[1], AsyncGroupDomain::CpAsync, lane, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &contexts[1],
+            AsyncGroupDomain::CpAsync,
+            lane,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2463,7 +2634,13 @@ mod tests {
                 .unwrap();
         }
         let wait = wait_hub
-            .wait_plan(&context, AsyncGroupDomain::Bulk, mask, 0, false)
+            .wait_plan(
+                &context,
+                AsyncGroupDomain::Bulk,
+                mask,
+                0,
+                AsyncGroupWaitKind::Full,
+            )
             .unwrap();
         assert!(wait_hub.complete_wait(wait).is_err());
         let state = wait_hub
@@ -2484,8 +2661,14 @@ mod tests {
         hub.commit(&context, AsyncGroupDomain::Bulk, lane).unwrap();
         hub.commit(&context, AsyncGroupDomain::Bulk, lane).unwrap();
 
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, lane, 1, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            lane,
+            1,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
         let remaining = &state.lanes[0].bulk.committed_groups;
         assert_eq!(remaining.len(), 1);
@@ -2493,8 +2676,14 @@ mod tests {
         assert!(remaining[0].issues.is_empty());
         drop(state);
 
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, lane, 0, true)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            lane,
+            0,
+            AsyncGroupWaitKind::Read,
+        )
+        .unwrap();
         hub.validate_quiescent().unwrap();
     }
 
@@ -2538,8 +2727,14 @@ mod tests {
         assert_eq!(completed.issues[0].writes.len(), 2);
         drop(state);
 
-        hub.wait_group(&context, AsyncGroupDomain::Bulk, lane, 0, false)
-            .unwrap();
+        hub.wait_group(
+            &context,
+            AsyncGroupDomain::Bulk,
+            lane,
+            0,
+            AsyncGroupWaitKind::Full,
+        )
+        .unwrap();
         let state = hub.state(context.global_warp_id()).unwrap().lock().unwrap();
         assert!(state.lanes[0].bulk.committed_groups.is_empty());
     }

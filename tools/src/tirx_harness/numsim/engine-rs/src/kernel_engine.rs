@@ -7699,7 +7699,7 @@ impl<M: EngineMode> WarpEngine<M> {
         domain: AsyncGroupDomain,
         mask: WarpMask,
         pending_groups: i64,
-        read_only: bool,
+        kind: crate::AsyncGroupWaitKind,
     ) -> Result<(), EngineError> {
         let operation = self
             .checked_effect_operation(operation, OperationKind::Barrier)?
@@ -7707,7 +7707,7 @@ impl<M: EngineMode> WarpEngine<M> {
                 EngineError::message("async-group wait requires a stable operation context")
             })?;
         let hub = self.kernel.services().async_groups();
-        let plan = hub.wait_plan(&self.context, domain, mask, pending_groups, read_only)?;
+        let plan = hub.wait_plan(&self.context, domain, mask, pending_groups, kind)?;
         self.before_effect(
             Some(operation),
             OperationEffect::AsyncGroupWait {

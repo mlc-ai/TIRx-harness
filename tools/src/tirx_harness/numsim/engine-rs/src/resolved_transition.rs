@@ -124,6 +124,9 @@ pub enum ResolvedAnalysisResource {
         kernel_index: usize,
         global_cta_id: usize,
     },
+    MemoryOrderKernel {
+        kernel_index: usize,
+    },
 }
 
 /// Replay-stable summary of one path-sensitive unmodeled analysis effect.
@@ -154,6 +157,10 @@ impl ResolvedAnalysisGapEffect {
             AnalysisGapDomain::Atomic => vec![ResolvedAnalysisResource::AtomicCta {
                 kernel_index: effect.kernel_index(),
                 global_cta_id: effect.global_cta_id(),
+            }],
+            // A system-scope release can pair with an acquire anywhere.
+            AnalysisGapDomain::MemoryOrder => vec![ResolvedAnalysisResource::MemoryOrderKernel {
+                kernel_index: effect.kernel_index(),
             }],
         };
         Self {

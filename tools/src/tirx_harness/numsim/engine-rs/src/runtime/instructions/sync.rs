@@ -1549,6 +1549,39 @@ pub fn fence_mbarrier_init(
     finish(warp, &operation)
 }
 
+/// Execute one `fence.alias.sync_restrict::read.release.sys`, a system-scope
+/// release of prior reads only. It has no numerical effect. Checkers cannot
+/// release reads without writes, so the fence publishes as `fence.release.sys`
+/// -- a superset of its ordering, so every reported race is real -- and
+/// records an analysis gap for the write races that superset can hide.
+#[inline(never)]
+pub fn fence_alias_read_release(
+    warp: &mut super::Engine,
+    context: ExecCtx,
+    site: SiteId,
+) -> Result<(), EngineError> {
+    #[cfg(feature = "profile")]
+    crate::instruction_profile::record(
+        context,
+        site,
+        std::any::type_name_of_val(&fence_alias_read_release),
+    );
+    let operation = engine(warp).begin_optional_analysis_gap_internal(
+        context.into_inner(),
+        site.get(),
+        OperationKind::Fence,
+        crate::AnalysisGapKind::ReadOnlyReleaseFence,
+        None,
+    )?;
+    engine(warp).memory_fence(
+        operation.as_ref(),
+        MemoryOrder::Release,
+        MemoryScope::Sys,
+        MemoryProxy::Generic,
+    )?;
+    finish(warp, &operation)
+}
+
 // State-token forms remain absent until the engine has a 64-bit state-token
 // transport. Acquire-qualified nonblocking waits execute exact numeric
 // readiness; checker modes additionally honor acquire-on-true semantics.

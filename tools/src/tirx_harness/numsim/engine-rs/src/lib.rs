@@ -83,8 +83,8 @@ pub(crate) use async_groups::{
     AsyncGroupCommitOutcome, AsyncGroupCommitPlan, AsyncGroupCommittedGroup,
     AsyncGroupCompletionAction, AsyncGroupCompletionActionId, AsyncGroupCompletionOutcome,
     AsyncGroupDomain, AsyncGroupHub, AsyncGroupId, AsyncGroupIssueBatchEffect,
-    AsyncGroupIssueEffect, AsyncGroupMilestone, AsyncGroupWaitOutcome, AsyncGroupWaitPlan,
-    AsyncGroupWaitedGroup,
+    AsyncGroupIssueEffect, AsyncGroupMilestone, AsyncGroupWaitKind, AsyncGroupWaitOutcome,
+    AsyncGroupWaitPlan, AsyncGroupWaitedGroup,
 };
 pub(crate) use async_token::AsyncTokenId;
 pub(crate) use checker_launch::CheckerLaunchContext;
