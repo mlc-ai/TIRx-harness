@@ -149,6 +149,14 @@ pub fn resolve_ptx_unary(decoded: &DecodedPtx) -> AResult<UnaryForm> {
                 ),
             );
         }
+        // `.2pi` takes the source in cycles and PTX requires `.ftz` with it.
+        let cycles = !decoded.modifier_or_empty("unit").is_empty();
+        if cycles && ftz.is_empty() {
+            return unmodeled_form(
+                decoded,
+                &format!("{}.approx.2pi requires .ftz", short_name(op_name)),
+            );
+        }
         instruction = if op_name == "tirx.ptx.cos" {
             "cos"
         } else {
@@ -156,7 +164,11 @@ pub fn resolve_ptx_unary(decoded: &DecodedPtx) -> AResult<UnaryForm> {
         };
         variant = format!(
             "v2::reg::variant::{}",
-            if ftz.is_empty() { "F32" } else { "F32Ftz" }
+            match (cycles, ftz.is_empty()) {
+                (true, _) => "F32FtzCycles",
+                (false, true) => "F32",
+                (false, false) => "F32Ftz",
+            }
         );
         expected_dtype = "float32";
         rust_type = "f32";

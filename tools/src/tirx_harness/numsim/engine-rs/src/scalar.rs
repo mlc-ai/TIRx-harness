@@ -429,6 +429,30 @@ pub fn ptx_cos_approx_f32(value: f32, ftz: bool) -> f32 {
     }
 }
 
+/// Reduces a `.2pi` operand, in cycles, to the radian angle of its fractional
+/// turn. Removing whole turns first is exact in f64, so the angle stays
+/// accurate for large inputs; zero keeps its sign, and non-finite inputs stay
+/// non-finite so the radian functions return NaN.
+fn cycles_to_radians(cycles: f32) -> f64 {
+    let cycles = f64::from(cycles);
+    if cycles == 0.0 || !cycles.is_finite() {
+        return cycles;
+    }
+    (cycles - cycles.round()) * core::f64::consts::TAU
+}
+
+/// `sin.approx.2pi.ftz.f32`: the sine of `value` turns (PTX ISA 9.5).
+pub fn ptx_sin_cycles_approx_ftz_f32(value: f32) -> f32 {
+    let value = flush_subnormal_f32(value);
+    flush_subnormal_f32(libm::sin(cycles_to_radians(value)) as f32)
+}
+
+/// `cos.approx.2pi.ftz.f32`: the cosine of `value` turns (PTX ISA 9.5).
+pub fn ptx_cos_cycles_approx_ftz_f32(value: f32) -> f32 {
+    let value = flush_subnormal_f32(value);
+    flush_subnormal_f32(libm::cos(cycles_to_radians(value)) as f32)
+}
+
 pub fn ptx_exp2_approx_ftz_bf16x2(value: u32) -> u32 {
     u32::from(ptx_exp2_approx_ftz_bf16(value as u16))
         | (u32::from(ptx_exp2_approx_ftz_bf16((value >> 16) as u16)) << 16)

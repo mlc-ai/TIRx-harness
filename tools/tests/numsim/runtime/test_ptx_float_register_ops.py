@@ -410,19 +410,39 @@ def test_trigonometric_approximations_obey_special_values_ftz_and_error_bound(
     _execution, op_name: str
 ):
     result, inputs = _execution
-    operation = math.sin if op_name == SIN else math.cos
-    for form in _forms_for(op_name):
+    radians = math.sin if op_name == SIN else math.cos
+    forms = _forms_for(op_name)
+    assert any(dict(form.modifiers).get("unit") == "2pi" for form in forms)
+    for form in forms:
+        modifiers = dict(form.modifiers)
         source = inputs[form.op_name, 0, form.dtypes[1]]
-        ftz = bool(dict(form.modifiers)["ftz"])
+        ftz = bool(modifiers["ftz"])
+        # `.2pi` reads the source in cycles: 1.0 is one turn, so sin(0.25) is 1.
+        cycles = modifiers.get("unit") == "2pi"
         expected = []
         for value in source:
             value = _flush_f32(value) if ftz else value
-            computed = np.float32(np.nan if not np.isfinite(value) else operation(float(value)))
+            if not np.isfinite(value):
+                computed = np.float32(np.nan)
+            elif cycles:
+                computed = np.float32(radians(2.0 * math.pi * math.fmod(float(value), 1.0)))
+            else:
+                computed = np.float32(radians(float(value)))
             expected.append(_flush_f32(computed) if ftz else computed)
         expected = np.asarray(expected, dtype=np.float32)
         actual = _actual(result, form)
         assert np.array_equal(np.isnan(actual), np.isnan(expected))
         finite = ~np.isnan(expected)
-        np.testing.assert_allclose(actual[finite], expected[finite], rtol=0.0, atol=2**-20.5)
-        zero = finite & (expected == 0.0)
+        if cycles:
+            # PTX bounds: 2^-20 on [-1, 1] cycles and 2^-14.2 on [-50, 50].
+            with np.errstate(invalid="ignore"):
+                magnitude = np.abs(source.astype(np.float64))
+            bound = np.where(magnitude <= 1.0, 2**-20, 2**-14.2)
+            assert np.all(magnitude[finite] <= 50.0)
+            assert np.all(np.abs(actual[finite] - expected[finite]) <= bound[finite])
+            # Only signed-zero inputs have a defined zero sign; whole turns do not.
+            zero = finite & (source == 0.0)
+        else:
+            np.testing.assert_allclose(actual[finite], expected[finite], rtol=0.0, atol=2**-20.5)
+            zero = finite & (expected == 0.0)
         np.testing.assert_array_equal(_float_bits(actual[zero]), _float_bits(expected[zero]))
