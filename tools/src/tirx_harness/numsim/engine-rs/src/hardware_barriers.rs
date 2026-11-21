@@ -2796,6 +2796,29 @@ impl NamedBarrierArrivalOutcome {
 pub struct NamedBarrierHub {
     publication_gate: Mutex<()>,
     state: Mutex<BTreeMap<NamedBarrierId, NamedBarrierEntry>>,
+    /// The launch, when known, so a partial warp's absent lanes can be
+    /// credited (see [`absent_lane_credit`]). `None` means whole warps.
+    topology: Option<crate::LaunchTopology>,
+}
+
+/// Arrivals credited for a warp's absent lanes by one barrier contribution.
+///
+/// PTX counts `bar`/`barrier` arrivals per warp: "the arrival count for the
+/// barrier is incremented by the warp size (not the number of active threads
+/// in the warp)", and the default count is the CTA's warp count times 32. The
+/// lanes of a CTA's partial last warp that do not exist never execute, so when
+/// the warp's existing lanes have all contributed through one barrier
+/// instruction flavor (`prior | arrival == launch`), the absent lanes are
+/// credited once. Whole warps have no absent lanes and receive no credit.
+/// [VERIFY] Per-warp counting is exact for a converged partial warp; crediting
+/// only once every existing lane has arrived is the conservative reading for a
+/// divergent one, pending a GPU microtest.
+pub(crate) fn absent_lane_credit(launch: WarpMask, prior: WarpMask, arrival: WarpMask) -> u64 {
+    if prior != launch && prior.union(arrival) == launch {
+        (WARP_SIZE - launch.len()) as u64
+    } else {
+        0
+    }
 }
 
 #[derive(Clone)]
@@ -2834,6 +2857,19 @@ impl NamedBarrierHub {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A hub for one launch, crediting the absent lanes of partial warps.
+    pub fn for_topology(topology: crate::LaunchTopology) -> Self {
+        Self {
+            topology: Some(topology),
+            ..Self::default()
+        }
+    }
+
+    fn launch_mask(&self, warp_id: usize) -> WarpMask {
+        self.topology
+            .map_or(WarpMask::FULL, |topology| topology.lane_mask_for_warp(warp_id))
     }
 
     pub fn sync(
@@ -3016,10 +3052,11 @@ impl NamedBarrierHub {
                     warp_id,
                 });
             }
+            let credit = absent_lane_credit(self.launch_mask(warp_id), prior_mask, arrival_mask);
             let completed = entry
                 .phase
                 .arrival_count
-                .checked_add(arrival_mask.len() as u64)
+                .checked_add(arrival_mask.len() as u64 + credit)
                 .ok_or_else(|| SynchronizationError::BarrierArrivalOverflow {
                     key: key.clone(),
                     phase: generation,

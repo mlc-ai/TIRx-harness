@@ -105,8 +105,10 @@ instruction_variant! {
         )?;
         let result = engine(warp).collective_numeric_operation(operation.as_ref(), || {
             let full_members = WarpValue::splat(u32::MAX);
+            // movmatrix is warp-wide in hardware: all 32 lanes must exist.
             validate_warp_collective_participants(
                 context.active_mask().into_inner(),
+                WarpMask::FULL,
                 &full_members,
                 &crate::DiagnosticLabel::new("movmatrix.sync.aligned.m8n8.trans.b16"),
             )?;
@@ -171,6 +173,7 @@ fn source_mask(
 ) -> Result<LaneMask, EngineError> {
     let mask = warp_shuffle_source_mask(
         context.active_mask().into_inner(),
+        context.launch_mask().into_inner(),
         member_mask.inner(),
         selector.inner(),
         control.inner(),
@@ -219,6 +222,7 @@ where
         engine(warp).collective_numeric_operation(operation.as_ref(), || {
             warp_shuffle_ptx(
                 context.active_mask().into_inner(),
+                context.launch_mask().into_inner(),
                 member_mask.inner(),
                 values.inner(),
                 selector.inner(),
@@ -293,12 +297,14 @@ shuffle_variant!(
 
 fn vote_predicate(
     active: WarpMask,
+    launch: WarpMask,
     member_masks: &WarpValue<u32>,
     predicates: &WarpValue<bool>,
     decide: impl Fn(&[bool]) -> bool,
 ) -> Result<R<bool>, crate::EngineError> {
     let members = validate_warp_collective_participants(
         active,
+        launch,
         member_masks,
         &crate::DiagnosticLabel::new("vote.sync"),
     )?;
@@ -318,7 +324,12 @@ fn execute_vote<Output, F>(
     numeric: F,
 ) -> Result<Output, EngineError>
 where
-    F: FnOnce(WarpMask, &WarpValue<u32>, &WarpValue<bool>) -> Result<Output, crate::EngineError>,
+    F: FnOnce(
+        WarpMask,
+        WarpMask,
+        &WarpValue<u32>,
+        &WarpValue<bool>,
+    ) -> Result<Output, crate::EngineError>,
 {
     let operation = engine(warp).begin_optional_operation(
         context.into_inner(),
@@ -329,6 +340,7 @@ where
     let result = engine(warp).collective_numeric_operation(operation.as_ref(), || {
         numeric(
             context.active_mask().into_inner(),
+            context.launch_mask().into_inner(),
             member_mask.inner(),
             predicates.inner(),
         )
@@ -354,25 +366,26 @@ macro_rules! vote_variant {
     };
 }
 
-vote_variant!(variant::Any, R<bool>, |active, masks, predicates| {
-    vote_predicate(active, masks, predicates, |values| {
+vote_variant!(variant::Any, R<bool>, |active, launch, masks, predicates| {
+    vote_predicate(active, launch, masks, predicates, |values| {
         values.iter().copied().any(|value| value)
     })
 });
-vote_variant!(variant::All, R<bool>, |active, masks, predicates| {
-    vote_predicate(active, masks, predicates, |values| {
+vote_variant!(variant::All, R<bool>, |active, launch, masks, predicates| {
+    vote_predicate(active, launch, masks, predicates, |values| {
         values.iter().copied().all(|value| value)
     })
 });
-vote_variant!(variant::Uniform, R<bool>, |active, masks, predicates| {
-    vote_predicate(active, masks, predicates, |values| {
+vote_variant!(variant::Uniform, R<bool>, |active, launch, masks, predicates| {
+    vote_predicate(active, launch, masks, predicates, |values| {
         values
             .first()
             .is_none_or(|first| values.iter().all(|value| value == first))
     })
 });
-vote_variant!(variant::Ballot, R<u32>, |active, masks, predicates| {
-    crate::runtime::warp_ops::warp_ballot_sync(active, masks, predicates).map(R::from_inner)
+vote_variant!(variant::Ballot, R<u32>, |active, launch, masks, predicates| {
+    crate::runtime::warp_ops::warp_ballot_sync(active, launch, masks, predicates)
+        .map(R::from_inner)
 });
 
 trait MatchType: MemoryType<Scalar: Eq> {}
@@ -394,6 +407,7 @@ impl MatchMode for variant::All {
 
 fn match_values<T, Mode>(
     active: WarpMask,
+    launch: WarpMask,
     member_masks: &WarpValue<u32>,
     values: &WarpValue<T::Scalar>,
 ) -> Result<(R<u32>, R<bool>), crate::EngineError>
@@ -403,6 +417,7 @@ where
 {
     let members = validate_warp_collective_participants(
         active,
+        launch,
         member_masks,
         &crate::DiagnosticLabel::new("match.sync"),
     )?;
@@ -450,6 +465,7 @@ where
     let result = engine(warp).collective_numeric_operation(operation.as_ref(), || {
         match_values::<T, Mode>(
             context.active_mask().into_inner(),
+            context.launch_mask().into_inner(),
             member_masks.inner(),
             values.inner(),
         )
@@ -573,6 +589,7 @@ where
     let result = engine(warp).collective_numeric_operation(operation.as_ref(), || {
         let members = validate_warp_collective_participants(
             context.active_mask().into_inner(),
+            context.launch_mask().into_inner(),
             member_masks.inner(),
             &crate::DiagnosticLabel::new("redux.sync"),
         )?;
@@ -668,6 +685,7 @@ pub fn elect_sync(
     crate::instruction_profile::record(context, _site, std::any::type_name_of_val(&elect_sync));
     let members = validate_warp_collective_participants(
         context.active_mask().into_inner(),
+        context.launch_mask().into_inner(),
         member_masks.inner(),
         &crate::DiagnosticLabel::new("elect.sync"),
     )?;
@@ -700,6 +718,7 @@ pub(crate) async fn execute_bar_warp_sync<W: WarpHandle + Send>(
 ) -> Result<(), EngineError> {
     validate_warp_collective_participants(
         context.active_mask().into_inner(),
+        context.launch_mask().into_inner(),
         member_mask.inner(),
         &crate::DiagnosticLabel::new("bar.warp.sync"),
     )?;

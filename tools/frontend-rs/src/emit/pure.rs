@@ -980,9 +980,45 @@ impl<'a> Emitter<'a> {
             "locality_domain_supplemental_sm" => {
                 Some("(ctx.cta_id_in_cluster() + ctx.cluster_id() / 2) % 2".to_owned())
             }
-            "ntid.x" => Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned()),
+            "ntid.x" if self.plan.topology.is_linear_whole_warp_cta() => {
+                Some("ctx.topology().warps_per_cta() * WARP_SIZE".to_owned())
+            }
             _ => None,
         };
+        let topology = &self.plan.topology;
+        if !topology.is_linear_whole_warp_cta() {
+            if let Some((name, axis)) = register_name.split_once('.') {
+                let index = ["x", "y", "z"].iter().position(|candidate| *candidate == axis);
+                match (name, index) {
+                    ("ntid", Some(index)) => {
+                        return Ok(RustValue::new(
+                            format!("{}_{result_type}", topology.block[index]),
+                            result_type,
+                            Uniformity::Uniform,
+                        ));
+                    }
+                    ("tid", Some(_)) if topology.thread_coordinate_is_warp_uniform(axis) => {
+                        return Ok(RustValue::new(
+                            format!(
+                                "({}) as {result_type}",
+                                topology.uniform_thread_coordinate(axis)
+                            ),
+                            result_type,
+                            Uniformity::Uniform,
+                        ));
+                    }
+                    ("tid", Some(_)) => {
+                        return Ok(self.emit_varying_value(
+                            &format!("tid_{axis}"),
+                            &format!("({}) as {result_type}", topology.thread_coordinate(axis)),
+                            &result_type,
+                            ControlProvenance::None,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.plan.topology.is_multidimensional() {
             if let Some(code) = self.plan.topology.cta_coordinate(register_name) {
                 return Ok(RustValue::new(
@@ -2680,8 +2716,10 @@ pub fn cuda_thread_rank(emitter: &mut Emitter, call: &Decoded) -> AResult<Option
         })
         .map(Some)
 }
-/// The `tirx.cuda` launch coordinates and dimensions. Topology extraction
-/// admits only one-dimensional grids, clusters and blocks, so every `y`/`z`
+/// The `tirx.cuda` launch coordinates and dimensions. Grid and cluster
+/// coordinates come from `cta_coordinate` when the grid or a cluster is
+/// multi-dimensional; thread coordinates and block dimensions come from the
+/// block shape when the CTA is not `(32k, 1, 1)`. Otherwise every `y`/`z`
 /// coordinate is 0 and every `y`/`z` dimension is 1.
 pub fn cuda_launch_index(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
     let signature = signature(call.node, call.call)?;
@@ -2720,6 +2758,24 @@ pub fn cuda_launch_index(emitter: &mut Emitter, call: &Decoded) -> AResult<Optio
             .cta_coordinate(&format!("{register}.{axis}"))
             .expect("a CTA coordinate register");
         return Ok(Some(uniform(code)));
+    }
+    if !topology.is_linear_whole_warp_cta() {
+        let index = ["x", "y", "z"].iter().position(|candidate| *candidate == axis).expect("axis");
+        match name {
+            "block_dim" => return Ok(Some(uniform(topology.block[index].to_string()))),
+            "thread_idx" if topology.thread_coordinate_is_warp_uniform(&axis) => {
+                return Ok(Some(uniform(topology.uniform_thread_coordinate(&axis))));
+            }
+            "thread_idx" => {
+                return Ok(Some(emitter.emit_varying_value(
+                    &format!("thread_idx_{axis}"),
+                    &format!("({}) as i32", topology.thread_coordinate(&axis)),
+                    "i32",
+                    ControlProvenance::None,
+                )));
+            }
+            _ => {}
+        }
     }
     let value = match (name, axis.as_str()) {
         ("block_idx" | "thread_idx" | "cluster_id" | "cluster_cta_id", "y" | "z") => uniform("0".to_owned()),

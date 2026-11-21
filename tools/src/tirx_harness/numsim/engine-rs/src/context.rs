@@ -37,6 +37,7 @@ pub struct WarpContext {
     cluster_id: usize,
     cta_id_in_cluster: usize,
     warp_id_in_cta: usize,
+    launch_mask: WarpMask,
     active_mask: WarpMask,
     control_provenance: ControlProvenance,
 }
@@ -49,13 +50,15 @@ impl WarpContext {
         let within_cluster = global_warp_id % warps_per_cluster;
         let cta_id_in_cluster = within_cluster / topology.warps_per_cta();
         let warp_id_in_cta = within_cluster % topology.warps_per_cta();
+        let launch_mask = topology.lane_mask_for_warp_in_cta(warp_id_in_cta);
         Self {
             topology,
             global_warp_id,
             cluster_id,
             cta_id_in_cluster,
             warp_id_in_cta,
-            active_mask: WarpMask::FULL,
+            launch_mask,
+            active_mask: launch_mask,
             control_provenance: ControlProvenance::None,
         }
     }
@@ -86,6 +89,19 @@ impl WarpContext {
 
     pub const fn active_mask(self) -> WarpMask {
         self.active_mask
+    }
+
+    /// The lanes that exist in this warp: `FULL` except in the partial last
+    /// warp of a CTA whose thread count is not a multiple of 32. A converged
+    /// warp has `active_mask() == launch_mask()`.
+    pub const fn launch_mask(self) -> WarpMask {
+        self.launch_mask
+    }
+
+    /// The lanes that do not exist in this warp. They behave as exited
+    /// threads: never active, never arriving, never named as a source.
+    pub const fn absent_mask(self) -> WarpMask {
+        WarpMask::from_bits(!self.launch_mask.bits())
     }
 
     pub fn set_active_mask(&mut self, active_mask: WarpMask) {

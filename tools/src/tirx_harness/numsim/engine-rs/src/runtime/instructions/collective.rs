@@ -588,8 +588,9 @@ async fn execute_cta_vote(
     local: i32,
 ) -> Result<R<i64>, EngineError> {
     let context = context.into_inner();
-    crate::runtime::require_full_warp_sync(
+    crate::runtime::require_converged(
         context.active_mask(),
+        &context,
         if operation_name == "and" {
             "cuda_syncthreads_and"
         } else {
@@ -642,9 +643,15 @@ macro_rules! bar_reduce_variants {
                 (i64, i64, R<bool>) => R<u32>;
                 async fn execute(warp: &mut super::Engine, context: ExecCtx, site: SiteId,
                                  (id, count, predicates): Self::Args) -> Result<Self::Output, EngineError> {
-                    let count_true: i32 = predicates.inner().lanes().iter().map(|value| i32::from(*value)).sum();
+                    // Fold only the executing lanes: a converged partial warp
+                    // has fewer than 32, and its absent lanes hold no value.
+                    let active = context.active_mask().into_inner();
+                    let count_true: i32 = active
+                        .into_iter()
+                        .map(|lane| i32::from(predicates[lane]))
+                        .sum();
                     let local = match CtaReduceOp::$reduction {
-                        CtaReduceOp::Min => i32::from(count_true == 32),
+                        CtaReduceOp::Min => i32::from(count_true == active.len() as i32),
                         CtaReduceOp::Max => i32::from(count_true != 0),
                         _ => count_true,
                     };
@@ -669,7 +676,7 @@ async fn execute_bar_reduce(
     local: i32,
 ) -> Result<R<u32>, EngineError> {
     let context = context.into_inner();
-    crate::runtime::require_full_warp_sync(context.active_mask(), "barrier.red")?;
+    crate::runtime::require_converged(context.active_mask(), &context, "barrier.red")?;
     let warp = engine(warp);
     let operation = warp.begin_current_operation(
         context,

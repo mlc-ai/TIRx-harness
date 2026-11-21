@@ -1658,6 +1658,12 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_setmaxnreg(&mut self, increase: bool, count: i64, source_op_id: i64) -> AResult<()> {
+        if self.plan.topology.has_partial_warp() {
+            return unsupported(format!(
+                "setmaxnreg is not modeled for a CTA with a partial warp ({} threads)",
+                self.plan.topology.threads_per_cta()
+            ));
+        }
         self.sync.uses_setmaxnreg = true;
         if increase && (24..=256).contains(&count) && count % 8 == 0 {
             let current = self.sync.max_valid_increase_target.unwrap_or(count);

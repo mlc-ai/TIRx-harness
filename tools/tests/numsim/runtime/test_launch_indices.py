@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import tvm_tirx
 from tirx_harness import numsim
 from tirx_harness.numsim.errors import UnsupportedTIRxError
 from tvm_tirx.script import tirx as T
@@ -135,11 +136,50 @@ def test_three_dimensional_grid_and_cluster_coordinates_follow_cuda(tmp_path):
     np.testing.assert_array_equal(result.outputs["output"], three_dimensional_expected())
 
 
+def _identity_kernel(block: tuple[int, int, int]):
+    threads = int(np.prod(block))
+    sregs = ("tid.x", "tid.y", "tid.z", "ntid.x", "ntid.y", "ntid.z", "laneid", "warpid")
+    columns = [
+        *(f'T.cuda.thread_idx("{axis}")' for axis in "xyz"),
+        *(f'T.cuda.block_dim("{axis}")' for axis in "xyz"),
+        "T.cuda.linear_thread_id()",
+        "T.cuda.warp_id()",
+        "T.cuda.lane_id()",
+        *(f'T.Cast("int32", T.cuda.mov_sreg(32, "{register}"))' for register in sregs),
+    ]
+    stores = "\n".join(f"    output[linear, {k}] = {value}" for k, value in enumerate(columns))
+    return tvm_tirx.script.from_source(
+        f"""
 @T.function
-def two_dimensional_block(output: T.Tensor((2,), "int32")):
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32, 2)))
-    if T.cuda.lane_id() == 0:
-        output[T.cuda.thread_idx("y")] = 1
+def identities(output: T.Tensor(({threads}, {len(columns)}), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={block}))
+    linear = T.cuda.linear_thread_id()
+{stores}
+""",
+        {"T": T},
+    )
+
+
+@pytest.mark.parametrize("block", [(16, 16, 1), (7, 5, 3), (1, 1, 1)])
+def test_multidimensional_and_partial_warp_thread_identities(tmp_path, block):
+    # CUDA linearizes x + y*bx + z*bx*by and forms warps from the linear id.
+    linear = np.arange(int(np.prod(block)))
+    z, y, x = np.unravel_index(linear, block[::-1])
+    bx, by, bz = (np.full_like(linear, extent) for extent in block)
+    warp, lane = linear // 32, linear % 32
+    expected = np.stack([x, y, z, bx, by, bz, linear, warp, lane, x, y, z, bx, by, bz, lane, warp])
+    module = numsim.transpile(_identity_kernel(block), cache_dir=tmp_path)
+    output = np.full(expected.T.shape, -1, dtype=np.int32)
+    result = numsim.Engine().run(module, {"output": output}, outputs=("output",))
+    np.testing.assert_array_equal(result.outputs["output"], expected.T)
+
+
+@T.function
+def too_many_threads(output: T.Tensor((1,), "int32")):
+    # `LaunchConfig` rejects this shape itself; direct launch threads reach NumSim.
+    y = T.launch_thread("threadIdx.y", 33)
+    x = T.launch_thread("threadIdx.x", 32)
+    output[0] = x + y
 
 
 @T.function
@@ -152,7 +192,7 @@ def preferred_cluster_differs(output: T.Tensor((4,), "int32")):
 @pytest.mark.parametrize(
     "kernel, message",
     [
-        (two_dimensional_block, "CTAs are one-dimensional, but block.y is 2"),
+        (too_many_threads, r"CTA has 1056 threads \(block 32x33x1\); CUDA allows at most 1024"),
         (preferred_cluster_differs, "preferred_cluster must equal cluster"),
     ],
 )

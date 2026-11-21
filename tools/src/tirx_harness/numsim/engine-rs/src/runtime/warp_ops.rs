@@ -23,6 +23,7 @@ pub(crate) enum WarpShuffleMode {
 /// occurrence accounting stay in the instruction wrapper.
 fn resolve_warp_shuffle_sources(
     active_mask: WarpMask,
+    launch_mask: WarpMask,
     participant_masks: &WarpValue<u32>,
     selectors: &WarpValue<u32>,
     controls: &WarpValue<u32>,
@@ -30,6 +31,7 @@ fn resolve_warp_shuffle_sources(
 ) -> Result<(WarpValue<usize>, WarpValue<bool>), EngineError> {
     let participant_mask = validate_warp_collective_participants(
         active_mask,
+        launch_mask,
         participant_masks,
         &crate::DiagnosticLabel::new("shfl.sync"),
     )?;
@@ -65,6 +67,15 @@ fn resolve_warp_shuffle_sources(
             }
         };
         let source_lane = if valid { candidate } else { lane };
+        if !launch_mask.contains(source_lane) {
+            // An absent lane behaves as an exited thread: naming it in the
+            // member mask is valid, but its register value is undefined.
+            return Err(EngineError::message(format!(
+                "warp shuffle on lane {lane} reads lane {source_lane}, which does not exist \
+                 in this partial warp (lanes {}..31 are absent)",
+                launch_mask.len()
+            )));
+        }
         if participant_mask & (1_u32 << source_lane) == 0 || !active_mask.contains(source_lane) {
             return Err(EngineError::message(
                 "warp shuffle reads a non-participant lane",
@@ -81,13 +92,21 @@ fn resolve_warp_shuffle_sources(
 /// register values from lanes that the instruction cannot observe.
 pub(crate) fn warp_shuffle_source_mask(
     active_mask: WarpMask,
+    launch_mask: WarpMask,
     participant_masks: &WarpValue<u32>,
     selectors: &WarpValue<u32>,
     controls: &WarpValue<u32>,
     mode: WarpShuffleMode,
 ) -> Result<WarpMask, EngineError> {
     let (source_lanes, _in_range) =
-        resolve_warp_shuffle_sources(active_mask, participant_masks, selectors, controls, mode)?;
+        resolve_warp_shuffle_sources(
+            active_mask,
+            launch_mask,
+            participant_masks,
+            selectors,
+            controls,
+            mode,
+        )?;
     let mut source_mask = WarpMask::EMPTY;
     for lane in active_mask {
         source_mask |= WarpMask::from_bits(1_u32 << source_lanes[lane]);
@@ -97,6 +116,7 @@ pub(crate) fn warp_shuffle_source_mask(
 
 pub(crate) fn warp_shuffle_ptx<T: RuntimeScalar>(
     active_mask: WarpMask,
+    launch_mask: WarpMask,
     participant_masks: &WarpValue<u32>,
     values: &WarpValue<T>,
     selectors: &WarpValue<u32>,
@@ -104,7 +124,14 @@ pub(crate) fn warp_shuffle_ptx<T: RuntimeScalar>(
     mode: WarpShuffleMode,
 ) -> Result<(WarpValue<T>, WarpValue<bool>), EngineError> {
     let (source_lanes, in_range) =
-        resolve_warp_shuffle_sources(active_mask, participant_masks, selectors, controls, mode)?;
+        resolve_warp_shuffle_sources(
+            active_mask,
+            launch_mask,
+            participant_masks,
+            selectors,
+            controls,
+            mode,
+        )?;
     let mut result = WarpValue::splat(T::zero());
     for lane in active_mask {
         result[lane] = values[source_lanes[lane]];
@@ -112,8 +139,20 @@ pub(crate) fn warp_shuffle_ptx<T: RuntimeScalar>(
     Ok((result, in_range))
 }
 
+/// Validate the member mask of one `*.sync` warp collective and return the
+/// members that exist.
+///
+/// `launch_mask` is the warp's existing lanes. Lanes outside it (the absent
+/// upper lanes of a CTA's partial last warp) behave as exited threads: CUDA
+/// requires only the non-exited threads named in the mask to execute the
+/// collective, so a mask naming them is valid and they are dropped from the
+/// returned members, so value collectives (`redux`, `match`) fold over the
+/// existing members only. Every named lane that exists must be active.
+/// Instructions that need all 32 hardware lanes pass `WarpMask::FULL` as
+/// `launch_mask`.
 pub(crate) fn validate_warp_collective_participants(
     active_mask: WarpMask,
+    launch_mask: WarpMask,
     participant_masks: &WarpValue<u32>,
     operation: &crate::DiagnosticLabel,
 ) -> Result<u32, EngineError> {
@@ -124,30 +163,33 @@ pub(crate) fn validate_warp_collective_participants(
     if expected == 0 {
         return Err(operation.engine_error(format_args!(" participant mask must not be zero")));
     }
-    if expected & !active_mask.bits() != 0 {
-        return Err(operation.warp_collective_divergence_with_detail(
+    if expected & launch_mask.bits() & !active_mask.bits() != 0 {
+        return Err(operation.warp_collective_divergence_requiring_with_detail(
             active_mask,
+            launch_mask,
             format_args!(" participant mask names an inactive lane"),
         ));
     }
     for lane in active_mask {
         let actual = participant_masks[lane];
         if actual != expected {
-            return Err(operation.warp_collective_divergence_with_detail(
+            return Err(operation.warp_collective_divergence_requiring_with_detail(
                 active_mask,
+                launch_mask,
                 format_args!(
                     " participant masks disagree: lane {lane} has 0x{actual:08x}, expected 0x{expected:08x}"
                 ),
             ));
         }
         if actual & (1_u32 << lane) == 0 {
-            return Err(operation.warp_collective_divergence_with_detail(
+            return Err(operation.warp_collective_divergence_requiring_with_detail(
                 active_mask,
-                format_args!(" executing lane {lane} is absent from its participant mask"),
+                launch_mask,
+                format_args!(" executing lane {lane} is not in its member mask"),
             ));
         }
     }
-    Ok(expected)
+    Ok(expected & launch_mask.bits())
 }
 
 pub fn require_uniform_i64(
@@ -190,11 +232,13 @@ pub fn warp_fns_b32(
 
 pub fn warp_ballot_sync(
     active_mask: WarpMask,
+    launch_mask: WarpMask,
     participant_masks: &WarpValue<u32>,
     predicates: &WarpValue<bool>,
 ) -> Result<WarpValue<u32>, EngineError> {
     let participant_mask = validate_warp_collective_participants(
         active_mask,
+        launch_mask,
         participant_masks,
         &crate::DiagnosticLabel::new("warp ballot"),
     )?;
@@ -376,6 +420,7 @@ mod tests {
         let values = WarpValue::from_fn(|lane| lane as u32);
         let (shuffled, _) = warp_shuffle_ptx(
             WarpMask::FULL,
+            WarpMask::FULL,
             &participants,
             &values,
             &WarpValue::from_fn(|lane| 31 - lane as u32),
@@ -384,6 +429,7 @@ mod tests {
         )
         .unwrap();
         let (xored, _) = warp_shuffle_ptx(
+            WarpMask::FULL,
             WarpMask::FULL,
             &participants,
             &values,
@@ -401,6 +447,7 @@ mod tests {
     #[test]
     fn shuffle_xor_width_allows_later_groups_to_read_earlier_groups() {
         let (result, _) = warp_shuffle_ptx(
+            WarpMask::FULL,
             WarpMask::FULL,
             &WarpValue::splat(u32::MAX),
             &WarpValue::from_fn(|lane| lane as u32),
@@ -420,6 +467,7 @@ mod tests {
         let active = WarpMask::from_lanes(0..16).unwrap();
         let error = warp_shuffle_ptx(
             active,
+            WarpMask::FULL,
             &WarpValue::splat(active.bits()),
             &WarpValue::from_fn(|lane| lane as u32),
             &WarpValue::splat(31),
@@ -436,25 +484,56 @@ mod tests {
     fn masked_collectives_reject_invalid_participants() {
         let label = crate::DiagnosticLabel::new("collective");
         let active = WarpMask::from_lanes(0..16).unwrap();
-        assert!(
-            validate_warp_collective_participants(active, &WarpValue::splat(u32::MAX), &label,)
-                .is_err()
-        );
         assert!(validate_warp_collective_participants(
+            active,
+            WarpMask::FULL,
+            &WarpValue::splat(u32::MAX),
+            &label,
+        )
+        .is_err());
+        assert!(validate_warp_collective_participants(
+            WarpMask::FULL,
             WarpMask::FULL,
             &WarpValue::splat(0),
             &label,
         )
         .is_err());
         let missing_self = WarpValue::splat(!(1_u32 << 7));
-        let error = validate_warp_collective_participants(WarpMask::FULL, &missing_self, &label)
-            .unwrap_err();
-        assert!(error.to_string().contains("executing lane 7 is absent"));
+        let error =
+            validate_warp_collective_participants(WarpMask::FULL, WarpMask::FULL, &missing_self, &label)
+                .unwrap_err();
+        assert!(error.to_string().contains("executing lane 7 is not in its member mask"));
         let inconsistent =
             WarpValue::from_fn(|lane| if lane == 7 { !(1_u32 << 0) } else { u32::MAX });
-        let error = validate_warp_collective_participants(WarpMask::FULL, &inconsistent, &label)
-            .unwrap_err();
+        let error =
+            validate_warp_collective_participants(WarpMask::FULL, WarpMask::FULL, &inconsistent, &label)
+                .unwrap_err();
         assert!(error.to_string().contains("participant masks disagree"));
+    }
+
+    #[test]
+    fn absent_lanes_behave_as_exited_members() {
+        // Warp 1 of a 48-thread CTA: lanes 0..16 exist; the full mask is valid.
+        let present = WarpMask::from_lanes(0..16).unwrap();
+        let full = WarpValue::splat(u32::MAX);
+        let ballot = warp_ballot_sync(present, present, &full, &WarpValue::splat(true)).unwrap();
+        assert_eq!(ballot[0], present.bits());
+        let values = WarpValue::from_fn(|lane| lane as u32);
+        let shuffle = |offset| {
+            let (selectors, controls) = (WarpValue::splat(offset), WarpValue::splat(31));
+            let mode = WarpShuffleMode::Xor;
+            warp_shuffle_ptx(present, present, &full, &values, &selectors, &controls, mode)
+        };
+        assert_eq!(shuffle(8).unwrap().0[3], 11);
+        assert!(shuffle(16).unwrap_err().to_string().contains("which does not exist"));
+        // A diverged partial warp is blamed on its existing lanes only.
+        let diverged = WarpMask::from_lanes(0..8).unwrap();
+        let label = crate::DiagnosticLabel::new("collective");
+        let error = validate_warp_collective_participants(diverged, present, &full, &label)
+            .unwrap_err()
+            .with_absent_lanes(!present);
+        assert!(error.to_string().contains("requires all 16 existing lanes"), "{error}");
+        assert!(!error.to_string().contains("do not exist"), "{error}");
     }
 
     #[test]
@@ -561,6 +640,7 @@ mod tests {
             crate::EngineErrorKind::WarpCollectiveDivergence {
                 operation,
                 active_mask: 0x0000_ffff,
+                ..
             } if operation == "cuda_warp_reduce"
         ));
         assert!(error

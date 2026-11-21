@@ -665,6 +665,11 @@ def native_binding_incomplete_payload(
                 "ctas_per_cluster": topology.ctas_per_cluster,
                 "warps_per_cta": topology.warps_per_cta,
                 "warp_count": topology.warp_count,
+                **(
+                    {"threads_per_cta": topology.threads_per_cta}
+                    if topology.threads_per_cta is not None and topology.threads_per_cta % 32
+                    else {}
+                ),
             },
         },
         "analysis_scope": {

@@ -320,9 +320,81 @@ pub struct LaunchTopology {
     /// these shapes, which stay out of `json()` like `min_blocks_per_sm`.
     pub grid: [i64; 3],
     pub cluster: [i64; 3],
+    /// The CTA shape along x, y and z. CUDA linearizes a CTA's threads as
+    /// `x + y * bx + z * bx * by` and forms warps from consecutive linear
+    /// ids, so the engine stays one-dimensional; emission recovers each
+    /// thread coordinate from this shape.
+    pub block: [i64; 3],
 }
 
+/// CUDA's per-CTA thread limit and per-axis block limits.
+const MAX_THREADS_PER_CTA: i64 = 1024;
+const MAX_BLOCK_EXTENTS: [i64; 3] = [1024, 1024, 64];
+
 impl LaunchTopology {
+    pub fn threads_per_cta(&self) -> i64 {
+        self.block.iter().product()
+    }
+
+    /// Whether the CTA is `(32k, 1, 1)`: the shapes NumSim modeled before
+    /// multi-dimensional and partial-warp CTAs, whose emission and manifest
+    /// stay byte-identical.
+    pub fn is_linear_whole_warp_cta(&self) -> bool {
+        self.block[1] == 1 && self.block[2] == 1 && self.block[0] % WARP_SIZE == 0
+    }
+
+    /// Whether the CTA's thread count is not a multiple of 32, so its last
+    /// warp is partial.
+    pub fn has_partial_warp(&self) -> bool {
+        self.threads_per_cta() % WARP_SIZE != 0
+    }
+
+    /// Rust (`usize`, in terms of `lane` and `ctx`) for one thread coordinate.
+    /// Factors with extent 1 are folded, so `(n, 1, 1)` gives the linear id.
+    pub fn thread_coordinate(&self, axis: &str) -> String {
+        let linear = "(ctx.warp_id_in_cta() * WARP_SIZE + lane)";
+        let [bx, by, bz] = self.block;
+        let axis = ["x", "y", "z"]
+            .iter()
+            .position(|candidate| *candidate == axis)
+            .expect("thread axis is x, y or z");
+        if self.block[axis] == 1 {
+            return "0_usize".to_owned();
+        }
+        match axis {
+            0 if by == 1 && bz == 1 => linear.to_owned(),
+            0 => format!("({linear} % {bx}_usize)"),
+            1 if bz == 1 => format!("({linear} / {bx}_usize)"),
+            1 => format!("(({linear} / {bx}_usize) % {by}_usize)"),
+            _ => format!("({linear} / {}_usize)", bx * by),
+        }
+    }
+
+    /// Whether a thread coordinate is the same for every lane of each warp:
+    /// `y` iff `bx` is a multiple of 32, `z` iff `bx * by` is.
+    pub fn thread_coordinate_is_warp_uniform(&self, axis: &str) -> bool {
+        let [bx, by, _] = self.block;
+        match axis {
+            "x" => self.block[0] == 1,
+            "y" => self.block[1] == 1 || bx % WARP_SIZE == 0,
+            _ => self.block[2] == 1 || (bx * by) % WARP_SIZE == 0,
+        }
+    }
+
+    /// Rust for one warp-uniform thread coordinate (see
+    /// [`Self::thread_coordinate_is_warp_uniform`]), with no reference to `lane`.
+    pub fn uniform_thread_coordinate(&self, axis: &str) -> String {
+        let warp_base = "(ctx.warp_id_in_cta() * WARP_SIZE)";
+        let [bx, by, _] = self.block;
+        match axis {
+            "x" => "0_usize".to_owned(),
+            "y" if self.block[1] == 1 => "0_usize".to_owned(),
+            "y" => format!("(({warp_base} / {bx}_usize) % {by}_usize)"),
+            _ if self.block[2] == 1 => "0_usize".to_owned(),
+            _ => format!("({warp_base} / {}_usize)", bx * by),
+        }
+    }
+
     /// Whether the grid or a cluster extends along y or z.
     pub fn is_multidimensional(&self) -> bool {
         self.grid[1] != 1 || self.grid[2] != 1 || self.cluster[1] != 1 || self.cluster[2] != 1
@@ -364,12 +436,22 @@ impl LaunchTopology {
     }
 
     pub fn json(&self) -> Json {
-        json_object(vec![
+        let mut fields = vec![
             ("clusters", Json::from(self.clusters)),
             ("ctas_per_cluster", Json::from(self.ctas_per_cluster)),
             ("warps_per_cta", Json::from(self.warps_per_cta)),
             ("warps_per_warpgroup", Json::from(self.warps_per_warpgroup)),
-        ])
+        ];
+        // Only new CTA shapes carry their block, so manifests of `(32k, 1, 1)`
+        // kernels are unchanged.
+        if !self.is_linear_whole_warp_cta() {
+            fields.push((
+                "block",
+                Json::Array(self.block.iter().map(|extent| Json::from(*extent)).collect()),
+            ));
+            fields.push(("threads_per_cta", Json::from(self.threads_per_cta())));
+        }
+        json_object(fields)
     }
 }
 
@@ -417,7 +499,9 @@ pub fn is_launch_entry(region: &RegionStmtObj) -> bool {
 const LAUNCH_THREAD_TAGS: &[(&str, &str)] = &[
     ("blockIdx.x", "global CTAs"),
     ("clusterCtaIdx.x", "CTAs per cluster"),
-    ("threadIdx.x", "threads per CTA"),
+    ("threadIdx.x", "block x"),
+    ("threadIdx.y", "block y"),
+    ("threadIdx.z", "block z"),
 ];
 
 /// The `(field, value)` operands a `tirx.device_entry` region's
@@ -462,19 +546,12 @@ fn visit(
                         "grid.x" => "global CTAs",
                         "grid.y" => "grid y",
                         "grid.z" => "grid z",
-                        "block.x" => "threads per CTA",
+                        "block.x" => "block x",
+                        "block.y" => "block y",
+                        "block.z" => "block z",
                         "cluster.x" => "CTAs per cluster",
                         "cluster.y" => "cluster y",
                         "cluster.z" => "cluster z",
-                        "block.y" | "block.z" => {
-                            let extent = static_int(ctx, &oref(value), environment)?;
-                            if extent != 1 {
-                                return unsupported(format!(
-                                    "NumSim CTAs are one-dimensional, but {field} is {extent}"
-                                ));
-                            }
-                            continue;
-                        }
                         _ => continue,
                     };
                     let extent = static_int(ctx, &oref(value), environment)?;
@@ -555,15 +632,32 @@ pub(crate) fn extract_topology(
     }
     let ctas_per_cluster = cluster.iter().product::<i64>();
     let clusters = grid.iter().product::<i64>() / ctas_per_cluster;
-    let warps_per_cta = match constraints.get("threads per CTA") {
-        Some(threads) if threads % WARP_SIZE != 0 => {
+    // A kernel that names no x extent and no y/z extent above 1 keeps the
+    // historical one-warp CTA; otherwise an unnamed extent is 1, as in CUDA.
+    let y = constraints.get("block y").unwrap_or(1);
+    let z = constraints.get("block z").unwrap_or(1);
+    let x = constraints
+        .get("block x")
+        .unwrap_or(if y == 1 && z == 1 { WARP_SIZE } else { 1 });
+    let block = [x, y, z];
+    for (axis, (extent, limit)) in ["x", "y", "z"]
+        .iter()
+        .zip(block.iter().zip(MAX_BLOCK_EXTENTS))
+    {
+        if *extent > limit {
             return unsupported(format!(
-                "CTA thread extent {threads} is not a whole number of warps"
-            ))
+                "block.{axis} is {extent}; CUDA allows at most {limit}"
+            ));
         }
-        Some(threads) => threads / WARP_SIZE,
-        None => 1,
-    };
+    }
+    let threads = block.iter().product::<i64>();
+    if threads > MAX_THREADS_PER_CTA {
+        return unsupported(format!(
+            "CTA has {threads} threads (block {}x{}x{}); CUDA allows at most {MAX_THREADS_PER_CTA}",
+            block[0], block[1], block[2]
+        ));
+    }
+    let warps_per_cta = (threads + WARP_SIZE - 1) / WARP_SIZE;
     Ok(LaunchTopology {
         clusters,
         ctas_per_cluster,
@@ -572,6 +666,7 @@ pub(crate) fn extract_topology(
         min_blocks_per_sm: constraints.get("min blocks per sm").unwrap_or(1),
         grid,
         cluster,
+        block,
     })
 }
 
@@ -761,4 +856,32 @@ pub fn validate_for(ctx: &Ctx, loop_stmt: &ForObj) -> AResult<Option<String>> {
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod cta_shape_tests {
+    use super::LaunchTopology;
+
+    fn topology(block: [i64; 3]) -> LaunchTopology {
+        let warps_per_cta = (block.iter().product::<i64>() + 31) / 32;
+        let (grid, cluster) = ([1; 3], [1; 3]);
+        let (clusters, ctas_per_cluster, warps_per_warpgroup, min_blocks_per_sm) = (1, 1, 4, 1);
+        LaunchTopology {
+            clusters, ctas_per_cluster, warps_per_cta, warps_per_warpgroup, min_blocks_per_sm,
+            grid, cluster, block,
+        }
+    }
+
+    #[test]
+    fn legacy_shapes_keep_their_lowering_and_new_shapes_linearize() {
+        let legacy = topology([128, 1, 1]);
+        assert_eq!(legacy.thread_coordinate("x"), "(ctx.warp_id_in_cta() * WARP_SIZE + lane)");
+        assert!(!legacy.json().to_string().contains("block"));
+        let shape = topology([8, 4, 2]);
+        let linear = "(ctx.warp_id_in_cta() * WARP_SIZE + lane)";
+        assert_eq!(shape.thread_coordinate("y"), format!("(({linear} / 8_usize) % 4_usize)"));
+        assert!(shape.thread_coordinate_is_warp_uniform("z"));
+        assert!(!shape.thread_coordinate_is_warp_uniform("y"));
+        assert!(topology([10, 10, 1]).json().to_string().contains("\"threads_per_cta\":100"));
+    }
 }

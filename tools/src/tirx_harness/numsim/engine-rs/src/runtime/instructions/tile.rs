@@ -469,11 +469,26 @@ fn element_count<Shape: StaticShape>() -> Result<usize, EngineError> {
     element_count_for(Shape::EXTENTS)
 }
 
+/// Tile element ownership at warp, warpgroup and CTA scope assumes whole
+/// warps; a CTA with a partial last warp has not been modeled, so fail closed.
+fn require_whole_warp_tile_scope(
+    scope: TileScopeKind,
+    context: ExecCtx,
+) -> Result<(), EngineError> {
+    if !matches!(scope, TileScopeKind::Thread)
+        && context.into_inner().topology().has_partial_warp()
+    {
+        return Err(crate::EngineError::analysis_incomplete("tile_scope_partial_warp_cta").into());
+    }
+    Ok(())
+}
+
 fn scope_lanes(
     scope: TileScopeKind,
     context: ExecCtx,
     linear: usize,
 ) -> Result<Vec<usize>, EngineError> {
+    require_whole_warp_tile_scope(scope, context)?;
     match scope {
         TileScopeKind::Thread => Ok(context.active_mask().into_iter().collect()),
         TileScopeKind::Warp => {
@@ -1333,6 +1348,7 @@ async fn copy_scope_sync<W>(
 where
     W: WarpHandle + Send,
 {
+    require_whole_warp_tile_scope(scope, context)?;
     match scope {
         TileScopeKind::Thread => Ok(()),
         TileScopeKind::Warp => {

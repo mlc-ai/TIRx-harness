@@ -193,6 +193,7 @@ struct KernelItem {
     clusters: i64,
     ctas_per_cluster: i64,
     warps_per_cta: i64,
+    threads_per_cta: i64,
     warp_function: String,
     analysis_warp_function: String,
     execute_function: String,
@@ -407,6 +408,7 @@ fn render_kernel(
         clusters: topology.clusters,
         ctas_per_cluster: topology.ctas_per_cluster,
         warps_per_cta: topology.warps_per_cta,
+        threads_per_cta: topology.threads_per_cta(),
         warp_function,
         analysis_warp_function,
         execute_function: if single {
@@ -1207,10 +1209,10 @@ const EXECUTE_TEMPLATE: &str = r#"fn __NUMSIM_EXECUTE_FUNCTION__(
 
 const RUN_PHASE_TEMPLATE: &str = r#"    if selected_phase.is_none() || selected_phase >= Some(__NUMSIM_INDEX___usize) {
         {
-        let topology = LaunchTopology::new(
+        let topology = LaunchTopology::__NUMSIM_TOPOLOGY_CONSTRUCTOR__(
             __NUMSIM_CLUSTERS__,
             __NUMSIM_CTAS_PER_CLUSTER__,
-            __NUMSIM_WARPS_PER_CTA__,
+            __NUMSIM_TOPOLOGY_CTA_EXTENT__,
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let physical = PhysicalMemory::with_global(topology, global.clone());
@@ -1257,10 +1259,10 @@ const RUN_PHASE_TEMPLATE: &str = r#"    if selected_phase.is_none() || selected_
     }"#;
 
 const SYNC_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
-            let topology = LaunchTopology::new(
+            let topology = LaunchTopology::__NUMSIM_TOPOLOGY_CONSTRUCTOR__(
                 __NUMSIM_CLUSTERS__,
                 __NUMSIM_CTAS_PER_CLUSTER__,
-                __NUMSIM_WARPS_PER_CTA__,
+                __NUMSIM_TOPOLOGY_CTA_EXTENT__,
             )
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
             let physical = PhysicalMemory::with_global(topology, global.clone());
@@ -1311,10 +1313,10 @@ const SYNC_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
         }"#;
 
 const RACE_PHASE_TEMPLATE: &str = r#"        __NUMSIM_INDEX___usize => {
-            let topology = LaunchTopology::new(
+            let topology = LaunchTopology::__NUMSIM_TOPOLOGY_CONSTRUCTOR__(
                 __NUMSIM_CLUSTERS__,
                 __NUMSIM_CTAS_PER_CLUSTER__,
-                __NUMSIM_WARPS_PER_CTA__,
+                __NUMSIM_TOPOLOGY_CTA_EXTENT__,
             )
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
             let physical = PhysicalMemory::with_global(topology, global.clone());
@@ -1528,6 +1530,22 @@ pub fn emit_rust_module(
                 item.ctas_per_cluster.to_string(),
             ),
             ("warps_per_cta".to_owned(), item.warps_per_cta.to_string()),
+            // Whole-warp CTAs keep `LaunchTopology::new(c, k, warps)`; a
+            // partial last warp needs the exact thread count.
+            (
+                "topology_constructor".to_owned(),
+                if item.threads_per_cta % 32 == 0 { "new" } else { "with_threads_per_cta" }
+                    .to_owned(),
+            ),
+            (
+                "topology_cta_extent".to_owned(),
+                if item.threads_per_cta % 32 == 0 {
+                    item.warps_per_cta
+                } else {
+                    item.threads_per_cta
+                }
+                .to_string(),
+            ),
             ("kernel_count".to_owned(), count_text.clone()),
             ("prepare_function".to_owned(), item.prepare_function.clone()),
             ("tmem_columns".to_owned(), item.tmem_columns.to_string()),
