@@ -6,13 +6,10 @@ import pytest
 from tests.numsim.microtests.harness import (
     PairedTensorMap,
     require_numsim_gpu,
-    run_gpu_primfunc,
     run_paired_primfunc,
 )
 from tests.numsim.runtime.test_tma_overrides import (
-    CLIP_BOX,
     CLIP_OPERANDS,
-    CLIP_PITCH,
     OVERRIDE_CASES,
     clip_inputs,
     clip_kernel,
@@ -140,29 +137,3 @@ def test_tma_override_dimension_bounds_match_gpu(route, pytestconfig, tmp_path):
         expected_y, expected_tile = clipped_expectation(route, d0 + 1, d1 + 1, inputs["y"])
         np.testing.assert_array_equal(result.gpu_outputs["y"], expected_y, err_msg=f"{d0, d1}")
         np.testing.assert_array_equal(result.gpu_outputs["out"], expected_tile)
-
-
-@pytest.mark.numsim_gpu
-@pytest.mark.parametrize("route", ("load", "s2g", "reduce"))
-@pytest.mark.parametrize("shape", ((5, 8), (9, 3), (16, 8)))
-def test_tma_store_inner_bound_granularity_matches_gpu(route, shape, pytestconfig):
-    """GPU half of ``test_tma_store_inner_bound_has_16_byte_granularity``:
-    both pin the same expectation, since the NumSim run needs the descriptor
-    to alias ``y`` (to expose its row gaps), which paired runs do not keep."""
-
-    require_sm107(pytestconfig)
-    inputs = clip_inputs(0, 0)
-    backing = inputs["y"][: 8 * CLIP_PITCH].reshape(8, CLIP_PITCH).copy()
-    inputs["m"] = PairedTensorMap(
-        array=backing,
-        global_shape=shape,
-        global_strides=(CLIP_PITCH * 4,),
-        box_shape=CLIP_BOX,
-        element_strides=(1, 1),
-    )
-    outputs = run_gpu_primfunc(
-        clip_kernel(route, override=False), inputs, outputs=("m", "out"), arch="sm_107a"
-    )
-    expected, expected_tile = clipped_expectation(route, *shape, backing.reshape(-1))
-    np.testing.assert_array_equal(outputs["m"].reshape(-1), expected)
-    np.testing.assert_array_equal(outputs["out"], expected_tile)

@@ -34,6 +34,10 @@ pub struct RuntimeTensorMap {
     transfer_template: Arc<TensorMapTransferTemplate>,
     im2col: Option<TensorMapIm2col>,
     alloc_class: TensorMapAllocClass,
+    /// Set on instruction-local maps whose dimensions an
+    /// `.override::global_dim{,_stride}` operand replaced; see
+    /// `store_inner_extent`.
+    overridden_dimensions: bool,
 }
 
 /// Im2col adds spatial bounds to a two-dimensional (channels, pixels) box.
@@ -1118,7 +1122,7 @@ impl RuntimeTensorMap {
             // bound in every direction (SM107 measurement): loads zero-fill
             // and stores/reductions skip the box beyond `operand + 1`
             // elements, with the store's inner bound at 16-byte granularity
-            // like any other TensorMap (`store_inner_extent`).
+            // (`store_inner_extent`).
             for (axis, &dimension) in dimensions.iter().enumerate() {
                 if !(0..=255).contains(&dimension) {
                     return Err(EngineError::message(
@@ -1143,7 +1147,9 @@ impl RuntimeTensorMap {
                 image.replace_global_stride(axis, stride)?;
             }
         }
-        image.materialize(memory, rank)
+        let mut overridden = image.materialize(memory, rank)?;
+        overridden.overridden_dimensions = !dimensions.is_empty();
+        Ok(overridden)
     }
 
     /// PTX makes an out-of-bounds TMA access through a large allocation class
@@ -1183,22 +1189,27 @@ impl RuntimeTensorMap {
     }
 
     /// Inner-dimension bound, in elements, of a shared-to-global copy or
-    /// reduction. Outer dimensions clip per element in both directions and
-    /// loads clip the inner dimension per element, but SM107 (VR200) stores
-    /// and reductions write every 16-byte global chunk that holds an
-    /// in-bounds element: the inner bound rounds up to 16 bytes, for 1-, 2-
-    /// and 4-byte elements, descriptor and overridden dimensions alike. Box
-    /// starts are 16-byte aligned, so the extra elements always lie in the
-    /// box; the measured stores never wrote past the box.
+    /// reduction. Outer dimensions and loads clip per element. With
+    /// overridden dimensions, SM107 (VR200) stores and reductions write
+    /// every 16-byte global chunk that holds an in-bounds element: the inner
+    /// bound rounds up to 16 bytes (measured for 1-, 2- and 4-byte elements).
+    /// Box starts are 16-byte aligned, so the extra elements lie in the box.
+    /// VR200 showed the same granularity for plain descriptors, but plain
+    /// stores stay per element until Blackwell is measured, since rounding
+    /// would turn tensor ends inside an allocation's last chunk into
+    /// out-of-bounds writes.
     fn store_inner_extent(&self) -> usize {
+        if !self.overridden_dimensions {
+            return self.global_shape[0];
+        }
         let bits = self.transfer_element_bits();
         (self.global_shape[0] * bits).div_ceil(8).next_multiple_of(16) * 8 / bits
     }
 
-    /// The 16-byte store granularity was measured for tiled stores of whole
-    /// bytes only. Sub-byte and im2col stores keep their exact per-element
-    /// footprint, which is only known to be right when the inner bound
-    /// already ends on a 16-byte chunk.
+    /// The 16-byte override store granularity was measured for tiled stores
+    /// of whole bytes only. Sub-byte and im2col stores keep their exact
+    /// per-element footprint, which is only known to be right when the
+    /// overridden inner bound already ends on a 16-byte chunk.
     fn require_measured_store_inner_bound(&self) -> Result<(), EngineError> {
         if self.store_inner_extent() != self.global_shape[0] {
             return Err(EngineError::analysis_incomplete(
@@ -1737,6 +1748,7 @@ impl RuntimeTensorMap {
             transfer_template,
             alloc_class,
             im2col,
+            overridden_dimensions: false,
         })
     }
 
@@ -4671,9 +4683,10 @@ mod tests {
     }
 
     #[test]
-    fn tensor_reduction_applies_each_element_of_in_bounds_chunks_once() {
+    fn tensor_reduction_applies_each_in_bounds_element_once() {
         let global = GlobalMemory::new();
-        // A 7-element tensor in an 8-element allocation.
+        // A 7-element tensor in an 8-element allocation: plain descriptors
+        // stay per element even inside the last 16-byte chunk.
         let initial = [10_u32, 20, 30, 40, 50, 60, 70, 80];
         let allocation = global
             .allocate_from_bytes(
@@ -4701,8 +4714,7 @@ mod tests {
         let context = topology.warp_contexts().next().unwrap();
         let (source, source_buffer, _) = shared_destination(&physical, 16);
         // The box starts at the 16-byte-aligned element 4; its last element
-        // lies past the tensor but in the box's last in-bounds 16-byte
-        // chunk, which SM107 reduces whole.
+        // lies past the tensor.
         let contributions = [1_u32, 2, 3, 99];
         let contribution_bytes = contributions
             .into_iter()
@@ -4746,7 +4758,7 @@ mod tests {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect::<Vec<_>>();
-        assert_eq!(actual, vec![10, 20, 30, 40, 51, 62, 73, 179]);
+        assert_eq!(actual, vec![10, 20, 30, 40, 51, 62, 73, 80]);
     }
 
     #[test]

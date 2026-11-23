@@ -460,22 +460,25 @@ def numsim_clip_inputs(inputs):
     return {**inputs, "m": numsim.TensorMap(array, **metadata).numpy()}
 
 
-def clipped_extents(route, columns, rows):
+def clipped_extents(route, columns, rows, chunked=True):
     """SM107 (VR200) measurement: loads bound both axes per element; stores
-    and reductions bound outer axes per element but write every 16-byte
-    chunk of the inner axis that holds an in-bounds element."""
+    and reductions with overridden dimensions bound outer axes per element
+    but write every 16-byte chunk of the inner axis that holds an in-bounds
+    element. Plain-descriptor stores (``chunked=False``) are modeled per
+    element: VR200 showed 16-byte chunks there too, but that is left
+    unmodeled until Blackwell is measured."""
 
     width, height = CLIP_BOX
-    if route != "load":
+    if route != "load" and chunked:
         columns = -(-columns // 4) * 4
     return min(columns, width), min(rows, height)
 
 
-def clipped_expectation(route, columns, rows, y, pitch=CLIP_PITCH):
+def clipped_expectation(route, columns, rows, y, pitch=CLIP_PITCH, chunked=True):
     """Expected (global buffer, shared tile) for a box moved at offset zero."""
 
     width, height = CLIP_BOX
-    columns, rows = clipped_extents(route, columns, rows)
+    columns, rows = clipped_extents(route, columns, rows, chunked)
     y = y.copy()
     tile = np.arange(1, width * height + 1, dtype=np.float32).reshape(height, width)
     for row in range(height):
@@ -507,9 +510,11 @@ def test_tma_override_dimensions_bound_every_direction(route, d0, d1, tmp_path):
 
 @pytest.mark.parametrize("route", ("load", "s2g", "reduce"))
 @pytest.mark.parametrize("shape", ((5, 8), (9, 3), (16, 8)))
-def test_tma_store_inner_bound_has_16_byte_granularity(route, shape, tmp_path):
-    """The same rule without overrides: the descriptor's own dimensions, over
-    rows of ``y`` whose 128-byte pitch shows writes past the inner bound."""
+def test_tma_plain_store_inner_bound_stays_per_element(route, shape, tmp_path):
+    """Without overrides the descriptor's own dimensions bound every direction
+    per element, so nothing lands in the 128-byte row gaps of ``y`` past the
+    inner bound (VR200 writes whole 16-byte chunks here; deliberately not
+    modeled until Blackwell is measured)."""
 
     inputs = clip_inputs(0, 0)
     inputs["m"] = numsim.TensorMap(
@@ -519,7 +524,7 @@ def test_tma_store_inner_bound_has_16_byte_granularity(route, shape, tmp_path):
         box_shape=CLIP_BOX,
         element_strides=(1, 1),
     ).numpy()
-    expected, expected_tile = clipped_expectation(route, *shape, inputs["y"])
+    expected, expected_tile = clipped_expectation(route, *shape, inputs["y"], chunked=False)
     result = run_checked(clip_kernel(route, override=False), inputs, cache_dir=tmp_path)
     np.testing.assert_array_equal(inputs["y"], expected)
     np.testing.assert_array_equal(result.outputs["out"], expected_tile)
