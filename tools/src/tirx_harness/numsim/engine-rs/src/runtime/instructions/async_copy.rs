@@ -66,7 +66,6 @@ pub fn override_tensor_map<W: WarpHandle>(
     lower_strides: &[i64],
     upper_strides: i64,
     coordinates: &[i64],
-    clips_dimensions: bool,
 ) -> Result<TensorMapHandle, EngineError> {
     #[cfg(feature = "profile")]
     crate::instruction_profile::record(
@@ -89,7 +88,6 @@ pub fn override_tensor_map<W: WarpHandle>(
             lower_strides,
             upper_strides,
             coordinates,
-            clips_dimensions,
         )
     })();
     match result {
