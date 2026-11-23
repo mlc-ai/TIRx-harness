@@ -9,7 +9,12 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any
 
-from ..errors import NumSimBuildError, UnmodeledTIRxFormError, UnsupportedTIRxError
+from ..errors import (
+    InvalidLaunchError,
+    NumSimBuildError,
+    UnmodeledTIRxFormError,
+    UnsupportedTIRxError,
+)
 
 
 @cache
@@ -119,6 +124,12 @@ def raise_failure(payload: dict[str, Any]) -> None:
         unmodeled = UnmodeledTIRxFormError(str(payload.get("target", "")), message)
         unmodeled.source_span = deserialize_source_span(payload.get("span"))
         raise unmodeled from None
+    if payload.get("kind") == "invalid_launch":
+        from .source_map import deserialize_source_span
+
+        raise InvalidLaunchError(
+            message, source_span=deserialize_source_span(payload.get("span"))
+        ) from None
     if payload.get("kind") == "unsupported":
         raise UnsupportedTIRxError(
             message, unsupported=tuple(payload.get("unsupported", ()))

@@ -49,6 +49,13 @@ pub enum Failure {
         /// The rejected node's source span, attached by the frontend loop.
         span: Option<Json>,
     },
+    /// A launch the CUDA driver provably rejects on the kernel's target
+    /// architecture; raised as `InvalidLaunchError`.
+    InvalidLaunch {
+        message: String,
+        /// The launch region's source span.
+        span: Option<Json>,
+    },
     /// A call, node or form the frontend has no rule for, or an inconsistency
     /// between its own analysis and emission; raised as `NumSimBuildError`.
     NotCovered(String),

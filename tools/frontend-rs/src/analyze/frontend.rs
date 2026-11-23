@@ -200,6 +200,8 @@ pub fn analyze_primfunc(ctx: &Ctx, func: &Function) -> AResult<KernelPlan> {
         .collect();
     let buffer_bindings = BufferBindings::build(&statements)?;
     ctx.record_tensor_decls(&buffer_bindings)?;
+    // A launch CUDA rejects never runs: report it before any coverage gap.
+    super::launch_limits::check_launch_limits(ctx, func, &statements, &nodes, &buffer_bindings)?;
     let params: Vec<Var> = func.params.iter().cloned().collect();
 
     let mut facts = KernelFacts::default();

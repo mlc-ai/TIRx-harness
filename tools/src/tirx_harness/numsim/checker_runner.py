@@ -17,7 +17,7 @@ import tvm_ffi
 from tvm_tirx import ir, tirx
 
 from .bindings import PreparedBindings, prepare_bindings
-from .errors import NumSimExecutionError, UnsupportedTIRxError
+from .errors import InvalidLaunchError, NumSimExecutionError, UnsupportedTIRxError
 from .host_abi import HostAbiContract, HostBindingSlot, build_host_abi
 from .transpiler.frontend import _extract_topology
 from .transpiler.source_map import (
@@ -729,18 +729,72 @@ def _frontend_incomplete_payload(
         }
     elif source_anchor is not None and _native_diagnostic_has_source_line(source_anchor):
         details["source_anchor"] = copy.deepcopy(source_anchor)
+    return _not_started_payload(
+        checker,
+        verdict="incomplete",
+        findings=[],
+        incomplete=[details],
+        termination="native_frontend_unsupported",
+        source_anchor=source_anchor,
+    )
+
+
+def _invalid_launch_payload(
+    checker: NativeChecker,
+    error: InvalidLaunchError,
+    *,
+    source_anchor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """An ``error`` verdict for a launch CUDA rejects before any CTA runs."""
+
+    details: dict[str, Any] = {
+        "kind": "invalid_launch",
+        "status": "error",
+        "message": str(error),
+    }
+    launch_span = serialize_source_span(error.source_span)
+    if _serialized_source_span_has_line(launch_span):
+        details["source_anchor"] = {
+            "scope": "launch",
+            "kernel_index": 0,
+            "source_text": "T.device_entry launch configuration",
+            "source_span": launch_span,
+        }
+    elif source_anchor is not None and _native_diagnostic_has_source_line(source_anchor):
+        details["source_anchor"] = copy.deepcopy(source_anchor)
+    return _not_started_payload(
+        checker,
+        verdict="error",
+        findings=[details],
+        incomplete=[],
+        termination="invalid_launch",
+        source_anchor=source_anchor,
+    )
+
+
+def _not_started_payload(
+    checker: NativeChecker,
+    *,
+    verdict: str,
+    findings: list[dict[str, Any]],
+    incomplete: list[dict[str, Any]],
+    termination: str,
+    source_anchor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """A payload for a kernel the frontend settled before any execution."""
+
     payload: dict[str, Any] = {
         "schema_version": 3,
-        "verdict": "incomplete",
-        "findings": [],
+        "verdict": verdict,
+        "findings": findings,
         "advisories": [],
-        "incomplete": [details],
+        "incomplete": incomplete,
         "stats": {"available": False},
         "execution_error": None,
         "coverage": {
             "status": "not_started",
             "eligible_for_clean": False,
-            "termination": {"kind": "native_frontend_unsupported"},
+            "termination": {"kind": termination},
         },
         "engine": {
             "mode": "native",
@@ -756,7 +810,7 @@ def _frontend_incomplete_payload(
             {
                 "execution_model": "direct_online_vc",
                 "sync": {
-                    "verdict": "incomplete",
+                    "verdict": verdict,
                     "findings": [],
                     "incomplete": [],
                     "effects": [],
@@ -813,6 +867,14 @@ def run_native_checker(
         )
         launch_scalar_dtypes = {**shape_scalar_dtypes, **launch_scalar_dtypes}
         module = transpile_native_checker_artifact(checker, concrete_func, cache_dir=cache_dir)
+    except InvalidLaunchError as error:
+        return NativeCheckerRun(
+            module=None,
+            bindings=None,
+            payload=_invalid_launch_payload(
+                checker, error, source_anchor=_primfunc_source_anchor(func)
+            ),
+        )
     except UnsupportedTIRxError as error:
         return NativeCheckerRun(
             module=None,

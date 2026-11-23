@@ -587,12 +587,22 @@ const DEVICE_ENTRY_ATTRS: &[&str] = &[
 /// priority only schedule the launch. Programmatic stream serialization lets
 /// the launch begin before the preceding kernel in its stream completes; NumSim
 /// runs one launch whose inputs are complete before it starts, and orders work
-/// after `griddepcontrol.wait` through its external-grid-dependency model.
+/// after `griddepcontrol.wait` through its external-grid-dependency model. The
+/// shared-memory and portable-cluster-size modes only decide which shared
+/// memory sizes and cluster shapes CUDA accepts; `launch_limits` checks the
+/// rejections it can prove, and an accepted launch executes identically.
 const SCALAR_LAUNCH_FIELDS: &[&str] = &[
     "dynamic_smem_bytes",
     "stream",
     "priority",
     "programmatic_stream_serialization",
+    "shared_memory_mode",
+    "portable_cluster_size_mode",
+];
+/// Enum launch fields and their number of `T.cuda.LaunchConfig` values.
+const ENUM_LAUNCH_FIELDS: &[(&str, i64)] = &[
+    ("shared_memory_mode", 5),
+    ("portable_cluster_size_mode", 3),
 ];
 /// Kernel attributes constrain occupancy and launch validity only; NumSim
 /// executes the launch shape directly.
@@ -656,6 +666,13 @@ pub fn validate_region(region: &RegionStmtObj) -> AResult<Option<String>> {
             return Ok(Some(format!(
                 "RegionStmt({op_name}) programmatic_stream_serialization must be a constant"
             )));
+        }
+        if let Some((_, count)) = ENUM_LAUNCH_FIELDS.iter().find(|(name, _)| name == field) {
+            if int_imm(&oref(value.clone())).is_none_or(|mode| !(0..*count).contains(&mode)) {
+                return Ok(Some(format!(
+                    "RegionStmt({op_name}) {field} must be a constant LaunchConfig enum value"
+                )));
+            }
         }
         if field == "dynamic_smem_bytes" && int_imm(&oref(value.clone())).is_none_or(|bytes| bytes < 0) {
             return Ok(Some(format!(

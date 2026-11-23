@@ -224,6 +224,11 @@ fn failure_payload(failure: Failure) -> Result<Json> {
             ("message", Json::String(message)),
             ("span", span.unwrap_or(Json::Null)),
         ]),
+        Failure::InvalidLaunch { message, span } => json_object(vec![
+            ("kind", Json::from("invalid_launch")),
+            ("message", Json::String(message)),
+            ("span", span.unwrap_or(Json::Null)),
+        ]),
         Failure::NotCovered(reason) => json_object(vec![
             ("kind", Json::from("not_covered")),
             ("message", Json::String(reason)),

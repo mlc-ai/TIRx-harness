@@ -127,3 +127,8 @@ inspect their verdicts as described in [Checkers and reports](checkers.md).
 .. autoapiexception:: tirx_harness.numsim.NumSimExecutionError
    :show-inheritance:
 ```
+
+```{eval-rst}
+.. autoapiexception:: tirx_harness.numsim.InvalidLaunchError
+   :show-inheritance:
+```
