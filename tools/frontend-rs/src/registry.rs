@@ -155,7 +155,10 @@ const UNREVIEWED_TARGET_PTX_REASON: &str =
 
 /// Every reviewed row, sorted by canonical IR name.
 pub const OPS: &[OpRow] = &[
+    OpRow::new("prim.cos", "pure_scalar", crate::emit::pure::cos),
+    OpRow::new("prim.erf", "pure_scalar", crate::emit::pure::erf),
     OpRow::new("prim.exp", "pure_scalar", crate::emit::pure::exp),
+    OpRow::new("prim.exp2", "pure_scalar", crate::emit::pure::exp2),
     OpRow::new("prim.fabs", "pure_scalar", crate::emit::pure::fabs),
     OpRow::new("prim.fma", "pure_scalar", crate::emit::pure::fma),
     OpRow::new("prim.if_then_else", "pure_scalar", crate::emit::pure::prim_if_then_else),
@@ -163,8 +166,12 @@ pub const OPS: &[OpRow] = &[
     OpRow::new("prim.log1p", "pure_scalar", crate::emit::pure::log1p),
     OpRow::new("prim.log2", "pure_scalar", crate::emit::pure::log2),
     OpRow::new("prim.popcount", "pure_scalar", crate::emit::pure::popcount),
+    OpRow::new("prim.pow", "pure_scalar", crate::emit::pure::pow),
     OpRow::new("prim.rsqrt", "pure_scalar", crate::emit::pure::rsqrt),
     OpRow::new("prim.sigmoid", "pure_scalar", crate::emit::pure::sigmoid),
+    OpRow::new("prim.sin", "pure_scalar", crate::emit::pure::sin),
+    OpRow::new("prim.sqrt", "pure_scalar", crate::emit::pure::sqrt),
+    OpRow::new("prim.tanh", "pure_scalar", crate::emit::pure::tanh),
     OpRow::new("tirx.address_of", "pure_scalar", crate::emit::pure::address_of),
     OpRow::new("tirx.cuda.__activemask", "pure_scalar", crate::emit::pure::cuda_activemask),
     OpRow::new("tirx.cuda.__shfl_down_sync", "pure_scalar", crate::emit::pure::cuda_shfl_down_sync),

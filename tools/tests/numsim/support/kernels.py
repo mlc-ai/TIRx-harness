@@ -103,7 +103,7 @@ def fetch_register_coordinates(output: T.Tensor((2, 32, 2), "int32")):
 def unsupported_exp(source: T.Tensor((32,), "float32"), destination: T.Tensor((32,), "float32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
-    destination[lane] = T.sin(source[lane])
+    destination[lane] = T.atan(source[lane])
 
 
 @T.function

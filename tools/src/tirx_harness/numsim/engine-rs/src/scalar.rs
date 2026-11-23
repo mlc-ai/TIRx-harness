@@ -485,6 +485,36 @@ pub fn ptx_lg2_approx_ftz_f32(value: f32) -> f32 {
     flush_subnormal_f32(libm::log2(value as f64) as f32)
 }
 
+/// CUDA's single-precision math library functions (`exp2f`, `tanhf`, `powf`, `sinf`, `cosf`,
+/// `erff`). The device result depends on the build: TIRx compiles with `--use_fast_math` by
+/// default, which maps `sinf`/`cosf`/`powf` to approximate intrinsics and flushes subnormals.
+/// As with `ptx_sin_approx_f32`, model each with one target-independent representative, the
+/// binary64 libm value rounded once to binary32, without replaying any approximation or
+/// flushing subnormals. Compare against device results with a tolerance, not bit for bit.
+pub fn cuda_exp2f(value: f32) -> f32 {
+    libm::exp2(value as f64) as f32
+}
+
+pub fn cuda_tanhf(value: f32) -> f32 {
+    libm::tanh(value as f64) as f32
+}
+
+pub fn cuda_powf(base: f32, exponent: f32) -> f32 {
+    libm::pow(base as f64, exponent as f64) as f32
+}
+
+pub fn cuda_sinf(value: f32) -> f32 {
+    libm::sin(value as f64) as f32
+}
+
+pub fn cuda_cosf(value: f32) -> f32 {
+    libm::cos(value as f64) as f32
+}
+
+pub fn cuda_erff(value: f32) -> f32 {
+    libm::erf(value as f64) as f32
+}
+
 pub fn ptx_tanh_approx_f32(value: f32) -> f32 {
     // Use one target-independent software representative rather than replaying
     // an architecture-specific tanh.approx polynomial.

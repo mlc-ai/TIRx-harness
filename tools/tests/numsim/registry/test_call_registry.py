@@ -85,24 +85,37 @@ def test_fetch_register_uses_launch_coordinates_without_hardware_state(tmp_path)
 def test_registry_remains_closed_for_unregistered_calls():
     spec = analyze(unsupported_exp)
 
-    assert any("Call(prim.sin(float32)->float32)" in item for item in spec.unsupported)
+    assert any("Call(prim.atan(float32)->float32)" in item for item in spec.unsupported)
 
 
-@pytest.mark.parametrize(
-    "op_name",
-    [
-        "prim.fabs",
-        "prim.log1p",
-        "prim.sigmoid",
-    ],
-)
+UNARY_FLOAT32_INTRINSICS = [
+    "prim.cos",
+    "prim.erf",
+    "prim.exp2",
+    "prim.fabs",
+    "prim.log1p",
+    "prim.sigmoid",
+    "prim.sin",
+    "prim.sqrt",
+    "prim.tanh",
+]
+
+
+@pytest.mark.parametrize("op_name", UNARY_FLOAT32_INTRINSICS)
 def test_registry_accepts_float32_gate_intrinsics(op_name: str):
     assert _accepted("float32", op_name, "T.float32(1)")
 
 
-@pytest.mark.parametrize("op_name", ["prim.fabs", "prim.log1p", "prim.sigmoid"])
+@pytest.mark.parametrize("op_name", UNARY_FLOAT32_INTRINSICS)
 def test_gate_intrinsics_reject_unmodeled_float64_forms(op_name: str):
     assert f"Call({op_name}(float64)->float64)" in _rejected("float64", op_name, "T.float64(1)")
+
+
+def test_registry_accepts_float32_pow():
+    assert _accepted("float32", "prim.pow", "T.float32(2)", "T.float32(0.5)")
+    assert "Call(prim.pow(float64, float64)->float64)" in _rejected(
+        "float64", "prim.pow", "T.float64(2)", "T.float64(0.5)"
+    )
 
 
 @pytest.mark.parametrize(

@@ -437,6 +437,10 @@ fn validate_fabs(_ctx: &Ctx, s: &CallSignature) -> Result<bool, String> {
     exact(s, "float32", &["float32"])
 }
 
+fn validate_binary_f32(_ctx: &Ctx, s: &CallSignature) -> Result<bool, String> {
+    exact(s, "float32", &["float32", "float32"])
+}
+
 fn validate_cuda_thread_rank(_ctx: &Ctx, s: &CallSignature) -> Result<bool, String> {
     exact(s, "int32", &[])
 }
@@ -2796,6 +2800,59 @@ pub fn exp(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> 
         .with_call_expr(call.node, |emitter| {
             let expr = call.node;
             emitter.emit_unary_atom(expr, "exp", "f32", ".exp()")
+        })
+        .map(Some)
+}
+/// A binary32 CUDA math library call modeled by an engine representative (`cuda_*f`).
+fn cuda_math_f32(
+    emitter: &mut Emitter,
+    call: &Decoded,
+    name: &str,
+    function: &'static str,
+    binary: bool,
+) -> AResult<Option<RustValue>> {
+    let signature = signature(call.node, call.call)?;
+    let valid = if binary {
+        validate_binary_f32(emitter.ctx, &signature)
+    } else {
+        validate_fabs(emitter.ctx, &signature)
+    };
+    check_signature(&signature, valid)?;
+    emitter
+        .with_call_expr(call.node, |emitter| {
+            let arguments = emitter.emit_arguments(call.node)?;
+            emitter.emit_call_atom(name, &arguments, "f32", |codes| {
+                format!("{function}({})", codes.join(", "))
+            })
+        })
+        .map(Some)
+}
+pub fn cos(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "cos", "cuda_cosf", false)
+}
+pub fn erf(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "erf", "cuda_erff", false)
+}
+pub fn exp2(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "exp2", "cuda_exp2f", false)
+}
+pub fn pow(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "pow", "cuda_powf", true)
+}
+pub fn sin(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "sin", "cuda_sinf", false)
+}
+pub fn tanh(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    cuda_math_f32(emitter, call, "tanh", "cuda_tanhf", false)
+}
+/// Modeled by the correctly rounded `f32::sqrt`. CUDA `sqrtf` matches it only without fast
+/// math; TIRx's default `--use_fast_math` lowers it to an approximate square root.
+pub fn sqrt(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
+    let signature = signature(call.node, call.call)?;
+    check_signature(&signature, validate_fabs(emitter.ctx, &signature))?;
+    emitter
+        .with_call_expr(call.node, |emitter| {
+            emitter.emit_unary_atom(call.node, "sqrt", "f32", ".sqrt()")
         })
         .map(Some)
 }

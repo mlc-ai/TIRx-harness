@@ -48,10 +48,11 @@ pub use crate::runtime::tensor_map_registry::RuntimeTensorMapRegistry;
 pub use crate::runtime::tmem::get_tmem_addr;
 pub use crate::runtime::warp_ops::require_uniform_i64;
 pub use crate::scalar::{
-    cuda_canonicalize_nan_f32, cuda_f32_max, cuda_f32_min, cuda_f32_to_fp16_bits,
-    cuda_fp16_bits_to_f32, float2_x, float2_y, floor_div_i64, floor_mod_i64,
-    fp8x4_e4m3_from_float4, make_float2, pack_bf16x2, ptx_exp2_approx_ftz_f32,
-    ptx_lg2_approx_ftz_f32, ptx_tanh_approx_f32, unpack_bf16x2, F32x4, U64x2,
+    cuda_canonicalize_nan_f32, cuda_cosf, cuda_erff, cuda_exp2f, cuda_f32_max, cuda_f32_min,
+    cuda_f32_to_fp16_bits, cuda_fp16_bits_to_f32, cuda_powf, cuda_sinf, cuda_tanhf, float2_x,
+    float2_y, floor_div_i64, floor_mod_i64, fp8x4_e4m3_from_float4, make_float2, pack_bf16x2,
+    ptx_exp2_approx_ftz_f32, ptx_lg2_approx_ftz_f32, ptx_tanh_approx_f32, unpack_bf16x2, F32x4,
+    U64x2,
 };
 pub use crate::spaces::{PhysicalMemory, SharedAllocation, TmemAllocation, WarpPrivateAllocation};
 pub use crate::topology::LaunchTopology;

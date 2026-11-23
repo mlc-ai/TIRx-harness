@@ -1365,6 +1365,18 @@ RUNTIME_CASES = (
         ),
     ),
     RuntimeCase(
+        target_ids=(
+            "call:prim.cos",
+            "call:prim.erf",
+            "call:prim.exp2",
+            "call:prim.pow",
+            "call:prim.sin",
+            "call:prim.sqrt",
+            "call:prim.tanh",
+        ),
+        tests=("runtime/test_math_intrinsics.py::test_math_calls_match_rounded_binary64",),
+    ),
+    RuntimeCase(
         target_ids=("call:prim.log2",),
         tests=(
             "runtime/test_scalar_control.py::test_current_scalar_device_intrinsics_have_stable_numeric_representatives",
