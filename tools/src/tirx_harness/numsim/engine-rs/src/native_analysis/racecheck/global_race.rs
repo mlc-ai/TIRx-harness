@@ -5011,9 +5011,16 @@ impl FindingAggregate {
             self.len += 1;
             return true;
         }
-        let merged = entries[lo..hi]
-            .iter()
-            .fold(finding, |merged, entry| merged.hull(entry));
+        // The hull keeps the receiver's operations, so fold onto the
+        // earliest instance: the report then names the first conflicting
+        // instance whatever order the pairs were visited in.
+        let merged = entries[lo..hi].iter().fold(finding, |merged, entry| {
+            if instance_key(entry) < instance_key(&merged) {
+                entry.hull(&merged)
+            } else {
+                merged.hull(entry)
+            }
+        });
         entries.drain(lo..hi);
         entries.insert(lo, merged);
         self.len -= hi - lo - 1;
@@ -5038,6 +5045,11 @@ impl FindingAggregate {
         findings.sort_unstable();
         findings
     }
+}
+
+/// The dynamic instances a finding names; its site fixes everything else.
+fn instance_key(finding: &PhysicalRaceFinding) -> (&DynamicOpId, &DynamicOpId) {
+    (finding.prior().operation(), finding.current().operation())
 }
 
 #[derive(Default)]
@@ -9829,9 +9841,15 @@ fn normalized_finding(
     right: &RecordedGlobalAccess,
     ordering_failure: PhysicalRaceOrderingFailure,
 ) -> PhysicalRaceFinding {
-    let left = normalized_witness(&left.witness());
-    let right = normalized_witness(&right.witness());
-    let (prior, current) = if left <= right {
+    // The pair is unordered, so it is reported in a canonical orientation
+    // over its static sites -- independent of the order it was visited in --
+    // while each side keeps its concrete instance (sequence and loop
+    // iterations) for the report. `FindingAggregate` keys on the sites.
+    let left_order = normalized_witness(&left.witness());
+    let right_order = normalized_witness(&right.witness());
+    let left = left.witness();
+    let right = right.witness();
+    let (prior, current) = if left_order <= right_order {
         (&left, &right)
     } else {
         (&right, &left)
@@ -10859,6 +10877,51 @@ mod tests {
         assert_eq!(retained[1].overlap().byte_offset(), 0);
         assert_eq!(retained[1].overlap().byte_len(), 8);
         assert_eq!(retained[1].prior().span().byte_len(), 8);
+    }
+
+    fn loop_finding(write_iteration: u64, read_iteration: u64) -> PhysicalRaceFinding {
+        let span = PhysicalByteSpan::new(PhysicalAllocationId::new(1), 0, 4).unwrap();
+        let witness = |warp, iteration, source, kind| {
+            PhysicalRaceWitness::from_parts_shared(
+                Arc::new(DynamicOpId::new(
+                    0,
+                    warp,
+                    10 * iteration,
+                    StaticOpId::new(source),
+                    [crate::LoopFrame::new(StaticOpId::new(source + 1), iteration)],
+                )),
+                0,
+                kind,
+                PhysicalAccessSpace::Global,
+                span,
+            )
+        };
+        PhysicalRaceFinding::new(
+            PhysicalRaceKind::WriteRead,
+            PhysicalRaceOrderingFailure::MissingInterActorSynchronization,
+            witness(0, write_iteration, 1, PhysicalAccessKind::Write),
+            witness(1, read_iteration, 3, PhysicalAccessKind::Read),
+            span,
+        )
+    }
+
+    #[test]
+    fn a_site_reports_its_earliest_instance_in_any_visiting_order() {
+        // One static pair races in two rounds; the merged finding names the
+        // first round's instances, not 0 and not the last one visited.
+        for order in [[(2, 1), (1, 0)], [(1, 0), (2, 1)]] {
+            let mut findings = FindingAggregate::with_cap(usize::MAX);
+            for (write, read) in order {
+                assert!(findings.insert(loop_finding(write, read)));
+            }
+            let retained = findings.findings();
+            assert_eq!(retained.len(), 1);
+            let iteration = |witness: &PhysicalRaceWitness| {
+                witness.operation().loop_frames()[0].iteration_ordinal()
+            };
+            assert_eq!(iteration(retained[0].prior()), 1);
+            assert_eq!(iteration(retained[0].current()), 0);
+        }
     }
 
     #[test]
