@@ -5,7 +5,7 @@ import pytest
 
 from tests.numsim.support.execution import with_cuda_arch
 from tirx_harness import numsim, racecheck, synccheck
-from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tirx_harness.numsim.errors import InvalidLaunchError
 from tvm_tirx.script import tirx as T
 
 
@@ -139,6 +139,7 @@ def test_fp8_cta1_extended_shared_addresses(tmp_path, a_in_tmem):
         np.testing.assert_array_equal(result.outputs["output"].view(np.float32), 32.0)
         for checker in (synccheck, racecheck):
             checker(kernel, arguments).require_clean()
-    # The wider field belongs to SM107, not to FP8 or K=32 generally.
-    with pytest.raises(UnsupportedTIRxError, match="exceeds the 18-bit descriptor address space"):
+    # The wider field belongs to SM107, not to FP8 or K=32 generally. SM100
+    # cannot even launch a block with more than 232448 bytes of shared memory.
+    with pytest.raises(InvalidLaunchError, match="exceeding the SM100 maximum opt-in"):
         numsim.transpile(with_cuda_arch(kernel, "sm_100a"), cache_dir=tmp_path)

@@ -16,7 +16,7 @@ from tests.numsim.support.tcgen_descriptor import (
     validate_tcgen05_instruction_shape,
 )
 from tirx_harness import numsim
-from tirx_harness.numsim.errors import UnsupportedTIRxError
+from tirx_harness.numsim.errors import InvalidLaunchError, UnsupportedTIRxError
 from tirx_harness.numsim.transpiler import analyze
 from tirx_harness.numsim.transpiler.artifact_template import emit_rust_module
 from tvm_tirx.backend.cuda.lang.alloc_pool import SMEMPool
@@ -3799,10 +3799,8 @@ def test_f8f6f4_cta2_k32_extended_shared_span_is_gated_by_arch_not_k_bit():
         kernel = with_cuda_arch(raw_tcgen_mma_f8f6f4_cta2_k32_extended_span_without_arch, arch)
         return emit_rust_module(analyze(kernel), kernel)
 
-    with pytest.raises(
-        UnsupportedTIRxError,
-        match="shared-memory virtual address span 270336 exceeds the 18-bit descriptor",
-    ):
+    # SM100 cannot launch a block with this much shared memory at all.
+    with pytest.raises(InvalidLaunchError, match="270336 bytes of shared memory per block"):
         emit_for_arch("sm_100a")
 
     # The family form selects the same SM107 descriptor decoding, so it must
