@@ -22,6 +22,7 @@ from .cases import (
     TensorMap,
 )
 from .errors import (
+    InvalidLaunchError,
     NumSimBuildError,
     NumSimError,
     NumSimExecutionError,
@@ -37,6 +38,7 @@ __all__ = [
     "Engine",
     "ExecutionAssumptions",
     "Im2col",
+    "InvalidLaunchError",
     "NativeAnalysisResult",
     "NumSimBuildError",
     "NumSimCase",

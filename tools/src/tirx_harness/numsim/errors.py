@@ -43,3 +43,15 @@ class NumSimBuildError(NumSimError):
 
 class NumSimExecutionError(NumSimError):
     """Raised when a compiled NumSim artifact fails during execution."""
+
+
+class InvalidLaunchError(NumSimExecutionError):
+    """Raised for a kernel launch CUDA provably rejects on the target architecture.
+
+    The launch never runs, so there is nothing to simulate; ``source_span`` is
+    the ``T.device_entry`` launch region whose configuration is invalid.
+    """
+
+    def __init__(self, message: str, *, source_span: Any = None) -> None:
+        super().__init__(message)
+        self.source_span = source_span

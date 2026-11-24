@@ -11,6 +11,7 @@ pub mod buffers;
 pub mod cuda_arch;
 pub mod expression_bindings;
 pub mod frontend;
+pub mod launch_limits;
 pub mod layout;
 pub mod memory;
 pub mod pointer_targets;

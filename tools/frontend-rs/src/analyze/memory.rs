@@ -211,7 +211,7 @@ fn append_buffer(builder: &mut BackingBuilder, buffer: &Var, is_parameter: bool)
 
 /// The dynamic shared memory of the `tirx.device_entry` launch: its
 /// `dynamic_smem_bytes` operand, or else the pool requirement `cuda.smem_required`.
-fn dynamic_shared_capacity(statements: &[Stmt]) -> AResult<Option<i64>> {
+pub(in crate::analyze) fn dynamic_shared_capacity(statements: &[Stmt]) -> AResult<Option<i64>> {
     let mut capacity: Option<i64> = None;
     for statement in statements {
         let Some(region) = statement.downcast_ref::<RegionStmtObj>() else {
