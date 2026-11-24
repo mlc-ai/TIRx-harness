@@ -15,8 +15,9 @@ use crate::analyze::util::prim_expr;
 
 use super::super::analyze::memory::{BufferPlan, MemorySpace};
 use super::super::analyze::topology::LAUNCH_THREAD;
-use super::super::analyze::util::{buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, int_imm, kind_or_bail, not_covered, oref, prim_dtype, repr_text, same, unsupported, AResult, Failure};
+use super::super::analyze::util::{buffer_dtype, buffer_name, dtype_text, expr_type, ffi_text, ident, int_imm, kind_or_bail, not_covered, oref, prim_dtype, repr_text, same, unsupported, AResult, Failure};
 use super::super::analyze::vector::classify_contiguous_ramp;
+use std::collections::{HashMap, HashSet};
 use super::abi;
 use super::{ControlProvenance, Emitter, NestedLoadSite, RustValue, Uniformity};
 use crate::tables::{
@@ -162,10 +163,8 @@ impl<'a> Emitter<'a> {
 
     /// `logical_buffer_name`: one checker identity for a physical view.
     pub fn logical_buffer_name(&mut self, buffer: &Var) -> AResult<String> {
-        for (candidate, name) in &self.logical_buffer_name_cache {
-            if same(candidate, buffer) {
-                return Ok(name.clone());
-            }
+        if let Some(&at) = self.logical_buffer_name_index.get(&ident(buffer)) {
+            return Ok(self.logical_buffer_name_cache[at].1.clone());
         }
         let root = self.ordinary_logical_view_root(buffer)?;
         let mut name = self.memory_plan.resolve(&root)?.name.clone();
@@ -173,6 +172,8 @@ impl<'a> Emitter<'a> {
             name = format!("anonymous_{}", self.buffer_code(buffer)?.field);
         }
         let name = self.unique_root_name(&root, name);
+        self.logical_buffer_name_index
+            .insert(ident(buffer), self.logical_buffer_name_cache.len());
         self.logical_buffer_name_cache
             .push((buffer.clone(), name.clone()));
         Ok(name)
@@ -182,24 +183,12 @@ impl<'a> Emitter<'a> {
     /// tvm-tirx names every `view`/`rearrange` result `v`, and two roots that
     /// share a name must not share a checker identity.
     fn unique_root_name(&mut self, root: &Var, name: String) -> String {
-        if let Some((_, existing)) = self
-            .logical_root_names
-            .iter()
-            .find(|(candidate, _)| same(candidate, root))
-        {
-            return existing.clone();
+        if let Some(&at) = self.logical_root_name_index.get(&ident(root)) {
+            return self.logical_root_names[at].1.clone();
         }
-        let base = name.clone();
-        let mut name = name;
-        let mut suffix = 1;
-        while self
-            .logical_root_names
-            .iter()
-            .any(|(_, taken)| *taken == name)
-        {
-            suffix += 1;
-            name = format!("{base}_{suffix}");
-        }
+        let name = self.logical_root_unique_names.claim(name);
+        self.logical_root_name_index
+            .insert(ident(root), self.logical_root_names.len());
         self.logical_root_names.push((root.clone(), name.clone()));
         name
     }
@@ -332,27 +321,17 @@ impl<'a> Emitter<'a> {
         let mut shared_views: Vec<((usize, i64, i64), usize)> = Vec::new();
         for (position, (_, code)) in self.buffers.iter().enumerate() {
             let plan = self.plan_of(code);
-            if plan.dynamic_data_var.is_some() {
+            if !is_raw_generic_candidate(plan) {
                 continue;
             }
-            let Some(backing) = plan.backing_index else {
-                continue;
-            };
+            let backing = plan.backing_index.expect("candidate backing");
             if plan.space == MemorySpace::Global {
-                if plan.is_parameter && !global_roots.iter().any(|(key, _)| *key == backing) {
+                if !global_roots.iter().any(|(key, _)| *key == backing) {
                     global_roots.push((backing, position));
                 }
                 continue;
             }
-            if !matches!(
-                plan.space,
-                MemorySpace::Shared | MemorySpace::Local | MemorySpace::Register
-            ) {
-                continue;
-            }
-            let Some(count) = plan.layout.element_count else {
-                continue;
-            };
+            let count = plan.layout.element_count.expect("candidate element count");
             let key = (
                 backing,
                 plan.layout.elem_offset * plan.layout.itemsize,
@@ -389,7 +368,16 @@ impl<'a> Emitter<'a> {
     }
 
     fn raw_generic_candidates(&mut self) -> AResult<String> {
-        self.raw_generic_candidate_storage_indices()?;
+        // Only the selection's failure matters here; the module renders the
+        // selected candidates once, from the final buffer set. Any candidate
+        // makes the selection non-empty, so it cannot fail.
+        if !self
+            .buffers
+            .iter()
+            .any(|(_, code)| is_raw_generic_candidate(self.plan_of(code)))
+        {
+            self.raw_generic_candidate_storage_indices()?;
+        }
         self.memory_candidates.generic = true;
         Ok("&buffers.raw_generic_candidates".to_owned())
     }
@@ -1882,5 +1870,85 @@ impl<'a> Emitter<'a> {
         self.emit_write_call(&invocation);
         self.recorded_store_count += 1;
         Ok(())
+    }
+}
+
+/// Whether `raw_generic_candidate_storage_indices` may select the buffer
+/// `plan`: a global parameter, or a sized shared, local or register view,
+/// with static backing storage.
+fn is_raw_generic_candidate(plan: &BufferPlan) -> bool {
+    if plan.dynamic_data_var.is_some() || plan.backing_index.is_none() {
+        return false;
+    }
+    if plan.space == MemorySpace::Global {
+        return plan.is_parameter;
+    }
+    matches!(
+        plan.space,
+        MemorySpace::Shared | MemorySpace::Local | MemorySpace::Register
+    ) && plan.layout.element_count.is_some()
+}
+
+/// Names that are claimed once and never released.
+#[derive(Default)]
+pub struct UniqueNames {
+    taken: HashSet<String>,
+    /// Per base name, the smallest suffix that may still be free. Names are
+    /// never released, so every suffix below it stays taken.
+    next_suffix: HashMap<String, i64>,
+}
+
+impl UniqueNames {
+    /// Claim the first free name of `base`, `base_2`, `base_3`, ...
+    ///
+    /// The search for `base` resumes at the suffix where the previous one
+    /// stopped, so claiming stays O(1) amortized even when thousands of
+    /// names share one base.
+    pub fn claim(&mut self, base: String) -> String {
+        let mut name = base.clone();
+        if self.taken.contains(&name) {
+            let mut suffix = self.next_suffix.get(&base).copied().unwrap_or(2);
+            name = format!("{base}_{suffix}");
+            while self.taken.contains(&name) {
+                suffix += 1;
+                name = format!("{base}_{suffix}");
+            }
+            self.next_suffix.insert(base, suffix + 1);
+        }
+        self.taken.insert(name.clone());
+        name
+    }
+}
+
+#[cfg(test)]
+mod unique_name_tests {
+    use super::UniqueNames;
+
+    /// The linear rescan that `UniqueNames::claim` replaces.
+    fn claim_by_rescan(taken: &mut Vec<String>, base: &str) -> String {
+        let mut name = base.to_owned();
+        let mut suffix = 1;
+        while taken.contains(&name) {
+            suffix += 1;
+            name = format!("{base}_{suffix}");
+        }
+        taken.push(name.clone());
+        name
+    }
+
+    #[test]
+    fn resumed_suffix_search_picks_the_names_of_a_full_rescan() {
+        // Bases that collide with generated names (`v_3`, `v_2`, `v_5`), both
+        // before and after the search for `v` reaches them, among many `v`s.
+        let mut bases = vec!["v", "v_3", "v", "v", "v", "v_2", "v", "v_5", "w", "v"];
+        bases.extend(std::iter::repeat("v").take(200));
+        bases.extend(["v_100", "v_300", "v_2", "w"]);
+        bases.extend(std::iter::repeat("v").take(200));
+        let mut names = UniqueNames::default();
+        let mut taken = Vec::new();
+        let claimed: Vec<String> = bases.iter().map(|base| names.claim((*base).to_owned())).collect();
+        let expected: Vec<String> = bases.iter().map(|base| claim_by_rescan(&mut taken, base)).collect();
+        assert_eq!(claimed[..10], ["v", "v_3", "v_2", "v_4", "v_5", "v_2_2", "v_6", "v_5_2", "w", "v_7"]);
+        assert_eq!(claimed, expected);
     }
 }
