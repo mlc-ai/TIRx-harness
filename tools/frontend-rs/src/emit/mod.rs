@@ -3,6 +3,7 @@
 //! The text snapshots pin the emitted text, so temp-name counters, capture
 //! attempts and restore points keep their order.
 
+use std::collections::HashMap;
 use tvm_tirx::tvm_ffi::object::ObjectIdentity;
 use tvm_tirx::ir::{Expr, Var};
 use tvm_tirx::tirx::Function;
@@ -296,8 +297,14 @@ pub struct Emitter<'a> {
     pub capturing_for_statements: IdSet,
     pub dynamic_buffers: Vec<(Var, String)>,
     pub logical_buffer_name_cache: Vec<(Var, String)>,
+    /// Position of each buffer in `logical_buffer_name_cache`, by identity.
+    pub logical_buffer_name_index: HashMap<ObjectIdentity, usize>,
     /// The checker identity of each ordinary logical root, unique per root.
     pub logical_root_names: Vec<(Var, String)>,
+    /// Position of each root in `logical_root_names`, by identity.
+    pub logical_root_name_index: HashMap<ObjectIdentity, usize>,
+    /// The names in `logical_root_names`, each claimed once.
+    pub logical_root_unique_names: stmt::UniqueNames,
     pub loop_transfer_cache: IdMap<bool>,
     pub subtree_may_suspend_cache: IdMap<bool>,
     pub failed_inner_uniform_if_splits: IdSet,
@@ -586,7 +593,10 @@ impl<'a> Emitter<'a> {
             capturing_for_statements: IdSet::default(),
             dynamic_buffers: Vec::new(),
             logical_buffer_name_cache: Vec::new(),
+            logical_buffer_name_index: HashMap::new(),
             logical_root_names: Vec::new(),
+            logical_root_name_index: HashMap::new(),
+            logical_root_unique_names: Default::default(),
             loop_transfer_cache: IdMap::default(),
             subtree_may_suspend_cache: IdMap::default(),
             failed_inner_uniform_if_splits: IdSet::default(),
