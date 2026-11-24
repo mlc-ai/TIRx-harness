@@ -161,7 +161,7 @@ impl LaunchRuntimeServices {
             mbarriers,
             mbarrier_init_fences: Arc::new(MbarrierInitFenceTracker::new()),
             deferred_payloads,
-            named_barriers: Arc::new(NamedBarrierHub::new()),
+            named_barriers: Arc::new(NamedBarrierHub::for_topology(topology)),
             rendezvous: Arc::new(RendezvousHub::for_launch(Arc::clone(&selected_warps))),
             cluster_barriers: Arc::new(ClusterBarrierHub::for_launch(
                 topology,
@@ -528,10 +528,11 @@ impl PreparedLaunch {
             .iter()
             .copied()
             .map(|context| {
-                WarpTask::new(
-                    context.global_warp_id(),
-                    make_warp(context, self.services().clone()),
-                )
+                let warp = make_warp(context, self.services().clone());
+                let absent = context.absent_mask();
+                WarpTask::new(context.global_warp_id(), async move {
+                    warp.await.map_err(|error| error.with_absent_lanes(absent))
+                })
             })
             .collect()
     }

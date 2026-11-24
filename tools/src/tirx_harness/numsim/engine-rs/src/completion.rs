@@ -52,6 +52,30 @@ impl DiagnosticLabel {
             .with_context(format_args!("{}{detail}: ", self.value))
     }
 
+    pub(crate) fn warp_collective_divergence_requiring_with_detail(
+        &self,
+        active_mask: crate::WarpMask,
+        required_mask: crate::WarpMask,
+        detail: fmt::Arguments<'_>,
+    ) -> crate::EngineError {
+        self.warp_collective_divergence_requiring(active_mask, required_mask)
+            .with_context(format_args!("{}{detail}: ", self.value))
+    }
+
+    /// A divergence from `required_mask` (the warp's existing lanes for a
+    /// convergence or member-mask check), which never blames absent lanes.
+    pub(crate) fn warp_collective_divergence_requiring(
+        &self,
+        active_mask: crate::WarpMask,
+        required_mask: crate::WarpMask,
+    ) -> crate::EngineError {
+        crate::EngineError::warp_collective_divergence_requiring(
+            self.value.clone(),
+            active_mask.bits(),
+            required_mask.bits(),
+        )
+    }
+
     pub(crate) fn collective_publication_error(
         &self,
         key: OccurrenceKey,

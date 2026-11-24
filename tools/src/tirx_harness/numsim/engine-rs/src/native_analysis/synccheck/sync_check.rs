@@ -725,11 +725,15 @@ struct SyncCheckState {
 }
 
 impl SyncCheckState {
-    /// Build a state whose strict named-barrier protocol knows the launch
-    /// CTA thread count. `None` (no topology) skips full-CTA-contract checks.
-    fn with_cta_thread_count(cta_thread_count: Option<u64>) -> Self {
+    /// Build a state whose strict named-barrier protocol knows the launch:
+    /// its CTA thread count and partial-warp lanes. `None` (no topology)
+    /// skips full-CTA-contract checks.
+    fn with_topology(topology: Option<crate::LaunchTopology>) -> Self {
         Self {
-            named_protocol: StrictNamedBarrierProtocol::new(cta_thread_count),
+            named_protocol: topology.map_or_else(
+                || StrictNamedBarrierProtocol::new(None),
+                StrictNamedBarrierProtocol::for_topology,
+            ),
             ..Self::default()
         }
     }
@@ -800,13 +804,11 @@ impl SyncCheckLaunchState {
         records_only_fixed_sync_transitions: bool,
         effect_diagnostic_limit: u64,
     ) -> Self {
-        let cta_thread_count = context
-            .topology()
-            .map(|topology| (topology.warps_per_cta() * crate::WARP_SIZE) as u64);
+        let topology = context.topology();
         Self {
-            inner: Mutex::new(SyncCheckState::with_cta_thread_count(cta_thread_count)),
+            inner: Mutex::new(SyncCheckState::with_topology(topology)),
             cluster_inners: (0..context.cluster_shards())
-                .map(|_| Mutex::new(SyncCheckState::with_cta_thread_count(cta_thread_count)))
+                .map(|_| Mutex::new(SyncCheckState::with_topology(topology)))
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             context,

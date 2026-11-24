@@ -1190,12 +1190,29 @@ impl<'a> Emitter<'a> {
             "clusterCtaIdx.x" => {
                 RustValue::new("ctx.cta_id_in_cluster() as i32", "i32", Uniformity::Uniform)
             }
-            "threadIdx.x" => {
+            "threadIdx.x" if topology.is_linear_whole_warp_cta() => {
                 let name = self.control_name("direct_thread_idx");
                 self.emit_line(&format!(
                     "let {name} = WarpValue::from_fn(|lane| (ctx.warp_id_in_cta() * WARP_SIZE + lane) as i32);"
                 ));
                 RustValue::new(name, "i32", Uniformity::Varying)
+            }
+            "threadIdx.x" | "threadIdx.y" | "threadIdx.z" => {
+                let axis = &thread_tag[thread_tag.len() - 1..];
+                if topology.thread_coordinate_is_warp_uniform(axis) {
+                    RustValue::new(
+                        format!("({}) as i32", topology.uniform_thread_coordinate(axis)),
+                        "i32",
+                        Uniformity::Uniform,
+                    )
+                } else {
+                    let coordinate = topology.thread_coordinate(axis);
+                    let name = self.control_name(&format!("direct_thread_idx_{axis}"));
+                    self.emit_line(&format!(
+                        "let {name} = WarpValue::from_fn(|lane| ({coordinate}) as i32);"
+                    ));
+                    RustValue::new(name, "i32", Uniformity::Varying)
+                }
             }
             _ => {
                 return unsupported(format!(
@@ -1683,7 +1700,7 @@ impl<'a> Emitter<'a> {
         if !self.loop_live_masks.is_empty() {
             return unsupported("Return from inside a generated loop is not implemented");
         }
-        self.emit_line("if ctx.active_mask() != WarpMask::FULL {");
+        self.emit_line("if ctx.active_mask() != ctx.launch_mask() {");
         self.emit_line(
             "    return Err(EngineError::message(\"kernel return requires a full warp\"));",
         );

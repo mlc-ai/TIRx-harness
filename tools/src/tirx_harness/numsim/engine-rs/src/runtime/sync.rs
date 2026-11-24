@@ -55,6 +55,22 @@ pub(crate) fn require_full_warp_sync_labeled(
     Ok(())
 }
 
+/// Require a converged warp: every lane that exists executes. Unlike
+/// [`require_full_warp_sync`], which is for instructions that need all 32
+/// hardware lanes, this accepts the partial last warp of a CTA whose thread
+/// count is not a multiple of 32 when all of its lanes are active.
+pub fn require_converged(
+    mask: WarpMask,
+    context: &WarpContext,
+    operation: &str,
+) -> Result<(), EngineError> {
+    if mask != context.launch_mask() {
+        return Err(DiagnosticLabel::new(operation)
+            .warp_collective_divergence_requiring(mask, context.launch_mask()));
+    }
+    Ok(())
+}
+
 /// Syntactic and effective ordering carried by `barrier.cluster.arrive`.
 ///
 /// NOTE (P3 sync-subset dissolution): the Release/Relaxed distinction currently
@@ -111,6 +127,14 @@ struct ClusterBarrierContract {
 
 impl ClusterBarrierContract {
     fn new(kernel_index: usize, context: &WarpContext) -> Result<Self, EngineError> {
+        // Cluster-barrier arrival is counted per warp and its strict and
+        // fixed-state protocols require 32 arriving lanes. A partial warp's
+        // arrival has not been validated against hardware, so fail closed.
+        if context.topology().has_partial_warp() {
+            return Err(EngineError::analysis_incomplete(
+                "cluster_barrier_partial_warp_cta",
+            ));
+        }
         let cluster_id = context.cluster_id();
         let participant_warps = context
             .topology()
@@ -1119,6 +1143,7 @@ pub struct NamedBarrierArrivePlan {
     expected_arrivals: u64,
     warp_id: usize,
     arrival_mask: WarpMask,
+    launch_mask: WarpMask,
 }
 
 impl NamedBarrierArrivePlan {
@@ -1140,6 +1165,11 @@ impl NamedBarrierArrivePlan {
 
     pub const fn arrival_mask(self) -> WarpMask {
         self.arrival_mask
+    }
+
+    /// The contributing warp's existing lanes; see [`WarpContext::launch_mask`].
+    pub const fn launch_mask(self) -> WarpMask {
+        self.launch_mask
     }
 
     pub fn apply(
@@ -1170,6 +1200,7 @@ pub struct NamedBarrierSyncPlan {
     expected_arrivals: u64,
     warp_id: usize,
     arrival_mask: WarpMask,
+    launch_mask: WarpMask,
     aligned: bool,
 }
 
@@ -1192,6 +1223,11 @@ impl NamedBarrierSyncPlan {
 
     pub const fn arrival_mask(self) -> WarpMask {
         self.arrival_mask
+    }
+
+    /// The contributing warp's existing lanes; see [`WarpContext::launch_mask`].
+    pub const fn launch_mask(self) -> WarpMask {
+        self.launch_mask
     }
 
     pub const fn aligned(self) -> bool {
@@ -1354,6 +1390,7 @@ pub fn plan_named_barrier_sync_with_alignment(
         expected_arrivals,
         warp_id: context.global_warp_id(),
         arrival_mask: mask,
+        launch_mask: context.launch_mask(),
         aligned,
     }))
 }
@@ -1387,6 +1424,7 @@ pub(crate) fn plan_internal_warpgroup_sync(
         expected_arrivals,
         warp_id: context.global_warp_id(),
         arrival_mask: mask,
+        launch_mask: context.launch_mask(),
         aligned: true,
     }))
 }
@@ -1407,6 +1445,7 @@ pub fn plan_named_barrier_arrive(
         expected_arrivals,
         warp_id: context.global_warp_id(),
         arrival_mask: mask,
+        launch_mask: context.launch_mask(),
     }))
 }
 

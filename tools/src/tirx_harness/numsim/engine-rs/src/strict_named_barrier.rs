@@ -451,6 +451,9 @@ pub struct StrictNamedBarrierProtocol {
     /// (bare unit tests) or where no named-barrier slot can exist anyway
     /// (a state-searched fixed-sync projection).
     cta_thread_count: Option<u64>,
+    /// The launch, when known, so a partial warp's absent lanes are credited
+    /// exactly as the runtime hub credits them. `None` means whole warps.
+    topology: Option<crate::LaunchTopology>,
     state: Mutex<StrictNamedBarrierState>,
 }
 
@@ -458,6 +461,17 @@ impl StrictNamedBarrierProtocol {
     pub fn new(cta_thread_count: Option<u64>) -> Self {
         Self {
             cta_thread_count,
+            topology: None,
+            state: Mutex::default(),
+        }
+    }
+
+    /// A protocol for one launch: its full-CTA count is `warps_per_cta * 32`
+    /// and a partial warp's absent lanes are credited.
+    pub fn for_topology(topology: crate::LaunchTopology) -> Self {
+        Self {
+            cta_thread_count: Some((topology.warps_per_cta() * crate::WARP_SIZE) as u64),
+            topology: Some(topology),
             state: Mutex::default(),
         }
     }
@@ -647,9 +661,22 @@ impl StrictNamedBarrierProtocol {
                 witness,
             });
         }
+        let prior_mask = slot
+            .contributors
+            .iter()
+            .filter(|prior| prior.warp_id == warp_id && prior.operation == operation)
+            .fold(WarpMask::EMPTY, |mask, prior| mask.union(prior.arrival_mask));
+        let launch_mask = self
+            .topology
+            .map_or(WarpMask::FULL, |topology| topology.lane_mask_for_warp(warp_id));
+        let credit = crate::hardware_barriers::absent_lane_credit(
+            launch_mask,
+            prior_mask,
+            arrival_mask,
+        );
         let completed_arrivals =
             slot.arrival_count
-                .checked_add(arrival_count)
+                .checked_add(arrival_count + credit)
                 .ok_or_else(|| StrictNamedBarrierError::CounterOverflow {
                     barrier_id,
                     generation: slot.generation,
@@ -1023,6 +1050,7 @@ impl Clone for StrictNamedBarrierProtocol {
             .clone();
         Self {
             cta_thread_count: self.cta_thread_count,
+            topology: self.topology,
             state: Mutex::new(state),
         }
     }
@@ -1272,6 +1300,20 @@ mod tests {
         ));
         assert!(protocol.waiter_state_exact(id(0, 14), 0, low, 0));
         assert!(protocol.waiter_state_exact(id(0, 14), 0, high, 0));
+    }
+
+    #[test]
+    fn partial_warp_absent_lanes_are_credited_per_instruction_flavor() {
+        // 33 threads: warp 1 has lane 0. Its bar.arrive and bar.sync each count 32.
+        let topology = crate::LaunchTopology::with_threads_per_cta(1, 1, 33).unwrap();
+        let protocol = StrictNamedBarrierProtocol::for_topology(topology);
+        let lane0 = WarpMask::from_bits(0x1);
+        protocol.arrive(id(0, 2), 96, 1, lane0, Some(witness(1, 0))).unwrap();
+        protocol.sync(id(0, 2), 96, 1, lane0, Some(witness(1, 1))).unwrap();
+        assert!(matches!(
+            protocol.sync(id(0, 2), 96, 0, WarpMask::FULL, Some(witness(0, 0))),
+            Ok(StrictNamedBarrierOutcome::Ready { completed_now: true, .. })
+        ));
     }
 
     #[test]

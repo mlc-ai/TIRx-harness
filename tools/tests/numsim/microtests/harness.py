@@ -65,7 +65,10 @@ class _GpuTensorMap:
 
 
 def require_numsim_gpu(
-    pytestconfig: pytest.Config, *, min_nvrtc: tuple[int, int] | None = None
+    pytestconfig: pytest.Config,
+    *,
+    min_nvrtc: tuple[int, int] | None = None,
+    min_sm_major: int = 10,
 ) -> None:
     """Skip when GPU microtests are disabled or the required hardware is unavailable."""
 
@@ -80,8 +83,8 @@ def require_numsim_gpu(
     if worker.startswith("gw") and worker[2:].isdigit():
         torch.cuda.set_device(int(worker[2:]) % torch.cuda.device_count())
     major, _minor = torch.cuda.get_device_capability()
-    if major < 10:
-        pytest.skip("live NumSim/GPU microtests require an SM100-or-newer GPU")
+    if major < min_sm_major:
+        pytest.skip(f"this live NumSim/GPU microtest requires an SM{min_sm_major}0-or-newer GPU")
     if min_nvrtc is not None:
         from cuda.bindings import nvrtc
 

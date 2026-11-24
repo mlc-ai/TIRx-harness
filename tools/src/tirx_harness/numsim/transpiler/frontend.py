@@ -42,6 +42,14 @@ class LaunchTopology:
     ctas_per_cluster: int
     warps_per_cta: int
     warps_per_warpgroup: int
+    # Present only for CTAs other than (32k, 1, 1): the block shape along x, y
+    # and z and its thread count, which need not be a multiple of 32.
+    block: tuple[int, int, int] | None = None
+    threads_per_cta: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.block is not None:
+            object.__setattr__(self, "block", tuple(self.block))
 
     @property
     def warp_count(self) -> int:

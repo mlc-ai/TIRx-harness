@@ -4122,7 +4122,12 @@ impl<M: EngineMode> WarpEngine<M> {
             }
         }
         if plan.aligned() {
-            validate_aligned_named_barrier_mask(operation, plan.arrival_mask(), "bar.sync")?;
+            validate_aligned_named_barrier_mask(
+                operation,
+                &self.context,
+                plan.arrival_mask(),
+                "bar.sync",
+            )?;
         }
 
         let staged = OperationEffect::NamedBarrierSyncRegister {
@@ -4169,7 +4174,7 @@ impl<M: EngineMode> WarpEngine<M> {
             .ok_or_else(|| EngineError::message("CTA named-barrier size overflow"))?;
         let recombine_unaligned_full_cta =
             !plan.aligned() && plan.expected_arrivals() == full_cta_arrivals;
-        if recombine_unaligned_full_cta && accumulated_arrival_mask != WarpMask::FULL {
+        if recombine_unaligned_full_cta && accumulated_arrival_mask != self.context.launch_mask() {
             return Ok(None);
         }
 
@@ -4210,7 +4215,12 @@ impl<M: EngineMode> WarpEngine<M> {
                 )));
             }
         }
-        validate_aligned_named_barrier_mask(operation, plan.arrival_mask(), "bar.arrive")?;
+        validate_aligned_named_barrier_mask(
+            operation,
+            &self.context,
+            plan.arrival_mask(),
+            "bar.arrive",
+        )?;
 
         let staged = OperationEffect::NamedBarrierArrive {
             plan,
@@ -4236,7 +4246,7 @@ impl<M: EngineMode> WarpEngine<M> {
         aligned: bool,
     ) -> Result<(), EngineError> {
         if !aligned
-            && !mask.is_full()
+            && mask != self.context.launch_mask()
             && M::observes_analysis_gap(
                 self.kernel.mode_state(),
                 AnalysisGapKind::ClusterBarrierUnaligned,
@@ -4282,7 +4292,7 @@ impl<M: EngineMode> WarpEngine<M> {
         aligned: bool,
     ) -> Result<(), EngineError> {
         if !aligned
-            && !mask.is_full()
+            && mask != self.context.launch_mask()
             && M::observes_analysis_gap(
                 self.kernel.mode_state(),
                 AnalysisGapKind::ClusterBarrierUnaligned,
@@ -7901,6 +7911,7 @@ impl<M: EngineMode> WarpEngine<M> {
 
 fn validate_aligned_named_barrier_mask(
     operation: Option<&OperationContext>,
+    context: &crate::WarpContext,
     mask: WarpMask,
     label: &str,
 ) -> Result<(), EngineError> {
@@ -7912,7 +7923,7 @@ fn validate_aligned_named_barrier_mask(
     }) {
         return Ok(());
     }
-    require_full_warp_sync(mask, label)
+    crate::runtime::require_converged(mask, context, label)
 }
 
 fn physical_access_error_context(

@@ -296,6 +296,12 @@ impl ExecCtx {
         LaneMask::from_inner(self.0.active_mask())
     }
 
+    /// The lanes that exist in this warp; a partial last warp of a CTA has
+    /// fewer than 32.
+    pub const fn launch_mask(self) -> LaneMask {
+        LaneMask::from_inner(self.0.launch_mask())
+    }
+
     /// Derive a context for a structured child region.
     pub fn with_active_mask(self, active: LaneMask) -> Self {
         Self(self.0.with_active_mask(active.into_inner()))

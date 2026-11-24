@@ -312,13 +312,20 @@ impl RendezvousHub {
         active_mask: WarpMask,
         warps_per_group: usize,
     ) -> Result<bool, EngineError> {
-        let contract = match scope {
-            "participation:warpgroup" => ParticipantContract::warpgroup(context, warps_per_group)?,
-            "participation:cta" => ParticipantContract::cta(context),
+        // A CTA-scope contract needs every existing lane (a partial last warp
+        // is converged when all its lanes are active); warpgroup-scope
+        // contracts back warp-wide hardware instructions and need all 32.
+        let (contract, required_mask) = match scope {
+            "participation:warpgroup" => (
+                ParticipantContract::warpgroup(context, warps_per_group)?,
+                WarpMask::FULL,
+            ),
+            "participation:cta" => (ParticipantContract::cta(context), context.launch_mask()),
             _ => return Ok(false),
         };
-        if active_mask != WarpMask::FULL {
-            return Err(DiagnosticLabel::new(operation).warp_collective_divergence(active_mask));
+        if active_mask != required_mask {
+            return Err(DiagnosticLabel::new(operation)
+                .warp_collective_divergence_requiring(active_mask, required_mask));
         }
         let contract = self.launch_contract(contract)?;
         // Inline expansion and warp-role branches can give one convergent

@@ -1252,6 +1252,11 @@ fn topology_to_py<'py>(py: Python<'py>, topology: LaunchTopology) -> PyResult<Bo
     result.set_item("ctas_per_cluster", topology.ctas_per_cluster())?;
     result.set_item("warps_per_cta", topology.warps_per_cta())?;
     result.set_item("warp_count", topology.warp_count())?;
+    // Only partial-warp launches carry the thread count, so payloads of
+    // whole-warp launches are unchanged.
+    if topology.has_partial_warp() {
+        result.set_item("threads_per_cta", topology.threads_per_cta())?;
+    }
     Ok(result)
 }
 

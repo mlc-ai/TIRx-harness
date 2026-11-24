@@ -626,6 +626,13 @@ pub(crate) enum EngineErrorKind {
     WarpCollectiveDivergence {
         operation: String,
         active_mask: u32,
+        /// The lanes the operation needs: all 32 for warp-wide hardware
+        /// instructions, or the existing lanes of a partial warp for
+        /// convergence and member-mask checks.
+        required_mask: u32,
+        /// Lanes of a partial warp that do not exist, named only when the
+        /// operation needs all 32 lanes; 0 otherwise.
+        absent_mask: u32,
     },
     AsyncGroupIssuerViolation {
         operation: String,
@@ -732,10 +739,48 @@ impl EngineError {
         operation: impl Into<String>,
         active_mask: u32,
     ) -> Self {
+        Self::warp_collective_divergence_requiring(operation, active_mask, u32::MAX)
+    }
+
+    /// A divergence from the lanes `required_mask` names: the existing lanes of
+    /// a partial warp for convergence and member-mask checks.
+    pub(crate) fn warp_collective_divergence_requiring(
+        operation: impl Into<String>,
+        active_mask: u32,
+        required_mask: u32,
+    ) -> Self {
         Self::from_kind(EngineErrorKind::WarpCollectiveDivergence {
             operation: operation.into(),
             active_mask,
+            required_mask,
+            absent_mask: 0,
         })
+    }
+
+    /// Name the lanes of a partial warp that do not exist in a warp-collective
+    /// divergence this error carries, so the report says why a full warp was
+    /// impossible. Other errors are returned unchanged.
+    pub(crate) fn with_absent_lanes(mut self, absent: crate::WarpMask) -> Self {
+        fn mark(kind: &mut EngineErrorKind, absent: u32) {
+            match kind {
+                // Only an operation that needs all 32 hardware lanes is
+                // impossible because lanes do not exist.
+                EngineErrorKind::WarpCollectiveDivergence {
+                    absent_mask,
+                    required_mask: u32::MAX,
+                    ..
+                } => {
+                    *absent_mask = absent;
+                }
+                EngineErrorKind::Context { source, .. }
+                | EngineErrorKind::WarpFailed { source, .. } => mark(&mut source.0, absent),
+                _ => {}
+            }
+        }
+        if !absent.is_empty() {
+            mark(&mut self.0, absent.bits());
+        }
+        self
     }
 
     pub(crate) fn async_group_issuer_violation(
@@ -955,10 +1000,32 @@ impl fmt::Display for EngineError {
             EngineErrorKind::WarpCollectiveDivergence {
                 operation,
                 active_mask,
-            } => write!(
-                f,
-                "{operation} requires all {WARP_SIZE} lanes, got mask 0x{active_mask:08x}"
-            ),
+                required_mask,
+                absent_mask,
+            } => {
+                if *required_mask == u32::MAX {
+                    write!(
+                        f,
+                        "{operation} requires all {WARP_SIZE} lanes, got mask 0x{active_mask:08x}"
+                    )?;
+                } else {
+                    write!(
+                        f,
+                        "{operation} requires all {} existing lanes, got mask 0x{active_mask:08x}",
+                        required_mask.count_ones()
+                    )?;
+                }
+                if *absent_mask != 0 {
+                    let present = WARP_SIZE - absent_mask.count_ones() as usize;
+                    write!(
+                        f,
+                        "; lanes {present}..{} of this partial warp do not exist because \
+                         the CTA's thread count is not a multiple of {WARP_SIZE}",
+                        WARP_SIZE - 1
+                    )?;
+                }
+                Ok(())
+            }
             EngineErrorKind::AsyncGroupIssuerViolation {
                 operation,
                 expected_lane_count,

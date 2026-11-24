@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
-use crate::WarpContext;
+use crate::{WarpContext, WarpMask, WARP_SIZE};
 
 /// Current engine limit, matching CUDA's 1024-thread CTA limit for 32-lane warps.
 pub const MAX_WARPS_PER_CTA: usize = 32;
@@ -11,19 +11,58 @@ pub const MAX_WARPS_PER_CTA: usize = 32;
 pub const MAX_CTAS_PER_CLUSTER: usize = 64;
 
 /// Linearized cluster/CTA/warp launch dimensions.
+///
+/// A CTA has `threads_per_cta` threads in `warps_per_cta = ceil(threads / 32)`
+/// warps formed from consecutive linear thread ids. When the thread count is
+/// not a multiple of 32 the last warp of every CTA is a partial warp whose
+/// upper lanes do not exist: they never execute and never arrive anywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LaunchTopology {
     clusters: usize,
     ctas_per_cluster: usize,
     warps_per_cta: usize,
+    threads_per_cta: usize,
     warp_count: usize,
 }
 
 impl LaunchTopology {
+    /// A launch of whole-warp CTAs: `warps_per_cta * 32` threads per CTA.
     pub fn new(
         clusters: usize,
         ctas_per_cluster: usize,
         warps_per_cta: usize,
+    ) -> Result<Self, TopologyError> {
+        let threads_per_cta = warps_per_cta
+            .checked_mul(WARP_SIZE)
+            .ok_or(TopologyError::WarpCountOverflow)?;
+        Self::with_dimensions(clusters, ctas_per_cluster, warps_per_cta, threads_per_cta)
+    }
+
+    /// A launch whose CTAs have `threads_per_cta` threads, which need not be
+    /// a multiple of 32: the last warp of each CTA is then partial.
+    pub fn with_threads_per_cta(
+        clusters: usize,
+        ctas_per_cluster: usize,
+        threads_per_cta: usize,
+    ) -> Result<Self, TopologyError> {
+        if threads_per_cta == 0 {
+            return Err(TopologyError::ZeroDimension {
+                name: "threads_per_cta",
+            });
+        }
+        Self::with_dimensions(
+            clusters,
+            ctas_per_cluster,
+            threads_per_cta.div_ceil(WARP_SIZE),
+            threads_per_cta,
+        )
+    }
+
+    fn with_dimensions(
+        clusters: usize,
+        ctas_per_cluster: usize,
+        warps_per_cta: usize,
+        threads_per_cta: usize,
     ) -> Result<Self, TopologyError> {
         for (name, value) in [
             ("clusters", clusters),
@@ -56,8 +95,36 @@ impl LaunchTopology {
             clusters,
             ctas_per_cluster,
             warps_per_cta,
+            threads_per_cta,
             warp_count,
         })
+    }
+
+    pub const fn threads_per_cta(self) -> usize {
+        self.threads_per_cta
+    }
+
+    /// Whether the last warp of each CTA has lanes that do not exist.
+    pub const fn has_partial_warp(self) -> bool {
+        self.threads_per_cta % WARP_SIZE != 0
+    }
+
+    /// The lanes that exist in warp `warp_id_in_cta` of a CTA: every lane
+    /// except in a partial last warp.
+    pub const fn lane_mask_for_warp_in_cta(self, warp_id_in_cta: usize) -> WarpMask {
+        let remaining = self
+            .threads_per_cta
+            .saturating_sub(warp_id_in_cta * WARP_SIZE);
+        if remaining >= WARP_SIZE {
+            WarpMask::FULL
+        } else {
+            WarpMask::from_bits((1_u32 << remaining) - 1)
+        }
+    }
+
+    /// The lanes that exist in the warp with global id `global_warp_id`.
+    pub const fn lane_mask_for_warp(self, global_warp_id: usize) -> WarpMask {
+        self.lane_mask_for_warp_in_cta(global_warp_id % self.warps_per_cta)
     }
 
     pub const fn clusters(self) -> usize {
@@ -163,6 +230,22 @@ mod tests {
         assert_eq!(topology.cluster_id_for_warp(24), None);
         assert_eq!(topology.cluster_warp_range(1), Some(12..24));
         assert_eq!(topology.cluster_warp_range(2), None);
+    }
+
+    #[test]
+    fn partial_warp_ctas_have_ceil_warps_and_launch_masks() {
+        for (threads, warps, last) in [(1, 1, 0x1_u32), (48, 2, 0xffff), (64, 2, u32::MAX)] {
+            let topology = LaunchTopology::with_threads_per_cta(2, 1, threads).unwrap();
+            assert_eq!(topology.warps_per_cta(), warps);
+            assert_eq!(topology.lane_mask_for_warp(2 * warps - 1).bits(), last);
+            let contexts = topology.warp_contexts().collect::<Vec<_>>();
+            assert_eq!(contexts[warps - 1].active_mask().bits(), last);
+            assert_eq!(contexts[warps - 1].launch_mask().bits(), last);
+        }
+        assert_eq!(
+            LaunchTopology::with_threads_per_cta(1, 1, 64).unwrap(),
+            LaunchTopology::new(1, 1, 2).unwrap()
+        );
     }
 
     #[test]

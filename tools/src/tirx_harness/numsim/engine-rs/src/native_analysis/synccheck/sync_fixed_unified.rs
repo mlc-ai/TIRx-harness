@@ -149,12 +149,14 @@ enum FixedSyncCommandKind {
         expected_arrivals: u64,
         warp_id: usize,
         arrival_mask: WarpMask,
+        launch_mask: WarpMask,
     },
     NamedBarrierSync {
         barrier_id: NamedBarrierId,
         expected_arrivals: u64,
         warp_id: usize,
         arrival_mask: WarpMask,
+        launch_mask: WarpMask,
         aligned: bool,
     },
     ClusterBarrierArrive {
@@ -1048,18 +1050,26 @@ impl FixedSyncProgram {
         };
         let mut generations = BTreeMap::<u64, NamedCausalGeneration>::new();
         for (command_index, command) in self.commands.iter().enumerate() {
-            let (barrier_id, expected_arrivals, warp_id, arrival_mask, contribution_kind) =
-                match &command.kind {
+            let (
+                barrier_id,
+                expected_arrivals,
+                warp_id,
+                arrival_mask,
+                launch_mask,
+                contribution_kind,
+            ) = match &command.kind {
                     FixedSyncCommandKind::NamedBarrierArrive {
                         barrier_id,
                         expected_arrivals,
                         warp_id,
                         arrival_mask,
+                        launch_mask,
                     } => (
                         *barrier_id,
                         *expected_arrivals,
                         *warp_id,
                         *arrival_mask,
+                        *launch_mask,
                         NamedCausalContributionKind::Arrive,
                     ),
                     FixedSyncCommandKind::NamedBarrierSync {
@@ -1067,12 +1077,14 @@ impl FixedSyncProgram {
                         expected_arrivals,
                         warp_id,
                         arrival_mask,
+                        launch_mask,
                         ..
                     } => (
                         *barrier_id,
                         *expected_arrivals,
                         *warp_id,
                         *arrival_mask,
+                        *launch_mask,
                         NamedCausalContributionKind::Sync,
                     ),
                     _ => {
@@ -1146,10 +1158,15 @@ impl FixedSyncProgram {
                     .into_boxed_str(),
                 }));
             }
+            let credit = crate::hardware_barriers::absent_lane_credit(
+                launch_mask,
+                WarpMask::from_bits(*prior_mask),
+                arrival_mask,
+            );
             *prior_mask |= arrival_mask.bits();
             generation_state.arrival_count = match generation_state
                 .arrival_count
-                .checked_add(arrival_mask.len() as u64)
+                .checked_add(arrival_mask.len() as u64 + credit)
             {
                 Some(count) if count <= expected_arrivals => count,
                 Some(count) => {
@@ -3038,6 +3055,7 @@ fn for_each_projected_command_kind(
             expected_arrivals,
             warp_id,
             arrival_mask,
+            launch_mask,
         } => emit(
             FixedSyncProjectionKey::NamedBarrier(*barrier_id),
             FixedSyncCommandKind::NamedBarrierArrive {
@@ -3045,6 +3063,7 @@ fn for_each_projected_command_kind(
                 expected_arrivals: *expected_arrivals,
                 warp_id: *warp_id,
                 arrival_mask: *arrival_mask,
+                launch_mask: *launch_mask,
             },
         ),
         FixedSyncCommandKind::NamedBarrierSync {
@@ -3052,6 +3071,7 @@ fn for_each_projected_command_kind(
             expected_arrivals,
             warp_id,
             arrival_mask,
+            launch_mask,
             aligned,
         } => emit(
             FixedSyncProjectionKey::NamedBarrier(*barrier_id),
@@ -3060,6 +3080,7 @@ fn for_each_projected_command_kind(
                 expected_arrivals: *expected_arrivals,
                 warp_id: *warp_id,
                 arrival_mask: *arrival_mask,
+                launch_mask: *launch_mask,
                 aligned: *aligned,
             },
         ),
@@ -3478,6 +3499,7 @@ fn command_from_summary(
                 expected_arrivals: plan.expected_arrivals(),
                 warp_id: plan.warp_id(),
                 arrival_mask: plan.arrival_mask(),
+                launch_mask: plan.launch_mask(),
             }
         }
         OwnedOperationEffect::NamedBarrierSyncRegister { plan, .. } => {
@@ -3486,6 +3508,7 @@ fn command_from_summary(
                 expected_arrivals: plan.expected_arrivals(),
                 warp_id: plan.warp_id(),
                 arrival_mask: plan.arrival_mask(),
+                launch_mask: plan.launch_mask(),
                 aligned: plan.aligned(),
             }
         }
@@ -4665,6 +4688,7 @@ impl FixedSyncProgram {
                 expected_arrivals,
                 warp_id,
                 arrival_mask,
+                launch_mask: _,
             } => {
                 let outcome = next
                     .named_barriers
@@ -4692,6 +4716,7 @@ impl FixedSyncProgram {
                 expected_arrivals,
                 warp_id,
                 arrival_mask,
+                launch_mask: _,
                 aligned,
             } => {
                 let outcome = next
@@ -5641,6 +5666,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 0,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                     aligned: true,
                 },
             ),
@@ -5652,6 +5678,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 1,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                     aligned: true,
                 },
             ),
@@ -5687,6 +5714,7 @@ mod tests {
                         expected_arrivals: (warp_count * 32) as u64,
                         warp_id,
                         arrival_mask: WarpMask::FULL,
+                        launch_mask: WarpMask::FULL,
                         aligned: true,
                     },
                 ));
@@ -5727,6 +5755,7 @@ mod tests {
                         expected_arrivals,
                         warp_id,
                         arrival_mask: WarpMask::FULL,
+                        launch_mask: WarpMask::FULL,
                         aligned,
                     },
                     None => FixedSyncCommandKind::NamedBarrierArrive {
@@ -5734,6 +5763,7 @@ mod tests {
                         expected_arrivals,
                         warp_id,
                         arrival_mask: WarpMask::FULL,
+                        launch_mask: WarpMask::FULL,
                     },
                 };
                 let mut initial = [0; WARPS];
@@ -5846,6 +5876,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 0,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                 },
                 Some(0),
                 &[0],
@@ -5858,6 +5889,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 0,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                     aligned: true,
                 },
                 Some(0),
@@ -5893,6 +5925,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 0,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                     aligned: true,
                 },
             ),
@@ -5944,6 +5977,7 @@ mod tests {
                     expected_arrivals: 64,
                     warp_id: 1,
                     arrival_mask: WarpMask::FULL,
+                    launch_mask: WarpMask::FULL,
                     aligned: true,
                 },
             ),

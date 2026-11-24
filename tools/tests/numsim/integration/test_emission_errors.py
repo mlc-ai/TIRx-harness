@@ -161,13 +161,19 @@ def test_error_recovery_respects_expression_let_scope(dtype, tmp_path):
         )
 
 
-@pytest.mark.parametrize("threads", [48, 128])
+@pytest.mark.parametrize("threads", [48, 128, 1056])
 def test_native_topology_returns_semantic_errors_as_data(threads):
+    # `LaunchConfig` rejects 1056 threads itself; a launch thread reaches NumSim.
+    launch = (
+        f'tid = T.launch_thread("threadIdx.x", {threads})'
+        if threads > 1024
+        else f"T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={threads}))"
+    )
     kernel = tvm_tirx.script.from_source(
         f"""
 @T.function
 def kernel():
-    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block={threads}))
+    {launch}
     thread = T.cuda.thread_in_warpgroup()
     T.evaluate(thread)
 """,
@@ -176,16 +182,17 @@ def kernel():
     result = native_frontend._library()["numsim_launch_topology"](
         kernel, native_frontend.compile_schema(), tvm_ffi.convert({})
     )
-    if threads == 48:
+    if threads == 1056:
         assert result["value"] is None
         assert result["error"]["kind"] == "unsupported"
-        message = "CTA thread extent 48 is not a whole number of warps"
+        message = "block.x is 1056; CUDA allows at most 1024"
         assert message in result["error"]["message"]
         with pytest.raises(UnsupportedTIRxError, match=message):
             native_frontend.launch_topology(kernel, {})
     else:
         assert result["error"] is None
-        assert native_frontend.launch_topology(kernel, {})["warps_per_cta"] == 4
+        topology = native_frontend.launch_topology(kernel, {})
+        assert topology["warps_per_cta"] == (threads + 31) // 32
 
 
 def test_foreign_exception_messages_are_not_parsed_as_frontend_errors(monkeypatch):

@@ -1470,3 +1470,20 @@ fn internal_warpgroup_rendezvous_generations_advance_without_cross_talk() {
     }
     hub.validate_quiescent().unwrap();
 }
+
+#[test]
+fn named_barrier_credits_absent_lanes_of_a_partial_warp_once() {
+    // 48 threads: warp 1 has lanes 0..16. Its divergent halves are credited
+    // only when the second completes the existing lanes.
+    let topology = crate::LaunchTopology::with_threads_per_cta(1, 1, 48).unwrap();
+    let hub = Arc::new(NamedBarrierHub::for_topology(topology));
+    let id = NamedBarrierId::new(0, 0);
+    let sync = |warp, bits| hub.register_sync(id, 64, warp, WarpMask::from_bits(bits));
+    assert!(!sync(1, 0x00ff).unwrap().completed_now());
+    assert!(!sync(0, u32::MAX).unwrap().completed_now());
+    assert!(sync(1, 0xff00).unwrap().completed_now());
+    assert!(matches!(sync(1, 0xffff), Ok(wait) if !wait.completed_now()));
+    assert!(matches!(sync(1, 0x1), Err(SynchronizationError::DuplicateArrival { .. })));
+    // Whole warps receive no credit.
+    assert_eq!(absent_lane_credit(WarpMask::FULL, WarpMask::EMPTY, WarpMask::FULL), 0);
+}

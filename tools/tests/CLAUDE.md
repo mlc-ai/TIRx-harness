@@ -13,6 +13,22 @@ python -m pytest -q -n 16 --dist=worksteal
 
 Always pass `-n`, including for targeted reruns.
 
+The pip install builds `frontend-rs` into
+`src/tirx_harness/numsim/_tvm_rust_ext.abi3.so` with its
+`_tvm_rust_ext.identity`. A checkout used without that install (for example
+through `PYTHONPATH=src`) must build the frontend itself and copy both files
+there, as `setup.py` does; otherwise the native frontend is loaded from an
+installed `tirx-harness` and tests silently run against its older frontend:
+
+```bash
+(cd frontend-rs && cp ../src/tirx_harness/numsim/dtype_registry.json . \
+  && cargo build --release --locked && rm dtype_registry.json)
+cp frontend-rs/target/release/libnumsim_tirx_frontend.so \
+  src/tirx_harness/numsim/_tvm_rust_ext.abi3.so
+echo "$(sed -n 's/^version = "\(.*\)"/\1/p' frontend-rs/Cargo.toml | head -1):tvm-tirx-0.1.0" \
+  > src/tirx_harness/numsim/_tvm_rust_ext.identity  # tvm-tirx version from Cargo.lock
+```
+
 Live GPU microtests run by default. `--no-run-numsim-gpu` skips them, but it is
 declared in `tests/numsim/conftest.py` and is therefore only accepted when the
 invocation targets that directory — a full run rejects it as an unrecognized

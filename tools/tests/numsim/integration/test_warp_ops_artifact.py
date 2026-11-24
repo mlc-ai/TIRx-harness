@@ -79,7 +79,9 @@ def test_warp_collectives_reject_invalid_participant_contracts(tmp_path):
             },
         )
 
-    with pytest.raises(numsim.NumSimExecutionError, match="executing lane 31 is absent"):
+    with pytest.raises(
+        numsim.NumSimExecutionError, match="executing lane 31 is not in its member mask"
+    ):
         numsim.Engine().run(
             module,
             {
