@@ -1505,7 +1505,7 @@ impl<'a> Emitter<'a> {
             swizzle.code
         ));
         self.emit_line(&format!(
-            "{values}[lane] = u64::from(({addresses}[lane] >> 4) & 0x3fff_u32) | (({}[lane] as u64 & 0x3fff_u64) << 16) | (({}[lane] as u64 & 0x3fff_u64) << 32) | (1_u64 << 46) | ({layout_type} << 61);",
+            "{values}[lane] = u64::from(({addresses}[lane] >> 4) & 0x7fff_u32) | (({}[lane] as u64 & 0x3fff_u64) << 16) | (({}[lane] as u64 & 0x3fff_u64) << 32) | (1_u64 << 46) | ({layout_type} << 61);",
             ldo.code, sdo.code
         ));
         self.indent -= 1;

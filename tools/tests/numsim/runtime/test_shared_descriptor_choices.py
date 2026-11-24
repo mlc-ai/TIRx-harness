@@ -25,12 +25,12 @@ def descriptor_choice_case(form):
         if str(call.op.name) != "tirx.ptx.tcgen05_cp":
             return call
         descriptor = call.args[1]
-        reserved = tirx.const(1 << 14, "uint64")
+        reserved = tirx.const(1 << 15, "uint64")  # bit 15 stays reserved in PTX ISA 9.5
         if form == "select":
             value = tirx.Select(condition, descriptor, tirx.bitwise_or(descriptor, reserved))
         else:
             low_word = tirx.Select(
-                condition, tirx.const(0, "uint32"), tirx.const(1 << 14, "uint32")
+                condition, tirx.const(0, "uint32"), tirx.const(1 << 15, "uint32")
             )
             value = tirx.bitwise_or(descriptor, tirx.Cast("uint64", low_word))
         return Call(

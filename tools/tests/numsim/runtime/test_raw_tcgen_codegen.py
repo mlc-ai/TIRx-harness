@@ -1646,7 +1646,7 @@ def raw_tcgen_mma_tf32_rejects_malformed_runtime_descriptor():
     T.cuda.tcgen05.encode_matrix_descriptor(
         T.address_of(desc_b), T.address_of(shared_b[0]), ldo=0, sdo=64, swizzle=3
     )
-    forged_desc = T.bitwise_or(desc_b, T.uint64(1 << 14))
+    forged_desc = T.bitwise_or(desc_b, T.uint64(1 << 15))  # bit 15 stays reserved in PTX ISA 9.5
     T.ptx["tcgen05.mma.cta_group::1.kind::tf32"](
         T.uint32(16),
         T.uint32(0),

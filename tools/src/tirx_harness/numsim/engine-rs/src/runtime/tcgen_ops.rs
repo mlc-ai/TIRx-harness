@@ -880,15 +880,16 @@ fn decode_raw_tcgen_matrix_descriptor(
 
 fn decode_raw_tcgen_matrix_descriptor_for_layout(
     descriptor: u64,
-    layout: RawTcgenMatrixDescriptorLayout,
+    _layout: RawTcgenMatrixDescriptorLayout,
 ) -> Result<RawTcgenMatrixDescriptor, EngineError> {
-    let field_bits = match layout {
-        RawTcgenMatrixDescriptorLayout::Sm100 | RawTcgenMatrixDescriptorLayout::Sm103 => 14,
-        RawTcgenMatrixDescriptorLayout::Sm107 => 15,
-    };
+    // PTX ISA 9.5 widens the start address and LDO to 15 bits (bits 0-14 and
+    // 16-30). Only SM107 shared memory reaches 256 KB, so the extra bit is
+    // never set by a valid SM100/SM103 descriptor; decoding it there yields an
+    // address beyond the block's shared memory, which the access checks reject.
+    let field_bits = 15;
     if ((descriptor >> 46) & 0x3) != 1 {
         return Err(EngineError::message(
-            "raw tcgen05.cp descriptor has an invalid version field",
+            "tcgen05 shared-memory matrix descriptor has an invalid version field",
         ));
     }
     let field_mask = (1_u64 << field_bits) - 1;
@@ -899,7 +900,7 @@ fn decode_raw_tcgen_matrix_descriptor_for_layout(
         || descriptor & (((1_u64 << 13) - 1) << 48) != 0
     {
         return Err(EngineError::message(
-            "raw tcgen05.cp descriptor uses unsupported reserved/base/LBO-mode bits",
+            "tcgen05 shared-memory matrix descriptor uses unsupported reserved/base/LBO-mode bits",
         ));
     }
     let layout_type = usize::try_from((descriptor >> 61) & 0x7)
@@ -912,7 +913,7 @@ fn decode_raw_tcgen_matrix_descriptor_for_layout(
         1 => (2, 32, 2),
         _ => {
             return Err(EngineError::message(format!(
-                "raw tcgen05.cp descriptor has invalid layout type {layout_type}"
+                "tcgen05 shared-memory matrix descriptor has invalid layout type {layout_type}"
             )));
         }
     };
@@ -921,7 +922,7 @@ fn decode_raw_tcgen_matrix_descriptor_for_layout(
         << 4;
     if swizzle_atom_bytes == 32 && start_address % 32 != 0 {
         return Err(EngineError::message(
-            "raw tcgen05.cp 128B/32B-atomic descriptor is not 32-byte aligned",
+            "tcgen05 shared-memory matrix descriptor with 128B/32B-atomic swizzle is not 32-byte aligned",
         ));
     }
     Ok(RawTcgenMatrixDescriptor {
@@ -8759,31 +8760,33 @@ mod tests {
     }
 
     #[test]
-    fn sm107_matrix_descriptor_accepts_bit14_but_sm100_and_bit15_fail_closed() {
-        // CUTLASS `mma_sm100_desc.hpp` widens start-address and LDO from 14
-        // to 15 bits only under CUTLASS_ARCH_MMA_SM107[AF]_ENABLED.
+    fn matrix_descriptor_start_and_ldo_have_fifteen_bits_and_bit15_fails_closed() {
+        // PTX ISA 9.5: start address bits 0-14, LDO bits 16-30; bits 15 and 31
+        // stay reserved. The width does not depend on the architecture.
         let base = (1_u64 << 46) | (2_u64 << 61);
         let extended = base | (1_u64 << 14) | (1_u64 << 30);
-        let decoded = decode_raw_tcgen_matrix_descriptor_for_layout(
-            extended,
-            RawTcgenMatrixDescriptorLayout::Sm107,
-        )
-        .unwrap();
-
-        assert_eq!(decoded.start_address, 1 << 18);
-        assert_eq!(decoded.leading_byte_offset, 1 << 18);
-        assert!(decode_raw_tcgen_matrix_descriptor_for_layout(
-            extended,
+        for layout in [
             RawTcgenMatrixDescriptorLayout::Sm100,
-        )
-        .is_err());
-        for reserved_bit in [15, 31] {
-            assert!(decode_raw_tcgen_matrix_descriptor_for_layout(
-                base | (1_u64 << reserved_bit),
-                RawTcgenMatrixDescriptorLayout::Sm107,
-            )
-            .is_err());
+            RawTcgenMatrixDescriptorLayout::Sm103,
+            RawTcgenMatrixDescriptorLayout::Sm107,
+        ] {
+            let decoded = decode_raw_tcgen_matrix_descriptor_for_layout(extended, layout).unwrap();
+            assert_eq!(decoded.start_address, 1 << 18);
+            assert_eq!(decoded.leading_byte_offset, 1 << 18);
+            for reserved_bit in [15, 31] {
+                assert!(decode_raw_tcgen_matrix_descriptor_for_layout(
+                    base | (1_u64 << reserved_bit),
+                    layout,
+                )
+                .is_err());
+            }
         }
+        assert_eq!(
+            decode_raw_tcgen_matrix_descriptor(extended)
+                .unwrap()
+                .start_address,
+            1 << 18
+        );
     }
 
     #[test]
