@@ -9,7 +9,11 @@ from tests.numsim.microtests.harness import (
     run_paired_primfunc,
 )
 from tests.numsim.runtime.test_tma_overrides import (
+    CLIP_OPERANDS,
     OVERRIDE_CASES,
+    clip_inputs,
+    clip_kernel,
+    clipped_expectation,
     multiissuer_override_case,
     override_kernel,
 )
@@ -103,3 +107,33 @@ def test_tma_overrides_match_gpu(pytestconfig, tmp_path):
             )
             np.testing.assert_array_equal(result.gpu_outputs["replacement"], expected)
             np.testing.assert_array_equal(result.gpu_outputs["output"], shared)
+
+
+def require_sm107(pytestconfig):
+    require_numsim_gpu(pytestconfig)
+    import torch
+
+    if torch.cuda.get_device_capability() != (10, 7):
+        pytest.skip("TMA override instructions require an SM107 GPU")
+
+
+@pytest.mark.numsim_gpu
+@pytest.mark.parametrize("route", ("load", "s2g", "reduce"))
+def test_tma_override_dimension_bounds_match_gpu(route, pytestconfig, tmp_path):
+    """Loads bound both axes per element; stores and reductions bound rows per
+    element and the inner axis at 16-byte granularity."""
+
+    require_sm107(pytestconfig)
+    for d0, d1 in CLIP_OPERANDS:
+        inputs = clip_inputs(d0, d1)
+        inputs["m"] = PairedTensorMap(**inputs["m"])
+        result = run_paired_primfunc(
+            clip_kernel(route),
+            inputs,
+            outputs=("y", "out"),
+            cache_dir=tmp_path,
+            arch="sm_107a",
+        )
+        expected_y, expected_tile = clipped_expectation(route, d0 + 1, d1 + 1, inputs["y"])
+        np.testing.assert_array_equal(result.gpu_outputs["y"], expected_y, err_msg=f"{d0, d1}")
+        np.testing.assert_array_equal(result.gpu_outputs["out"], expected_tile)

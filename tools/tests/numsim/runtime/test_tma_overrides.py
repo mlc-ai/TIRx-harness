@@ -240,8 +240,9 @@ def kernel(input_map: T.Ptr(T.TensorMap), replacement: T.Tensor((32800,), "float
             continue
         for row in range(2):
             for column in range(4):
-                # SM107 bounds loads by the overridden dimension but writes the
-                # whole box for stores and reductions with dimension overrides.
+                # SM107 bounds loads by the overridden dimension per element;
+                # stores and reductions round the inner bound up to 16 bytes,
+                # which covers this 4-float box row for every lane.
                 inside = column < 4 - lane or not load
                 index = lane * 16 + row * 4 * (1 + lane) + column
                 if load:
@@ -308,7 +309,9 @@ def test_tma_override_dimension_operand_encodes_size_minus_one(form, dimension, 
 @pytest.mark.parametrize("route", ("s2g", "reduce"))
 @pytest.mark.parametrize("form", ("dim_b8", "stride_b16"))
 @pytest.mark.parametrize("dimension", (1, 3))
-def test_tma_override_store_dimensions_do_not_clip_the_box(route, form, dimension, tmp_path):
+def test_tma_override_store_inner_dimension_rounds_up_to_16_bytes(route, form, dimension, tmp_path):
+    # The 4-float (16-byte) box row is one store chunk: any inner bound
+    # inside it writes the whole row (SM107 measurement, #47).
     kernel = override_kernel(route, form, dimension=dimension)
     inputs, _ = override_inputs(form)
     before = inputs["replacement"].copy()
@@ -364,3 +367,232 @@ def test_tma_override_keeps_async_destination_race():
     report = racecheck(kernel, inputs)
     assert report.verdict == "error"
     assert any(finding.details["access_pair"] == "write_read" for finding in report.findings)
+
+
+# A 16 x 8 fp32 box (64-byte rows) moved through a 128-byte row pitch, so a
+# write past the box's inner edge would land in the visible row gap.
+CLIP_BOX = (16, 8)
+CLIP_PITCH = 32
+CLIP_SPELLINGS = {
+    "load": "cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes",
+    "s2g": "cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group",
+    "reduce": "cp.reduce.async.bulk.tensor.2d.global.shared::cta.add.tile.bulk_group",
+}
+
+
+def clip_kernel(route, *, override=True):
+    """One CTA moves the box at coordinates (0, 0). With ``override`` the
+    instruction redirects it to ``y`` with the runtime size-minus-one
+    dimension operands ``d0``/``d1``; otherwise it uses the descriptor."""
+
+    spelling = CLIP_SPELLINGS[route]
+    operands = ["T.address_of(m)"]
+    if override:
+        spelling += ".override::global_address.override::global_dim_stride"
+        operands += [
+            'T.reinterpret(y.ptr_to([0]), ty="uint64")',
+            'T.cast(d0, "uint8")',
+            'T.cast(d1, "uint8")',
+            f"T.uint32({CLIP_PITCH * 4 // 16})",
+            "T.uint16(0)",
+        ]
+    operands += ["T.int32(0)", "T.int32(0)"]
+    size = CLIP_BOX[0] * CLIP_BOX[1]
+    if route == "load":
+        operands = ["tile.ptr_to([0])", *operands, "barrier.ptr_to([0])"]
+        completion = f"""
+        T.ptx.mbarrier.arrive.expect_tx.shared.b64(barrier.ptr_to([0]), {size * 4})
+        T.cuda.mbarrier_wait(barrier.ptr_to([0]), 0)"""
+    else:
+        operands.append("tile.ptr_to([0])")
+        completion = """
+        T.ptx.cp.async_.bulk.commit_group()
+        T.ptx.cp.async_.bulk.wait_group(0)"""
+    return tvm_tirx.script.from_source(
+        f"""
+@T.function
+def kernel(m: T.Ptr(T.TensorMap), y: T.Tensor((32768 + {CLIP_PITCH * 8},), "float32"),
+           out: T.Tensor(({size},), "float32"), d0: T.int32, d1: T.int32):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    tile = T.alloc_shared(({size},), "float32", align=128)
+    barrier = T.alloc_shared((1,), "uint64")
+    for j in T.serial({size // 32}):
+        tile[j * 32 + lane] = T.cast(j * 32 + lane + 1, "float32")
+    if lane == 0:
+        T.ptx.mbarrier.init.shared.b64(barrier.ptr_to([0]), 1)
+    T.ptx.fence.proxy.async_.shared__cta()
+    T.ptx.fence.mbarrier_init.release.cluster()
+    T.cuda.cta_sync()
+    if lane == 0:
+        T.ptx["{spelling}"]({", ".join(operands)})
+{completion}
+    T.cuda.cta_sync()
+    for j in T.serial({size // 32}):
+        out[j * 32 + lane] = tile[j * 32 + lane]
+""",
+        {"T": T},
+    )
+
+
+def clip_inputs(d0, d1):
+    """Arguments for ``clip_kernel``: the descriptor's own (64, 64) tensor is
+    ignored by the override; ``y`` holds distinct values to catch any write."""
+
+    return {
+        "m": dict(
+            array=np.full((64, 64), -1, np.float32),
+            global_shape=(64, 64),
+            global_strides=(256,),
+            box_shape=CLIP_BOX,
+            element_strides=(1, 1),
+        ),
+        "y": np.arange(32768 + CLIP_PITCH * 8, dtype=np.float32) + 1000,
+        "out": np.zeros(CLIP_BOX[0] * CLIP_BOX[1], np.float32),
+        "d0": np.int32(d0),
+        "d1": np.int32(d1),
+    }
+
+
+def numsim_clip_inputs(inputs):
+    metadata = dict(inputs["m"])
+    array = metadata.pop("array")
+    return {**inputs, "m": numsim.TensorMap(array, **metadata).numpy()}
+
+
+def clipped_extents(route, columns, rows, chunked=True):
+    """SM107 (VR200) measurement: loads bound both axes per element; stores
+    and reductions with overridden dimensions bound outer axes per element
+    but write every 16-byte chunk of the inner axis that holds an in-bounds
+    element. Plain-descriptor stores (``chunked=False``) are modeled per
+    element: VR200 showed 16-byte chunks there too, but that is left
+    unmodeled until Blackwell is measured."""
+
+    width, height = CLIP_BOX
+    if route != "load" and chunked:
+        columns = -(-columns // 4) * 4
+    return min(columns, width), min(rows, height)
+
+
+def clipped_expectation(route, columns, rows, y, pitch=CLIP_PITCH, chunked=True):
+    """Expected (global buffer, shared tile) for a box moved at offset zero."""
+
+    width, height = CLIP_BOX
+    columns, rows = clipped_extents(route, columns, rows, chunked)
+    y = y.copy()
+    tile = np.arange(1, width * height + 1, dtype=np.float32).reshape(height, width)
+    for row in range(height):
+        for column in range(width):
+            index = row * pitch + column
+            inside = row < rows and column < columns
+            if route == "load":
+                tile[row, column] = y[index] if inside else 0
+            elif inside:
+                y[index] = tile[row, column] + (y[index] if route == "reduce" else 0)
+    return y, tile.reshape(-1)
+
+
+# (d0, d1) size-minus-one operands: partial and full 16-byte inner chunks,
+# partial rows, both axes at once, and operands beyond the box. (An inner
+# size past the 128-byte row pitch is rejected as an overlapping stride.)
+CLIP_OPERANDS = ((0, 7), (3, 7), (4, 7), (8, 2), (15, 4), (5, 4), (31, 255))
+
+
+@pytest.mark.parametrize("route", ("load", "s2g", "reduce"))
+@pytest.mark.parametrize("d0,d1", CLIP_OPERANDS)
+def test_tma_override_dimensions_bound_every_direction(route, d0, d1, tmp_path):
+    inputs = numsim_clip_inputs(clip_inputs(d0, d1))
+    expected_y, expected_tile = clipped_expectation(route, d0 + 1, d1 + 1, inputs["y"])
+    result = run_checked(clip_kernel(route), inputs, cache_dir=tmp_path)
+    np.testing.assert_array_equal(inputs["y"], expected_y)
+    np.testing.assert_array_equal(result.outputs["out"], expected_tile)
+
+
+@pytest.mark.parametrize("route", ("load", "s2g", "reduce"))
+@pytest.mark.parametrize("shape", ((5, 8), (9, 3), (16, 8)))
+def test_tma_plain_store_inner_bound_stays_per_element(route, shape, tmp_path):
+    """Without overrides the descriptor's own dimensions bound every direction
+    per element, so nothing lands in the 128-byte row gaps of ``y`` past the
+    inner bound (VR200 writes whole 16-byte chunks here; deliberately not
+    modeled until Blackwell is measured)."""
+
+    inputs = clip_inputs(0, 0)
+    inputs["m"] = numsim.TensorMap(
+        inputs["y"][: 8 * CLIP_PITCH].reshape(8, CLIP_PITCH),
+        global_shape=shape,
+        global_strides=(CLIP_PITCH * 4,),
+        box_shape=CLIP_BOX,
+        element_strides=(1, 1),
+    ).numpy()
+    expected, expected_tile = clipped_expectation(route, *shape, inputs["y"], chunked=False)
+    result = run_checked(clip_kernel(route, override=False), inputs, cache_dir=tmp_path)
+    np.testing.assert_array_equal(inputs["y"], expected)
+    np.testing.assert_array_equal(result.outputs["out"], expected_tile)
+
+
+def packed_ragged_store_kernel(starts, counts):
+    """CTA ``i`` stores one 16 x 8 box at row ``starts[i]`` of a packed
+    output, bounded by the overridden row count ``counts[i]``."""
+
+    selections = "".join(
+        f"""
+    if cta == {cta}:
+        start[0] = {start}
+        count[0] = {count}"""
+        for cta, (start, count) in enumerate(zip(starts, counts))
+    )
+    return tvm_tirx.script.from_source(
+        f"""
+@T.function
+def kernel(m: T.Ptr(T.TensorMap), y: T.Tensor((32768 + 512,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid={len(starts)}, block=32))
+    cta = T.cuda.block_idx("x")
+    lane = T.cuda.lane_id()
+    tile = T.alloc_shared((128,), "float32", align=128)
+    start = T.alloc_local((1,), "int32")
+    count = T.alloc_local((1,), "int32")
+    for j in T.serial(4):
+        tile[j * 32 + lane] = T.cast(cta + 1, "float32")
+    T.ptx.fence.proxy.async_.shared__cta()
+    T.cuda.cta_sync()
+    start[0] = 0
+    count[0] = 1{selections}
+    if lane == 0:
+        T.ptx["cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group.override::global_address.override::global_dim_stride"](
+            T.address_of(m), T.reinterpret(y.ptr_to([start[0] * 16]), ty="uint64"),
+            T.cast(15, "uint8"), T.cast(count[0] - 1, "uint8"), T.uint32(4), T.uint16(0),
+            T.int32(0), T.int32(0), tile.ptr_to([0]))
+        T.ptx.cp.async_.bulk.commit_group()
+        T.ptx.cp.async_.bulk.wait_group(0)
+""",
+        {"T": T},
+    )
+
+
+def packed_ragged_inputs():
+    return {
+        "m": numsim.TensorMap(
+            np.zeros((8, 16), np.float32),
+            global_shape=(16, 8),
+            global_strides=(64,),
+            box_shape=(16, 8),
+            element_strides=(1, 1),
+        ).numpy(),
+        "y": np.full(32768 + 512, -7, np.float32),
+    }
+
+
+def test_tma_override_store_clipping_separates_packed_segments(tmp_path):
+    counts = (5, 3, 6)
+    inputs = packed_ragged_inputs()
+    run_checked(packed_ragged_store_kernel((0, 5, 8), counts), inputs, cache_dir=tmp_path)
+    expected = np.full(32768 + 512, -7, np.float32)
+    expected[: 16 * sum(counts)] = np.repeat(np.arange(1, 4), np.array(counts) * 16)
+    np.testing.assert_array_equal(inputs["y"], expected)
+
+
+def test_tma_override_store_overlapping_segments_still_race():
+    # CTA 1's four rows (5..8) reach CTA 2's first row (8).
+    report = racecheck(packed_ragged_store_kernel((0, 5, 8), (5, 4, 6)), packed_ragged_inputs())
+    assert report.verdict == "error", report.format()
+    assert any(finding.details["access_pair"] == "write_write" for finding in report.findings)

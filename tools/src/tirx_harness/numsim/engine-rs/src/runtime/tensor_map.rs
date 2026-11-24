@@ -34,6 +34,10 @@ pub struct RuntimeTensorMap {
     transfer_template: Arc<TensorMapTransferTemplate>,
     im2col: Option<TensorMapIm2col>,
     alloc_class: TensorMapAllocClass,
+    /// Set on instruction-local maps whose dimensions an
+    /// `.override::global_dim{,_stride}` operand replaced; see
+    /// `store_inner_extent`.
+    overridden_dimensions: bool,
 }
 
 /// Im2col adds spatial bounds to a two-dimensional (channels, pixels) box.
@@ -1076,7 +1080,6 @@ impl RuntimeTensorMap {
         lower_strides: &[i64],
         upper_strides: i64,
         coordinates: &[i64],
-        clips_dimensions: bool,
     ) -> Result<Self, EngineError> {
         let rank = self.rank();
         let observed_base = address.observed_allocation_address().unwrap_or(0);
@@ -1115,22 +1118,18 @@ impl RuntimeTensorMap {
                 ));
             }
             // Like the descriptor's own globalDim fields, each override operand
-            // encodes the dimension size minus one: SM107 loads `operand + 1`
-            // elements along the axis. Stores and reductions with dimension
-            // overrides are not clipped at all on SM107; they write the whole
-            // box, which starts at the required zero coordinates.
+            // encodes the dimension size minus one and replaces the tensor
+            // bound in every direction (SM107 measurement): loads zero-fill
+            // and stores/reductions skip the box beyond `operand + 1`
+            // elements, with the store's inner bound at 16-byte granularity
+            // (`store_inner_extent`).
             for (axis, &dimension) in dimensions.iter().enumerate() {
                 if !(0..=255).contains(&dimension) {
                     return Err(EngineError::message(
                         "TMA override dimension must be an 8-bit size-minus-one value",
                     ));
                 }
-                let size = if clips_dimensions {
-                    dimension as usize + 1
-                } else {
-                    self.box_shape[axis]
-                };
-                image.replace_global_dimension(axis, size)?;
+                image.replace_global_dimension(axis, dimension as usize + 1)?;
             }
             let upper = u16::try_from(upper_strides)
                 .map_err(|_| EngineError::message("TMA upper strides must fit 16 bits"))?;
@@ -1148,7 +1147,9 @@ impl RuntimeTensorMap {
                 image.replace_global_stride(axis, stride)?;
             }
         }
-        image.materialize(memory, rank)
+        let mut overridden = image.materialize(memory, rank)?;
+        overridden.overridden_dimensions = !dimensions.is_empty();
+        Ok(overridden)
     }
 
     /// PTX makes an out-of-bounds TMA access through a large allocation class
@@ -1185,6 +1186,37 @@ impl RuntimeTensorMap {
 
     pub(crate) const fn rank(&self) -> usize {
         self.global_shape.len()
+    }
+
+    /// Inner-dimension bound, in elements, of a shared-to-global copy or
+    /// reduction. Outer dimensions and loads clip per element. With
+    /// overridden dimensions, SM107 (VR200) stores and reductions write
+    /// every 16-byte global chunk that holds an in-bounds element: the inner
+    /// bound rounds up to 16 bytes (measured for 1-, 2- and 4-byte elements).
+    /// Box starts are 16-byte aligned, so the extra elements lie in the box.
+    /// VR200 showed the same granularity for plain descriptors, but plain
+    /// stores stay per element until Blackwell is measured, since rounding
+    /// would turn tensor ends inside an allocation's last chunk into
+    /// out-of-bounds writes.
+    fn store_inner_extent(&self) -> usize {
+        if !self.overridden_dimensions {
+            return self.global_shape[0];
+        }
+        let bits = self.transfer_element_bits();
+        (self.global_shape[0] * bits).div_ceil(8).next_multiple_of(16) * 8 / bits
+    }
+
+    /// The 16-byte override store granularity was measured for tiled stores
+    /// of whole bytes only. Sub-byte and im2col stores keep their exact
+    /// per-element footprint, which is only known to be right when the
+    /// overridden inner bound already ends on a 16-byte chunk.
+    fn require_measured_store_inner_bound(&self) -> Result<(), EngineError> {
+        if self.store_inner_extent() != self.global_shape[0] {
+            return Err(EngineError::analysis_incomplete(
+                "tma_store_partial_16b_inner_chunk_unmeasured",
+            ));
+        }
+        Ok(())
     }
 
     fn transfer_element_bits(&self) -> usize {
@@ -1716,6 +1748,7 @@ impl RuntimeTensorMap {
             transfer_template,
             alloc_class,
             im2col,
+            overridden_dimensions: false,
         })
     }
 
@@ -2294,6 +2327,7 @@ impl TensorMapTransferTemplate {
         &self,
         tensor_map: &RuntimeTensorMap,
         origin: &[i64],
+        store: bool,
     ) -> Result<TensorMapBoundGlobalProgram, EngineError> {
         if origin.len() != tensor_map.global_shape.len() {
             return Err(EngineError::message(format!(
@@ -2312,7 +2346,11 @@ impl TensorMapTransferTemplate {
 
         let extent = tensor_map.traversal_shape[0] as i128;
         let origin_inner = i128::from(origin[0]);
-        let global_extent = tensor_map.global_shape[0] as i128;
+        let global_extent = if store {
+            tensor_map.store_inner_extent()
+        } else {
+            tensor_map.global_shape[0]
+        } as i128;
         let step = tensor_map.element_strides[0] as i128;
         let ceil_div = |value: i128| -(-value).div_euclid(step);
         let start = ceil_div(-origin_inner).clamp(0, extent);
@@ -2771,7 +2809,7 @@ impl RawTmaG2cTransferPlan {
             multicast,
         )?;
         let template = &tensor_map.transfer_template;
-        let source_program = template.bind_global(tensor_map, origin)?;
+        let source_program = template.bind_global(tensor_map, origin, false)?;
         let destination_program = bind_tensor_map_shared_runs(
             destination,
             layout.lane,
@@ -3040,7 +3078,7 @@ fn im2col_transfer_runs(
     for (pixel, origin) in origins.iter().enumerate() {
         let payload_base = pixel * template.payload_len;
         if write_shared || !matches!(tensor_map.transfer_element_bits(), 4 | 6) {
-            for mut run in template.bind_global(tensor_map, origin)?.runs {
+            for mut run in template.bind_global(tensor_map, origin, false)?.runs {
                 run.payload_offset += payload_base;
                 global_runs.push(run);
             }
@@ -3177,6 +3215,7 @@ impl RawTmaS2gTransferPlan {
                 "align16 padded FP4 TensorMap does not support shared-to-global Tensor Copy",
             ));
         }
+        tensor_map.require_measured_store_inner_bound()?;
         if let Some(&channel) = origin.first() {
             tensor_map.validate_box_start(channel)?;
         }
@@ -3287,6 +3326,7 @@ impl RawTmaS2gTransferPlan {
         };
         let mut destination_bits = Vec::new();
         let destination_runs = if matches!(tensor_map.transfer_element_bits(), 4 | 6) {
+            tensor_map.require_measured_store_inner_bound()?;
             if origin.len() != tensor_map.global_shape.len() {
                 return Err(EngineError::message(format!(
                     "TensorMap expected {} coordinates, got {}",
@@ -3322,7 +3362,7 @@ impl RawTmaS2gTransferPlan {
             }
             Vec::new()
         } else {
-            let program = template.bind_global(tensor_map, origin)?;
+            let program = template.bind_global(tensor_map, origin, true)?;
             program.runs
         };
 
@@ -3794,7 +3834,7 @@ impl RawTmaG2cTransferPlan {
         let mut destination_runs = Vec::new();
         for (row, origin) in gathered.gather_origins.iter().enumerate() {
             let payload_base = row * template.payload_len;
-            for mut run in template.bind_global(tensor_map, origin)?.runs {
+            for mut run in template.bind_global(tensor_map, origin, false)?.runs {
                 run.payload_offset += payload_base;
                 source_runs.push(run);
             }
@@ -4085,7 +4125,6 @@ mod tests {
                 &[1, 2, 3, 4],
                 0x4321,
                 &[0; 5],
-                true,
             )
             .unwrap();
         for axis in 0..4 {
@@ -4646,7 +4685,9 @@ mod tests {
     #[test]
     fn tensor_reduction_applies_each_in_bounds_element_once() {
         let global = GlobalMemory::new();
-        let initial = [10_u32, 20, 30, 40, 50, 60, 70];
+        // A 7-element tensor in an 8-element allocation: plain descriptors
+        // stay per element even inside the last 16-byte chunk.
+        let initial = [10_u32, 20, 30, 40, 50, 60, 70, 80];
         let allocation = global
             .allocate_from_bytes(
                 initial
@@ -4717,7 +4758,7 @@ mod tests {
             .chunks_exact(4)
             .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
             .collect::<Vec<_>>();
-        assert_eq!(actual, vec![10, 20, 30, 40, 51, 62, 73]);
+        assert_eq!(actual, vec![10, 20, 30, 40, 51, 62, 73, 80]);
     }
 
     #[test]
@@ -5037,7 +5078,7 @@ mod tests {
         );
         let template = &tensor_map.transfer_template;
         for (origin, expected) in [([0, 0], 12), ([0, 2], 0)] {
-            let source = template.bind_global(&tensor_map, &origin).unwrap();
+            let source = template.bind_global(&tensor_map, &origin, false).unwrap();
             let (payload, _) = materialize_raw_tma_g2c_payload(
                 &physical,
                 &tensor_map,
@@ -5058,7 +5099,7 @@ mod tests {
     fn fp4_read_codec_matches_packed_and_padded_shared_layouts() {
         let read = |physical: &PhysicalMemory, map: &RuntimeTensorMap| {
             let template = &map.transfer_template;
-            let source = template.bind_global(map, &[0, 0]).unwrap();
+            let source = template.bind_global(map, &[0, 0], false).unwrap();
             materialize_raw_tma_g2c_payload(
                 physical,
                 map,
