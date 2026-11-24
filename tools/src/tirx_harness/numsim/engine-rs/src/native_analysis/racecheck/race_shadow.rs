@@ -3377,12 +3377,26 @@ impl RetainedRaceWitness {
     }
 }
 
+/// Same static access site: dynamic instances of one source operation (other
+/// sequence numbers or loop iterations) share a site, matching the key the
+/// global finding aggregate merges on.
 fn witness_same_site(left: &PhysicalRaceWitness, right: &PhysicalRaceWitness) -> bool {
+    let same_loop_sites = || {
+        let (left, right) = (left.operation.loop_frames(), right.operation.loop_frames());
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.loop_site_id() == right.loop_site_id())
+    };
     left.lane == right.lane
         && left.kind == right.kind
         && left.space == right.space
         && left.span.allocation() == right.span.allocation()
-        && (Arc::ptr_eq(&left.operation, &right.operation) || left.operation == right.operation)
+        && (Arc::ptr_eq(&left.operation, &right.operation)
+            || (left.operation.same_static_instruction(&right.operation)
+                && left.operation.global_warp_id() == right.operation.global_warp_id()
+                && same_loop_sites()))
 }
 
 /// The smallest span of one allocation covering both.
