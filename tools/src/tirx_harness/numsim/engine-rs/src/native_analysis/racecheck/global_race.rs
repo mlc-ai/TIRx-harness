@@ -5895,15 +5895,43 @@ impl GlobalRaceState {
         topology: Option<LaunchTopology>,
         shared: Arc<GlobalRaceShared>,
     ) -> Self {
+        let actors = topology
+            .map(|topology| {
+                GlobalActorStates::with_topology(topology, Arc::clone(&shared.async_registry))
+            })
+            .unwrap_or_else(|| {
+                GlobalActorStates::with_registry(Arc::clone(&shared.async_registry))
+            });
+        Self::with_actors(topology, shared, actors)
+    }
+
+    /// One shard's state for the warps `[base_warp, base_warp + warp_count)`.
+    ///
+    /// Its actor table covers only those warps. A launch builds one shard per
+    /// cluster, so a table sized for the whole launch, even one replaced right
+    /// away, makes the launch's setup quadratic in its cluster count.
+    pub(crate) fn for_warp_range(
+        topology: Option<LaunchTopology>,
+        base_warp: usize,
+        warp_count: usize,
+        shared: Arc<GlobalRaceShared>,
+    ) -> Self {
+        let actors = GlobalActorStates::with_warp_range(
+            base_warp,
+            warp_count,
+            Arc::clone(&shared.async_registry),
+        );
+        Self::with_actors(topology, shared, actors)
+    }
+
+    fn with_actors(
+        topology: Option<LaunchTopology>,
+        shared: Arc<GlobalRaceShared>,
+        actors: GlobalActorStates,
+    ) -> Self {
         let mut state = Self {
             topology,
-            actors: topology
-                .map(|topology| {
-                    GlobalActorStates::with_topology(topology, Arc::clone(&shared.async_registry))
-                })
-                .unwrap_or_else(|| {
-                    GlobalActorStates::with_registry(Arc::clone(&shared.async_registry))
-                }),
+            actors,
             shared,
             ..Self::default()
         };
@@ -5912,22 +5940,6 @@ impl GlobalRaceState {
             state.replay_recording =
                 cfg!(test) || std::env::var_os("NUMSIM_REPLAY_METRICS").is_some();
         }
-        state
-    }
-
-    /// One shard's state for the warps `[base_warp, base_warp + warp_count)`.
-    pub(crate) fn for_warp_range(
-        topology: Option<LaunchTopology>,
-        base_warp: usize,
-        warp_count: usize,
-        shared: Arc<GlobalRaceShared>,
-    ) -> Self {
-        let mut state = Self::with_shared(topology, Arc::clone(&shared));
-        state.actors = GlobalActorStates::with_warp_range(
-            base_warp,
-            warp_count,
-            Arc::clone(&shared.async_registry),
-        );
         state
     }
 

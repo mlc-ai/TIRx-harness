@@ -1475,31 +1475,33 @@ impl CompletionSource for SetmaxnregHub {
                     ));
                 }
             }
-            let per_wg = state
-                .warpgroups
-                .iter()
-                .filter_map(|((cta_id, warpgroup_id), warpgroup)| {
-                    (*cta_id == *global_cta_id).then_some((
+            // The CTA's own warpgroups, a contiguous key range: scanning every
+            // warpgroup of the launch per CTA made this check quadratic in the
+            // CTA count.
+            let cta_warpgroups = || {
+                state
+                    .warpgroups
+                    .range((*global_cta_id, 0)..=(*global_cta_id, usize::MAX))
+            };
+            let per_wg = cta_warpgroups()
+                .map(|((_cta_id, warpgroup_id), warpgroup)| {
+                    (
                         *warpgroup_id,
                         if warpgroup.last_completed_ordinal.is_some() {
                             warpgroup.current_count
                         } else {
                             state.default_count
                         },
-                    ))
+                    )
                 })
                 .collect::<BTreeMap<_, _>>();
-            let launch_allocation = state
-                .warpgroups
-                .iter()
-                .filter_map(|((cta_id, _warpgroup_id), warpgroup)| {
-                    (*cta_id == *global_cta_id).then_some(
-                        if warpgroup.last_completed_ordinal.is_some() {
-                            state.calling_initial_count.unwrap_or(state.default_count)
-                        } else {
-                            state.default_count
-                        },
-                    )
+            let launch_allocation = cta_warpgroups()
+                .map(|(_key, warpgroup)| {
+                    if warpgroup.last_completed_ordinal.is_some() {
+                        state.calling_initial_count.unwrap_or(state.default_count)
+                    } else {
+                        state.default_count
+                    }
                 })
                 .sum::<i64>();
             let allocated_count = per_wg.values().sum::<i64>();
