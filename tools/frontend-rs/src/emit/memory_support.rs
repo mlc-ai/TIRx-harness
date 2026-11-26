@@ -10,8 +10,8 @@ use tvm_tirx::tvm_ffi::ObjectRefCore;
 use super::super::analyze::buffers::call_op_name;
 use super::super::analyze::memory::MemorySpace;
 use super::super::analyze::util::{
-    as_buffer, as_var, buffer_dtype, dtype_of, int_imm_expr, oref, prim, repr_text, simplify,
-    unsupported, AResult,
+    as_buffer, as_var, buffer_dtype, buffer_scope, dtype_of, int_imm_expr, oref, prim, repr_text,
+    same, simplify, unsupported, AResult,
 };
 use super::abi;
 use super::{ControlProvenance, Emitter, RustValue, Uniformity};
@@ -294,7 +294,10 @@ impl<'a> Emitter<'a> {
     ) -> AResult<RustValue> {
         let value = match value {
             Some(value) => value,
-            None => self.emit_expr(address)?,
+            None => match self.global_address_of_pointer(address, space)? {
+                Some(pointer) => return Ok(pointer),
+                None => self.emit_expr(address)?,
+            },
         };
         if value.rust_type == "PhysicalPtr" {
             return Ok(value);
@@ -314,6 +317,51 @@ impl<'a> Emitter<'a> {
             ));
         }
         self.emit_raw_generic_pointer(value, active_mask)
+    }
+
+    /// The pointer of an exact `address_of(G[indices])` on a global tensor
+    /// parameter `G`, addressed by a global or generic access, keeps `G` as
+    /// its allocation: the access is checked against `G` itself, as CUDA
+    /// dereferences `&G[indices]`. The same element through its integer
+    /// generic address resolves to whichever allocation owns those bits, and
+    /// to no binding at all (an incomplete analysis) once it leaves `G`.
+    /// Only parameters qualify: a declared view of an allocation may be
+    /// indexed past its own extent while staying inside the allocation, and
+    /// its integer address resolves that correctly.
+    fn global_address_of_pointer(
+        &mut self,
+        address: &ObjectRef,
+        space: &str,
+    ) -> AResult<Option<RustValue>> {
+        if !(space.is_empty() || space == "global") {
+            return Ok(None);
+        }
+        let Some(call) = address.downcast_ref::<CallObj>() else {
+            return Ok(None);
+        };
+        if call_op_name(call)?.as_deref() != Some("tirx.address_of") || call.args.len() != 1 {
+            return Ok(None);
+        }
+        let argument = oref(call.args[0].clone());
+        let Some(load) = argument.downcast_ref::<TensorLoadObj>() else {
+            return Ok(None);
+        };
+        let Some(source) = as_buffer(&oref(load.source.clone())) else {
+            return Ok(None);
+        };
+        if buffer_scope(&source) != "global"
+            || !self.params.iter().any(|parameter| same(parameter, &source))
+        {
+            return Ok(None);
+        }
+        // Lower the call as before, for its bookkeeping; only its integer
+        // result is replaced.
+        self.emit_expr(address)?;
+        let indices: Vec<Expr> = load.indices.iter().map(|x| x.clone().into()).collect();
+        let pointer = self.emit_buffer_address(&source, &indices)?;
+        let name = self.control_name("global_address_of_pointer");
+        self.emit_line(&format!("let {name} = {};", pointer.code));
+        Ok(Some(RustValue::new(name, "PhysicalPtr", Uniformity::Varying)))
     }
 
     /// A resolved shared-memory pointer.
