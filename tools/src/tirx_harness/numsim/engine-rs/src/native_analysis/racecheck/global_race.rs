@@ -4865,7 +4865,15 @@ impl ShadowCell {
 
 /// How many merged findings the global byte shadow retains before it only
 /// counts further ones.
-const RACECHECK_MAX_RETAINED_FINDINGS: usize = 1 << 20;
+///
+/// Each retained finding is converted to Python, source-anchored and rendered
+/// into the report, so the retained count bounds that work. At 1 << 20 a
+/// kernel whose every CTA writes the same bytes (128 CTAs of 128 threads, one
+/// byte store each) spent 79 s in execution and 290 s more turning its 1 M
+/// findings into a report, at 11 GB; at 1 << 12 the report takes 2.6 s. The
+/// verdict is unchanged: dropped findings are counted and reported as
+/// `FindingsTruncated`.
+const RACECHECK_MAX_RETAINED_FINDINGS: usize = 1 << 12;
 
 /// How many writes one word's history holds before the record stops being the
 /// whole history. A wait names a position in it, so a truncated record cannot
@@ -4962,6 +4970,9 @@ pub(crate) struct FindingAggregate {
     len: usize,
     cap: usize,
     dropped: u64,
+    // Whether a dropped finding was an error rather than a review, so the
+    // verdict never depends on which findings the cap kept.
+    dropped_error: bool,
 }
 
 impl Default for FindingAggregate {
@@ -4977,7 +4988,13 @@ impl FindingAggregate {
             len: 0,
             cap,
             dropped: 0,
+            dropped_error: false,
         }
+    }
+
+    fn drop_finding(&mut self, finding: &PhysicalRaceFinding) {
+        self.dropped += 1;
+        self.dropped_error |= !finding.requires_unwaited_tmem_load_review();
     }
 
     /// Merge `finding` into its site's ranges; returns whether it was
@@ -4989,7 +5006,7 @@ impl FindingAggregate {
             match self.sites.get_mut(&site) {
                 Some(entries) => entries,
                 None => {
-                    self.dropped += 1;
+                    self.drop_finding(&finding);
                     return false;
                 }
             }
@@ -5004,7 +5021,7 @@ impl FindingAggregate {
         let hi = entries.partition_point(|entry| entry.overlap().byte_offset() <= overlap.byte_end());
         if lo == hi {
             if at_cap {
-                self.dropped += 1;
+                self.drop_finding(&finding);
                 return false;
             }
             entries.insert(lo, finding);
@@ -5033,6 +5050,10 @@ impl FindingAggregate {
 
     fn dropped(&self) -> u64 {
         self.dropped
+    }
+
+    fn dropped_error(&self) -> bool {
+        self.dropped_error
     }
 
     fn iter(&self) -> impl Iterator<Item = &PhysicalRaceFinding> {
@@ -5088,6 +5109,10 @@ pub(crate) struct GlobalRaceShared {
     /// Keep narrow and wide scopes separate: a later CTA fence must not hide
     /// a GPU fence from an observer outside that CTA.
     sc_fences: Mutex<BTreeMap<(usize, MemoryScope, MemoryProxy), Arc<ReleaseHead>>>,
+    /// Set once the retained findings are at their cap and an error finding
+    /// was dropped: the verdict is then an error whatever the rest of the
+    /// launch does, and the rest can only add findings that are dropped.
+    findings_saturated: AtomicBool,
 }
 
 impl fmt::Debug for GlobalRaceShared {
@@ -5132,6 +5157,14 @@ impl GlobalRaceShared {
         (findings.len(), findings.dropped())
     }
 
+    /// Whether the cap dropped an error finding (not only reviews).
+    pub(crate) fn dropped_error_finding(&self) -> bool {
+        self.findings
+            .lock()
+            .expect("global racecheck findings lock was poisoned")
+            .dropped_error()
+    }
+
     pub(crate) fn scope_diagnostics(&self) -> Vec<GlobalScopeMismatchDiagnostic> {
         self.scope_diagnostics
             .lock()
@@ -5159,11 +5192,20 @@ impl GlobalRaceShared {
     }
 
     fn insert_finding(&self, finding: PhysicalRaceFinding) {
-        let _ = self
+        let mut findings = self
             .findings
             .lock()
-            .expect("global racecheck findings lock was poisoned")
-            .insert(finding);
+            .expect("global racecheck findings lock was poisoned");
+        let _ = findings.insert(finding);
+        if findings.dropped_error() {
+            self.findings_saturated.store(true, AtomicOrdering::Release);
+        }
+    }
+
+    /// Whether the retained findings are capped with an error among the
+    /// dropped ones (see `findings_saturated`).
+    pub(crate) fn findings_saturated(&self) -> bool {
+        self.findings_saturated.load(AtomicOrdering::Acquire)
     }
 
     fn insert_scope_diagnostic(&self, diagnostic: GlobalScopeMismatchDiagnostic) {
@@ -10889,6 +10931,15 @@ mod tests {
         assert_eq!(retained[1].overlap().byte_offset(), 0);
         assert_eq!(retained[1].overlap().byte_len(), 8);
         assert_eq!(retained[1].prior().span().byte_len(), 8);
+    }
+
+    #[test]
+    fn a_dropped_error_finding_is_remembered_for_the_verdict() {
+        let mut findings = FindingAggregate::with_cap(1);
+        assert!(findings.insert(finding_at(0, 0, 0, 4)));
+        assert!(!findings.dropped_error());
+        assert!(!findings.insert(finding_at(0, 1, 0, 4)));
+        assert!(findings.dropped_error());
     }
 
     fn loop_finding(write_iteration: u64, read_iteration: u64) -> PhysicalRaceFinding {

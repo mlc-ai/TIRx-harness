@@ -3652,6 +3652,7 @@ impl RaceCheckLaunchState {
         let mut advisories = Vec::new();
         let mut accesses = Vec::new();
         let mut incomplete_reasons = Vec::new();
+        let mut dropped_error_finding = false;
         let mut access_count = 0_usize;
         let mut accesses_complete = true;
         for shard in &self.race.race_shards {
@@ -3742,6 +3743,7 @@ impl RaceCheckLaunchState {
             let shared = &self.race.global_shared;
             append_report_findings(&mut findings, shared.findings());
             let (retained, dropped) = shared.findings_retained();
+            dropped_error_finding = shared.dropped_error_finding();
             if dropped > 0 {
                 push_unique_incomplete(
                     &mut incomplete_reasons,
@@ -3775,7 +3777,8 @@ impl RaceCheckLaunchState {
         let status = combine_peer_verdicts(
             sync.status(),
             &RaceVerdictInputs {
-                saw_error: false,
+                // A capped-away error finding is still an error.
+                saw_error: dropped_error_finding,
                 saw_incomplete: false,
                 saw_review: false,
                 findings: &findings,
@@ -8212,6 +8215,17 @@ impl EngineModeImpl for RaceCheckMode {
         state: &Self::LaunchState,
         operation: &OperationContext,
     ) -> Result<(), EngineError> {
+        // Once an error finding was dropped at the retained-finding cap the
+        // verdict is final, and every further access could only add dropped
+        // findings: in a launch whose CTAs all write the same bytes each new
+        // write is checked against every unordered writer before it, so the
+        // rest of the launch is quadratic in its CTAs. Stop it here; the
+        // findings and the truncation are reported as before.
+        if state.race.global_memory_model_enabled
+            && state.race.global_shared.findings_saturated()
+        {
+            return Err(EngineError::analysis_incomplete("racecheck_findings_saturated"));
+        }
         if operation.kind() != OperationKind::Load {
             state.invalidate_compact_global_read_cache(operation.id().global_warp_id())?;
         }
