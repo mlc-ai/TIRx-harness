@@ -702,9 +702,36 @@ where
                 services,
                 Arc::clone(&mode_state),
             );
-            make_warp(WarpEngine::new(context, kernel))
+            release_private_on_exit(
+                physical.clone(),
+                context.global_warp_id(),
+                Box::pin(make_warp(WarpEngine::new(context, kernel))),
+            )
         },
     )
+}
+
+/// Run a warp's body, then drop its LOCAL and REG bytes once it has finished
+/// successfully. Every warp's backings are created before the launch, so
+/// without this a launch holds all of them until it ends; with it only the
+/// warps that have started and not yet finished do.
+///
+/// The body comes boxed: every warp's future exists from the start of the
+/// launch, and an async wrapper keeps its argument and the awaited value in
+/// separate slots, which would hold a large unrolled body twice.
+pub(crate) async fn release_private_on_exit<WarpFuture>(
+    physical: PhysicalMemory,
+    global_warp_id: usize,
+    warp: std::pin::Pin<Box<WarpFuture>>,
+) -> Result<(), EngineError>
+where
+    WarpFuture: Future<Output = Result<(), EngineError>>,
+{
+    let result = warp.await;
+    if result.is_ok() {
+        physical.release_warp_private(global_warp_id);
+    }
+    result
 }
 
 pub fn allocate_cta_shared(

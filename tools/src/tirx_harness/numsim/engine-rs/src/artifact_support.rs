@@ -411,7 +411,11 @@ where
                 services,
                 Arc::new(()),
             );
-            make_warp(WarpEngine::new(context, kernel), artifact_services)
+            crate::runtime::launch::release_private_on_exit(
+                physical.clone(),
+                context.global_warp_id(),
+                Box::pin(make_warp(WarpEngine::new(context, kernel), artifact_services)),
+            )
         },
     )
 }

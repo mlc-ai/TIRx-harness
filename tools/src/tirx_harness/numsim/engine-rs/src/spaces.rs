@@ -3,7 +3,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use crate::memory::{
@@ -763,6 +763,9 @@ pub struct WarpPrivateMemory {
     topology: LaunchTopology,
     bytes: GlobalMemory,
     semantic_progress: Arc<WarpPrivateSemanticProgress>,
+    /// The allocations each warp owns, by global warp id, released together
+    /// when the warp finishes (`release_warp`).
+    owned: Arc<[Mutex<Vec<AllocationId>>]>,
 }
 
 struct WarpPrivateSemanticProgress {
@@ -824,7 +827,34 @@ impl WarpPrivateMemory {
             topology,
             bytes: GlobalMemory::new_owner_private(),
             semantic_progress: Arc::new(WarpPrivateSemanticProgress::new(topology.warp_count())),
+            owned: (0..topology.warp_count())
+                .map(|_| Mutex::new(Vec::new()))
+                .collect(),
         }
+    }
+
+    fn record_owned(&self, owner: WarpId, allocation: AllocationId) -> Result<(), AddressSpaceError> {
+        let global_warp_id = owner.global_warp_id(self.topology)?;
+        self.owned[global_warp_id]
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(allocation);
+        Ok(())
+    }
+
+    /// Drop the bytes of every allocation `global_warp_id` owns. Called when
+    /// the warp has finished: no other warp can address its LOCAL or REG
+    /// bytes, so nothing reads them again.
+    pub(crate) fn release_warp(&self, global_warp_id: usize) {
+        let Some(owned) = self.owned.get(global_warp_id) else {
+            return;
+        };
+        let owned = std::mem::take(
+            &mut *owned
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        self.bytes.release_owner_private(&owned);
     }
 
     fn with_read_policy(mut self, read_policy: UninitializedReadPolicy) -> Self {
@@ -855,6 +885,7 @@ impl WarpPrivateMemory {
             .checked_mul(WARP_SIZE)
             .ok_or(AddressSpaceError::SizeOverflow)?;
         let allocation = self.bytes.allocate_uninitialized(byte_len)?;
+        self.record_owned(owner, allocation)?;
         Ok(WarpPrivateAllocation {
             allocation,
             raw: self.bytes.full_view(allocation)?,
@@ -873,6 +904,7 @@ impl WarpPrivateMemory {
             .checked_mul(WARP_SIZE)
             .ok_or(AddressSpaceError::SizeOverflow)?;
         let allocation = self.bytes.allocate_zeroed(byte_len)?;
+        self.record_owned(owner, allocation)?;
         Ok(WarpPrivateAllocation {
             allocation,
             raw: self.bytes.full_view(allocation)?,
@@ -2428,6 +2460,12 @@ impl PhysicalMemory {
         &self.registers
     }
 
+    /// Drop the LOCAL and REG bytes of a warp that has finished.
+    pub(crate) fn release_warp_private(&self, global_warp_id: usize) {
+        self.local.release_warp(global_warp_id);
+        self.registers.release_warp(global_warp_id);
+    }
+
     pub const fn tmem(&self) -> &TmemMemory {
         &self.tmem
     }
@@ -2771,6 +2809,36 @@ mod tests {
                 MemoryError::AccessOutOfBounds { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn a_finished_warp_releases_only_its_own_private_bytes() {
+        let registers = RegisterMemory::new(topology());
+        let first = warp(0, 0, 0);
+        let second = warp(0, 0, 1);
+        let first_allocation = registers.allocate_zeroed(first, 4).unwrap();
+        let second_allocation = registers.allocate_zeroed(second, 4).unwrap();
+        registers
+            .write_lane_bytes(first, &first_allocation, 0, 0, 4, 0, &[1, 2, 3, 4])
+            .unwrap();
+        registers
+            .write_lane_bytes(second, &second_allocation, 0, 0, 4, 0, &[5, 6, 7, 8])
+            .unwrap();
+
+        registers.release_warp(first.global_warp_id(topology()).unwrap());
+
+        let mut bytes = [0_u8; 4];
+        registers
+            .read_lane_bytes_into(second, &second_allocation, 0, 0, 4, 0, &mut bytes)
+            .unwrap();
+        assert_eq!(bytes, [5, 6, 7, 8]);
+        assert_eq!(
+            registers
+                .bytes
+                .allocation_len(first_allocation.allocation())
+                .unwrap(),
+            4 * WARP_SIZE
+        );
     }
 
     #[cfg(feature = "analysis-core")]
