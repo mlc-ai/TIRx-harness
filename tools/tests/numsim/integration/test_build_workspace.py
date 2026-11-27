@@ -937,3 +937,65 @@ def test_metadata_failure_waits_for_compiler_before_removing_workdir(monkeypatch
             future.result(timeout=5)
     assert not directories[0].exists()
     assert not prepared.shared_artifact_dir.exists()
+
+
+def _cargo_artifact(rlib: Path, *extra: Path) -> str:
+    """One Cargo ``compiler-artifact`` line, as ``--message-format=json`` emits it."""
+
+    return json.dumps(
+        {
+            "reason": "compiler-artifact",
+            "target": {"name": "numsim_engine"},
+            "filenames": [str(rlib), *(str(path) for path in extra)],
+        }
+    )
+
+
+def test_cargo_reported_libraries_reads_the_artifact_stream():
+    rlib = Path("/target/release/build/numsim-engine/abc/out/libnumsim_engine-abc.rlib")
+    proc_macro = Path("/target/release/build/pyo3-macros/def/out/libpyo3_macros-def.so")
+    stdout = "\n".join(
+        [
+            _cargo_artifact(rlib, rlib.with_suffix(".rmeta")),
+            _cargo_artifact(proc_macro),
+            json.dumps({"reason": "build-finished", "success": True}),
+            "warning: not json",
+        ]
+    )
+
+    assert build._cargo_reported_libraries(stdout) == [rlib, proc_macro]
+
+
+def test_mirror_cargo_libraries_makes_the_new_cargo_layout_linkable(tmp_path):
+    """Cargo >= 1.100 reports libraries under ``release/build/<package>/<hash>/out``."""
+
+    out_dir = tmp_path / "release" / "build" / "numsim-engine" / "abc" / "out"
+    out_dir.mkdir(parents=True)
+    source = out_dir / "libnumsim_engine-abc.rlib"
+    source.write_bytes(b"engine")
+    proc_macro = out_dir / "libpyo3_macros-abc.so"
+    proc_macro.write_bytes(b"macro")
+    dependency_dir = tmp_path / "release" / "deps"
+    stream = _cargo_artifact(source, out_dir / "libnumsim_engine-abc.rmeta", proc_macro)
+
+    build._mirror_cargo_libraries(stream, dependency_dir)
+
+    linked = dependency_dir / source.name
+    assert linked.is_symlink()
+    assert linked.resolve() == source.resolve()
+    assert (dependency_dir / proc_macro.name).is_symlink()
+    assert build._dependency_rlib(dependency_dir, "numsim_engine") == linked
+
+
+def test_mirror_cargo_libraries_is_idempotent_across_rebuilds(tmp_path):
+    out_dir = tmp_path / "release" / "build" / "numsim-engine" / "abc" / "out"
+    out_dir.mkdir(parents=True)
+    source = out_dir / "libnumsim_engine-abc.rlib"
+    source.write_bytes(b"engine")
+    dependency_dir = tmp_path / "release" / "deps"
+    stream = _cargo_artifact(source)
+
+    build._mirror_cargo_libraries(stream, dependency_dir)
+    build._mirror_cargo_libraries(stream, dependency_dir)
+
+    assert build._dependency_rlib(dependency_dir, "numsim_engine") == dependency_dir / source.name

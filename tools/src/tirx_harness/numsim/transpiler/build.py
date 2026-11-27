@@ -44,6 +44,9 @@ _GENERATED_SOURCE_IDENTITY_LOCK = threading.Lock()
 _GENERATED_SOURCE_IDENTITIES: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
 _CARGO_PACKAGE_NAME = "numsim-generated-artifact"
 _GENERATED_BACKEND = "direct-rustc-v1"
+# Library artifacts a direct rustc invocation may have to resolve: rlibs plus the
+# shared libraries Cargo produces for proc-macro crates on each host platform.
+_CARGO_LIBRARY_SUFFIXES = (".rlib", ".so", ".dylib", ".dll")
 _GENERATED_ARTIFACT_RELEASE_OPT_LEVEL = 3
 _GENERATED_OPT_LEVEL = _GENERATED_ARTIFACT_RELEASE_OPT_LEVEL
 _GENERATED_CODEGEN_UNITS = 16
@@ -1051,6 +1054,58 @@ def _dependency_rlib(directory: Path, crate_name: str) -> Path:
     return candidates[0]
 
 
+def _cargo_reported_libraries(stdout: str) -> list[Path]:
+    """Return the linkable library artifacts Cargo reported for the dependency build.
+
+    This includes proc-macro crates, which are shared libraries rather than
+    ``.rlib`` files but still have to be reachable from the dependency search
+    directory of the generated artifact's rustc invocation.
+    """
+    libraries: list[Path] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if message.get("reason") != "compiler-artifact":
+            continue
+        libraries.extend(
+            Path(name)
+            for name in message.get("filenames", ())
+            if name.endswith(_CARGO_LIBRARY_SUFFIXES)
+        )
+    return libraries
+
+
+def _mirror_cargo_libraries(stdout: str, dependency_dir: Path) -> None:
+    """Link every Cargo-reported library into the directory generated rustc calls search.
+
+    Cargo 1.100 and later place library artifacts under
+    ``release/build/<package>/<hash>/out`` instead of ``release/deps``. The
+    generated artifact is compiled by a direct rustc invocation that receives
+    one ``-L dependency`` directory plus explicit ``--extern`` paths, so both
+    the transitive rlibs and the proc-macro shared libraries must remain
+    reachable from that single directory. Mirror Cargo's own report rather than
+    assuming the layout; on older Cargo the artifacts already live in
+    ``release/deps`` and the entries are skipped.
+    """
+    dependency_dir.mkdir(parents=True, exist_ok=True)
+    for source in _cargo_reported_libraries(stdout):
+        if not source.is_file():
+            continue
+        target = dependency_dir / source.name
+        if target.is_symlink():
+            if target.resolve() == source.resolve():
+                continue
+            target.unlink()
+        elif target.exists():
+            continue
+        target.symlink_to(source)
+
+
 def _read_prepared_dependencies(
     directory: Path,
     key: str,
@@ -1192,6 +1247,7 @@ def _prepare_dependencies(
                 )
 
             dependency_dir = target_dir / "release" / "deps"
+            _mirror_cargo_libraries(completed.stdout, dependency_dir)
             engine_rlib = _dependency_rlib(dependency_dir, "numsim_engine")
             pyo3_rlib = _dependency_rlib(dependency_dir, "pyo3")
             manifest = {
