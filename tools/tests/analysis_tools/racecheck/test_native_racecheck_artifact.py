@@ -689,6 +689,37 @@ def test_native_racecheck_cta_reduce_internal_barriers_order_scratch_accesses(tm
     assert result.incomplete == []
 
 
+@T.function
+def native_racecheck_every_cta_writes_one_row(output: T.Tensor((128,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=96, block=128))
+    thread = T.cuda.thread_idx("x")
+    output[thread] = T.Cast("uint32", T.cuda.block_idx("x"))
+
+
+def test_native_racecheck_truncated_global_findings_keep_the_error_verdict(tmp_path):
+    # 96 CTAs write the same 128 words: one write/write site per CTA pair,
+    # warp and lane, more than the retained-finding cap.
+    result = numsim.Engine(max_workers=1).run_racecheck_phase(
+        numsim.transpile(native_racecheck_every_cta_writes_one_row, cache_dir=tmp_path),
+        {"output": np.zeros(128, dtype=np.uint32)},
+    )
+    assert result.verdict == "error"
+    assert len(result.findings) == 4096
+    assert {finding["access_pair"] for finding in result.findings} == {"write_write"}
+    truncated = [item for item in result.incomplete if item.get("reason") == "findings_truncated"]
+    assert len(truncated) == 1, result.incomplete
+    # The verdict was final once an error was dropped; the launch stopped there.
+    assert "racecheck_findings_saturated" in str(result.payload.get("execution_error"))
+
+    from tirx_harness import racecheck
+
+    report = racecheck(
+        native_racecheck_every_cta_writes_one_row, {"output": np.zeros(128, dtype=np.uint32)}
+    )
+    assert report.verdict == "error"
+    assert "data_race" in {finding.kind for finding in report.findings}
+
+
 def test_native_racecheck_single_warp_cta_reduce_is_clean_and_numeric(tmp_path):
     numeric_module = numsim.transpile(
         native_racecheck_single_warp_cta_reduce,

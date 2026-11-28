@@ -23,6 +23,28 @@ def repeated_uninitialized_operand(output: T.Tensor((128,), "uint32")):
     value[0] = 42  # final statement is unrelated to the invalid reads
 
 
+@T.function
+def many_uninitialized_operands(output: T.Tensor((73728,), "uint32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=288, block=256))
+    value = T.alloc_local((1,), "uint32")
+    thread = T.cuda.block_idx("x") * 256 + T.cuda.thread_idx("x")
+    T.ptx.st.global_.u32(output.ptr_to([thread]), value[0])
+
+
+@pytest.mark.parametrize(
+    "checker", [_run_synccheck, _run_racecheck], ids=["synccheck", "racecheck"]
+)
+def test_uninitialized_read_advisories_are_bounded_and_counted(checker):
+    # 73,728 reviews (one per thread) exceed the 65,536 an analysis payload
+    # keeps; the verdict and the total survive the bound.
+    report = checker(many_uninitialized_operands, inputs={"output": np.zeros(73728, np.uint32)})
+    native = report.native_payload
+    assert report.verdict == "review"
+    assert len(native["advisories"]) == 65536
+    assert native["uninitialized_read_reviews_total"] == 73728
+    assert native["uninitialized_read_reviews_dropped"] == 8192
+
+
 @pytest.mark.parametrize(
     "checker", [_run_synccheck, _run_racecheck], ids=["synccheck", "racecheck"]
 )

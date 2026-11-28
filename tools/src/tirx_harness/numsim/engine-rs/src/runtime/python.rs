@@ -1381,6 +1381,17 @@ fn uninitialized_read_review_to_py<'py>(
     Ok(item)
 }
 
+/// How many uninitialized-read reviews an analysis payload carries as
+/// advisories. Reviews are recorded per distinct access, so a kernel that
+/// reads an uninitialized register array in every thread made one advisory
+/// per lane and access: 14.9 M for a 1536 x 256 launch, whose conversion to
+/// Python (27 GB) and report outlasted any CPU budget. The first reviews in
+/// their recorded order are kept and the total is reported beside them; the
+/// verdict needs only that one review exists. The bound stays above every
+/// canonical kernel's review count (at most 52,224, gdn_decode_fp32_mtp_warp),
+/// so their reports are unchanged.
+const MAX_UNINITIALIZED_READ_ADVISORIES: usize = 1 << 16;
+
 pub(crate) fn annotate_analysis_uninitialized_read_reviews(
     py: Python<'_>,
     result: Py<PyAny>,
@@ -1397,7 +1408,15 @@ pub(crate) fn annotate_analysis_uninitialized_read_reviews(
         payload.set_item("advisories", &value)?;
         value
     };
-    for review in reviews {
+    let total = reviews.len();
+    if total > MAX_UNINITIALIZED_READ_ADVISORIES {
+        payload.set_item("uninitialized_read_reviews_total", total)?;
+        payload.set_item(
+            "uninitialized_read_reviews_dropped",
+            total - MAX_UNINITIALIZED_READ_ADVISORIES,
+        )?;
+    }
+    for review in reviews.into_iter().take(MAX_UNINITIALIZED_READ_ADVISORIES) {
         advisories.append(uninitialized_read_review_to_py(py, review)?)?;
     }
     let verdict = payload
