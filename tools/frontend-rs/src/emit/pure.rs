@@ -2,8 +2,8 @@
 
 use crate::analyze::buffers::call_op_name;
 use crate::analyze::util::{
-    as_buffer, buffer_name, buffer_scope, dtype_of, ffi_text, not_covered, oref, unmodeled,
-    unsupported, AResult,
+    as_buffer, buffer_name, buffer_scope, dtype_of, ffi_text, int_const, not_covered, oref,
+    unmodeled, unsupported, AResult, TensorVarExt,
 };
 use crate::analyze::Ctx;
 use crate::decode::Decoded;
@@ -740,6 +740,27 @@ impl<'a> Emitter<'a> {
             pointer.code
         ));
         Ok(RustValue::new(address, "u64", Uniformity::Varying))
+    }
+
+    /// The data pointer of a bare shared tensor operand: its first element,
+    /// as CUDA codegen passes the tensor (`tensor.ptr_to([0, ...])`).
+    fn tensor_base_pointer(
+        &mut self,
+        buffer: &tvm_tirx::ir::Var,
+        label: &str,
+    ) -> AResult<RustValue> {
+        let scope = buffer_scope(buffer);
+        if !scope.starts_with("shared") {
+            return unsupported(format!(
+                "{label} {} must be in shared memory, got scope {scope:?}",
+                buffer_name(buffer)
+            ));
+        }
+        let mut zeros: Vec<Expr> = Vec::new();
+        for _ in buffer.tensor_type().shape.iter() {
+            zeros.push(int_const("int32", 0)?.into());
+        }
+        self.emit_buffer_address(buffer, &zeros)
     }
 
     /// `emit_buffer_address`.
@@ -1922,7 +1943,10 @@ impl<'a> Emitter<'a> {
             "float64" => "v2::reg::variant::F64",
             other => return not_covered(format!("CTA reduction marker for {other}")),
         };
-        let scratch = self.pointer(&args[3], "CTA reduction scratch pointer")?;
+        let scratch = match as_buffer(&args[3]) {
+            Some(buffer) => self.tensor_base_pointer(&buffer, "CTA reduction scratch tensor")?,
+            None => self.pointer(&args[3], "CTA reduction scratch pointer")?,
+        };
         let result = self.control_name("cta_reduce_values");
         let site = self.v2_site(Some(source_op_id));
         let call = abi::warp_call(
@@ -2180,7 +2204,12 @@ pub fn cuda_clock64(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<Rus
         .map(Some)
 }
 pub fn cuda_cta_reduce(emitter: &mut Emitter, call: &Decoded) -> AResult<Option<RustValue>> {
-    let signature = signature(call.node, call.call)?;
+    let mut signature = signature(call.node, call.call)?;
+    // CUDA codegen passes a bare shared tensor as its data pointer, the
+    // address of its first element, exactly as `scratch.ptr_to([0])`.
+    if call.args.len() == 4 && as_buffer(&call.args[3]).is_some() {
+        signature.arg_dtypes[3] = "handle".to_owned();
+    }
     check_signature(
         &signature,
         validate_cuda_cta_reduce(emitter.ctx, &signature),

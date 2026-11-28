@@ -90,6 +90,30 @@ def native_racecheck_cta_reduce_scratch_clean(output: T.Tensor((1,), "float32"))
 
 
 @T.function
+def native_racecheck_cta_reduce_bare_scratch_waw(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((2,), "float32")
+    if (warp == 1) and (lane == 0):
+        scratch[0] = T.float32(7)
+    reduced: T.let = T.cuda.cta_sum(T.Cast("float32", lane), 2, scratch)
+    if (warp == 0) and (lane == 0):
+        output[0] = reduced
+
+
+@T.function
+def native_racecheck_cta_reduce_bare_scratch_clean(output: T.Tensor((1,), "float32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=64))
+    warp = T.cuda.warp_id()
+    lane = T.cuda.lane_id()
+    scratch = T.alloc_shared((2,), "float32")
+    reduced: T.let = T.cuda.cta_sum(T.Cast("float32", warp * 32 + lane), 2, scratch)
+    if (warp == 0) and (lane == 0):
+        output[0] = reduced
+
+
+@T.function
 def native_racecheck_single_warp_cta_reduce(output: T.Tensor((1,), "float32")):
     T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
     lane = T.cuda.lane_id()
@@ -687,6 +711,40 @@ def test_native_racecheck_cta_reduce_internal_barriers_order_scratch_accesses(tm
     assert result.verdict == "clean"
     assert result.findings == []
     assert result.incomplete == []
+
+
+def test_native_racecheck_cta_reduce_bare_scratch_is_clean_and_numeric(tmp_path):
+    # CUDA codegen passes a bare tensor as its data pointer, as `scratch.ptr_to([0])`.
+    clean = numsim.Engine(max_workers=1).run_racecheck_phase(
+        numsim.transpile(native_racecheck_cta_reduce_bare_scratch_clean, cache_dir=tmp_path),
+        {"output": np.zeros(1, dtype=np.float32)},
+    )
+    assert clean.verdict == "clean"
+    assert clean.findings == []
+    assert clean.incomplete == []
+
+    numeric = numsim.Engine(max_workers=1).run(
+        numsim.transpile(
+            native_racecheck_cta_reduce_bare_scratch_clean,
+            cache_dir=tmp_path,
+            _analysis_checker=None,
+        ),
+        {"output": np.zeros(1, dtype=np.float32)},
+    )
+    assert numeric.outputs["output"][0] == np.float32(sum(range(64)))
+
+
+def test_native_racecheck_records_bare_scratch_cta_reduce_accesses(tmp_path):
+    # The bare scratch carries the same hidden accesses as `scratch.ptr_to([0])`.
+    result = numsim.Engine(max_workers=1).run_racecheck_phase(
+        numsim.transpile(native_racecheck_cta_reduce_bare_scratch_waw, cache_dir=tmp_path),
+        {"output": np.zeros(1, dtype=np.float32)},
+    )
+    assert result.verdict == "error"
+    assert result.incomplete == []
+    finding = result.findings[-1]
+    assert finding["access_pair"] == "write_write"
+    assert finding["prior"]["space"] == finding["current"]["space"] == "shared"
 
 
 def test_native_racecheck_single_warp_cta_reduce_is_clean_and_numeric(tmp_path):
