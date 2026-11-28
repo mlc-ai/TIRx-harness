@@ -1033,3 +1033,71 @@ def test_raw_load_rejects_an_unmapped_integer_when_the_address_is_consumed(tmp_p
         assert "T.ptx.ld" in report.format()
     with pytest.raises(numsim.NumSimExecutionError, match="integer_address_without_binding"):
         numsim.Engine().run(module, {"output": np.zeros(32, dtype=np.uint32)})
+
+
+@T.function
+def raw_global_address_of_local_index_load(
+    source: T.Tensor((2, 4, 32), "uint32"), output: T.Tensor((32,), "uint32")
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    index = T.alloc_local((1,), "int32")
+    index[0] = lane
+    T.ptx.ld.global_.u32(output[lane], source.ptr_to([1, 3, T.Cast("int64", index[0])]))
+
+
+@T.function
+def raw_global_address_of_row_overflow_load(
+    source: T.Tensor((2, 4, 32), "uint32"), output: T.Tensor((32,), "uint32")
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    # Column lane + 32 of row 0 is element lane of row 1: still inside the tensor.
+    T.ptx.ld.global_.u32(output[lane], source.ptr_to([0, 0, lane + 32]))
+
+
+@T.function
+def raw_global_address_of_oob_load(
+    source: T.Tensor((2, 4, 32), "uint32"),
+    neighbor: T.Tensor((256,), "uint32"),
+    output: T.Tensor((32,), "uint32"),
+):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=32))
+    lane = T.cuda.lane_id()
+    index = T.alloc_local((1,), "int32")
+    index[0] = lane * 32
+    T.ptx.ld.global_.u32(output[lane], source.ptr_to([0, T.Cast("int64", index[0]), 0]))
+    neighbor[lane] = output[lane]
+
+
+def test_raw_global_address_of_with_a_local_index_binds_its_tensor(tmp_path):
+    source = np.arange(2 * 4 * 32, dtype=np.uint32).reshape(2, 4, 32)
+    for kernel, expected in (
+        (raw_global_address_of_local_index_load, source[1, 3]),
+        (raw_global_address_of_row_overflow_load, source[0, 1]),
+    ):
+        inputs = {"source": source, "output": np.zeros(32, dtype=np.uint32)}
+        result = numsim.Engine().run(numsim.transpile(kernel, cache_dir=tmp_path), inputs)
+        np.testing.assert_array_equal(result.outputs["output"], expected)
+        for checker in (synccheck, racecheck):
+            report = checker(kernel, inputs)
+            assert report.verdict == "clean", report.format()
+
+
+def test_raw_global_address_of_past_its_tensor_is_out_of_bounds(tmp_path):
+    # Positive control. &source[0, 32 * lane, 0] leaves `source` on every lane
+    # but 0. Resolved from its integer address it named no binding (an
+    # incomplete analysis), or `neighbor` had the arena placed it there. As a
+    # pointer into `source`, it is an out-of-bounds access of `source`.
+    inputs = {
+        "source": np.zeros((2, 4, 32), dtype=np.uint32),
+        "neighbor": np.zeros(256, dtype=np.uint32),
+        "output": np.zeros(32, dtype=np.uint32),
+    }
+    for checker in (synccheck, racecheck):
+        report = checker(raw_global_address_of_oob_load, inputs)
+        assert report.verdict == "error", report.format()
+        assert "integer_address_without_binding" not in report.format()
+    module = numsim.transpile(raw_global_address_of_oob_load, cache_dir=tmp_path)
+    with pytest.raises(numsim.NumSimExecutionError, match="(?i)out of bounds|exceeds"):
+        numsim.Engine().run(module, inputs)
